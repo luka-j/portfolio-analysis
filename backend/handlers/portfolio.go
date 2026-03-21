@@ -9,7 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gofolio-analysis/middleware"
+	"gofolio-analysis/models"
 	"gofolio-analysis/services/flexquery"
+	"gofolio-analysis/services/parsers"
 	"gofolio-analysis/services/portfolio"
 )
 
@@ -46,6 +48,85 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 		"positions_count":        len(data.OpenPositions),
 		"trades_count":           len(data.Trades),
 		"cash_transactions_count": len(data.CashTransactions),
+	})
+}
+
+// UploadEtradeBenefits handles POST /api/v1/portfolio/upload/etrade/benefits
+func (h *PortfolioHandler) UploadEtradeBenefits(c *gin.Context) {
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file field: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	txns, err := parsers.ParseBenefitHistory(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "parse error: " + err.Error()})
+		return
+	}
+
+	h.saveEtradeTransactions(c, txns)
+}
+
+// UploadEtradeSales handles POST /api/v1/portfolio/upload/etrade/sales
+func (h *PortfolioHandler) UploadEtradeSales(c *gin.Context) {
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file field: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	txns, err := parsers.ParseGainsLosses(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "parse error: " + err.Error()})
+		return
+	}
+
+	h.saveEtradeTransactions(c, txns)
+}
+
+func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.Transaction) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	var user models.User
+	if err := h.Parser.DB.Where(&models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "getting user: " + err.Error()})
+		return
+	}
+
+	// Cleanup pass for previously inserted $0 placeholders that caused the charting artifacts
+	h.Parser.DB.Where("user_id = ? AND type = ? AND price = 0", user.ID, "RSU_VEST").Delete(&models.Transaction{})
+
+	saved := 0
+	for _, txn := range txns {
+		var existing models.Transaction
+		err := h.Parser.DB.Where(
+			"user_id = ? AND type = ? AND symbol = ? AND date_time = ? AND quantity >= ? AND quantity <= ?",
+			user.ID, txn.Type, txn.Symbol, txn.DateTime, txn.Quantity-1e-8, txn.Quantity+1e-8,
+		).First(&existing).Error
+
+		if err == nil {
+			// Update in place to repair historical records that were incorrectly priced
+			existing.Price = txn.Price
+			existing.Proceeds = txn.Proceeds
+			existing.TaxCostBasis = txn.TaxCostBasis
+			if err := h.Parser.DB.Save(&existing).Error; err == nil {
+				saved++
+			}
+		} else {
+			txn.UserID = user.ID
+			if err := h.Parser.DB.Create(&txn).Error; err == nil {
+				saved++
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "upload successful",
+		"saved_count":  saved,
+		"parsed_count": len(txns),
 	})
 }
 

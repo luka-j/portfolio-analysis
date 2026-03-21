@@ -57,7 +57,7 @@ func (s *Service) GetCurrentHoldings(data *models.FlexQueryData) []models.Holdin
 func (s *Service) reconstructFromTrades(trades []models.Trade) []models.Holding {
 	posMap := make(map[string]*models.Holding)
 	for _, t := range trades {
-		if isFXTrade(t) {
+		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
 			continue
 		}
 		k := posKey(t.Symbol, t.ListingExchange)
@@ -200,6 +200,9 @@ func (s *Service) computeCostBasisMulti(data *models.FlexQueryData, currencies [
 		var openLots []lot
 		var matchedSells []matchedSell
 		for _, t := range trades {
+			if t.BuySell == "TRANSFER_IN" {
+				continue
+			}
 			if t.Quantity > 0 {
 				openLots = append(openLots, lot{qty: t.Quantity, price: t.Price, date: t.DateTime, curr: t.Currency})
 			} else if t.Quantity < 0 {
@@ -334,6 +337,9 @@ func (s *Service) computeRealizedGLMulti(data *models.FlexQueryData, currencies 
 		var openLots []lot
 		var matchedSells []matchedSell
 		for _, t := range trades {
+			if t.BuySell == "TRANSFER_IN" {
+				continue
+			}
 			if t.Quantity > 0 {
 				openLots = append(openLots, lot{qty: t.Quantity, price: t.Price, date: t.DateTime, curr: t.Currency})
 			} else if t.Quantity < 0 {
@@ -430,7 +436,7 @@ func (s *Service) computeCommissionsMulti(data *models.FlexQueryData, currencies
 
 	tradesByKey := make(map[string][]models.Trade)
 	for _, t := range data.Trades {
-		if isFXTrade(t) {
+		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
 			continue
 		}
 		k := posKey(t.Symbol, t.ListingExchange)
@@ -469,6 +475,9 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 	nativeCurrency := ""
 
 	for _, t := range data.Trades {
+		if t.BuySell == "TRANSFER_IN" {
+			continue
+		}
 		if t.Symbol != symbol {
 			continue
 		}
@@ -509,8 +518,13 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 			ConvertedPrice: convertedPrice,
 			Commission:     t.Commission,
 			Proceeds:       t.Proceeds,
+			TaxCostBasis:   t.TaxCostBasis,
 		})
 	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Date > entries[j].Date
+	})
 
 	return &models.TradesResponse{
 		Symbol:          symbol,
@@ -712,7 +726,7 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 	var flows []models.CashFlow
 
 	for _, t := range data.Trades {
-		if isFXTrade(t) {
+		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
 			continue
 		}
 		// A buy introduces cash into the equity portfolio (Deposit). t.Proceeds is negative.
@@ -798,7 +812,7 @@ func (s *Service) buildDailyHoldings(data *models.FlexQueryData, from, to time.T
 		// Use midnight for 'from' comparison
 		fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
 		if t.DateTime.Before(fromDate) {
-			if !isFXTrade(t) {
+			if !isFXTrade(t) && t.BuySell != "TRANSFER_IN" {
 				k := posKey(t.Symbol, t.ListingExchange)
 				if _, ok := currentHoldings[k]; !ok {
 					currentHoldings[k] = &models.Holding{Symbol: t.Symbol, Currency: t.Currency, ListingExchange: t.ListingExchange}
@@ -818,7 +832,7 @@ func (s *Service) buildDailyHoldings(data *models.FlexQueryData, from, to time.T
 
 		for tradeIdx < len(sortedTrades) && !sortedTrades[tradeIdx].DateTime.After(endOfDay) {
 			t := sortedTrades[tradeIdx]
-			if !isFXTrade(t) {
+			if !isFXTrade(t) && t.BuySell != "TRANSFER_IN" {
 				k := posKey(t.Symbol, t.ListingExchange)
 				if _, ok := currentHoldings[k]; !ok {
 					currentHoldings[k] = &models.Holding{Symbol: t.Symbol, Currency: t.Currency, ListingExchange: t.ListingExchange}
@@ -917,7 +931,7 @@ func (s *Service) allSymbols(data *models.FlexQueryData) []string {
 		symSet[posKey(op.Symbol, "")] = true
 	}
 	for _, t := range data.Trades {
-		if isFXTrade(t) {
+		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
 			continue
 		}
 		symSet[posKey(t.Symbol, t.ListingExchange)] = true

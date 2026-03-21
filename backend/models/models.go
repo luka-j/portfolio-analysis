@@ -17,6 +17,7 @@ type Trade struct {
 	Proceeds        float64   `json:"proceeds"`
 	Commission      float64   `json:"commission"`
 	BuySell         string    `json:"buy_sell"`
+	TaxCostBasis    *float64  `json:"tax_cost_basis,omitempty"`
 	YahooSymbol     string    `json:"yahoo_symbol,omitempty"`
 }
 
@@ -146,8 +147,9 @@ type TradeEntry struct {
 	NativeCurrency string  `json:"native_currency"`
 	ConvertedPrice float64 `json:"converted_price"`
 	Commission     float64 `json:"commission"`
-	Proceeds       float64 `json:"proceeds"`
-	YahooSymbol    string  `json:"yahoo_symbol,omitempty"`
+	Proceeds       float64  `json:"proceeds"`
+	TaxCostBasis   *float64 `json:"tax_cost_basis,omitempty"`
+	YahooSymbol    string   `json:"yahoo_symbol,omitempty"`
 }
 
 // TradesResponse is the response for GET /portfolio/trades.

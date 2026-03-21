@@ -30,6 +30,7 @@ type Transaction struct {
 	Description   string
 	YahooSymbol   string    `gorm:"index"`
 	AssetCategory string
+	TaxCostBasis  *float64
 }
 
 // MarketData represents cached end-of-day price data from Yahoo Finance.

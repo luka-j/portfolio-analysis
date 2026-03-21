@@ -90,6 +90,8 @@ func setupRouter(cfg *config.Config, parser *flexquery.Parser, marketSvc market.
 	// Portfolio endpoints.
 	ph := handlers.NewPortfolioHandler(parser, portfolioSvc)
 	api.POST("/portfolio/upload", ph.Upload)
+	api.POST("/portfolio/upload/etrade/benefits", ph.UploadEtradeBenefits)
+	api.POST("/portfolio/upload/etrade/sales", ph.UploadEtradeSales)
 	api.GET("/portfolio/value", ph.GetValue)
 	api.GET("/portfolio/history", ph.GetHistory)
 	api.GET("/portfolio/history/returns", ph.GetReturns) // real cumulative TWR curve

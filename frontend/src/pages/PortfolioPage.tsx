@@ -342,16 +342,20 @@ function TradeDetail({ symbol, exchange, nativeCurrency, displayCurrency }: { sy
     return () => { cancelled = true }
   }, [symbol, displayCurrency])
 
+  const hasTaxCostBasis = trades.some(t => t.tax_cost_basis !== undefined && t.tax_cost_basis !== null)
+  const colsClass = hasTaxCostBasis ? 'grid-cols-7' : 'grid-cols-6'
+
   return (
     <div className="px-6 py-4 bg-[#13152180] border-t border-[#2a2e42]">
       <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">Trade History — {symbol}</p>
       <div className="bg-[#0f1117] rounded-xl border border-[#2a2e42] overflow-hidden">
-        <div className="grid grid-cols-6 gap-2 px-4 py-2 text-xs font-medium text-slate-500 uppercase border-b border-[#2a2e42]">
+        <div className={`grid ${colsClass} gap-2 px-4 py-2 text-xs font-medium text-slate-500 uppercase border-b border-[#2a2e42]`}>
           <div>Date</div>
           <div>Side</div>
           <div className="text-right">Quantity</div>
           <div className="text-right">Price ({nativeCurrency})</div>
           <div className="text-right">Price ({displayCurrency === 'Original' ? nativeCurrency : displayCurrency})</div>
+          {hasTaxCostBasis && <div className="text-right">Tax Cost Basis</div>}
           <div className="text-right">Commission</div>
         </div>
 
@@ -363,11 +367,11 @@ function TradeDetail({ symbol, exchange, nativeCurrency, displayCurrency }: { sy
           <div className="px-4 py-6 text-center text-slate-500 text-sm">No trades found for {symbol}.</div>
         ) : (
           trades.map((trade, i) => (
-            <div key={i} className="grid grid-cols-6 gap-2 px-4 py-2.5 text-sm border-b border-[#2a2e42]/50 hover:bg-[#1a1d2e] transition-colors">
+            <div key={i} className={`grid ${colsClass} gap-2 px-4 py-2.5 text-sm border-b border-[#2a2e42]/50 hover:bg-[#1a1d2e] transition-colors`}>
               <div className="text-slate-300">{trade.date}</div>
               <div>
                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                  trade.side === 'BUY' || trade.side === 'TRANSFER_IN'
+                  trade.side === 'BUY' || trade.side === 'TRANSFER_IN' || trade.side === 'ESPP_VEST' || trade.side === 'RSU_VEST'
                     ? 'bg-emerald-500/15 text-emerald-400'
                     : trade.side === 'SELL' || trade.side === 'TRANSFER_OUT'
                     ? 'bg-red-500/15 text-red-400'
@@ -379,6 +383,11 @@ function TradeDetail({ symbol, exchange, nativeCurrency, displayCurrency }: { sy
               <div className="text-right text-slate-300">{formatNumber(trade.quantity, 0)}</div>
               <div className="text-right text-slate-300">{formatNumber(trade.price)}</div>
               <div className="text-right text-slate-300">{formatNumber(trade.converted_price)}</div>
+              {hasTaxCostBasis && (
+                <div className="text-right text-slate-400">
+                  {trade.tax_cost_basis !== undefined && trade.tax_cost_basis !== null ? formatNumber(trade.tax_cost_basis) : '—'}
+                </div>
+              )}
               <div className="text-right text-slate-400">{formatNumber(Math.abs(trade.commission))}</div>
             </div>
           ))

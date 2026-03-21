@@ -238,20 +238,37 @@ func (p *Parser) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 
 	data := &models.FlexQueryData{}
 
+	exchangeMap := make(map[string]string)
 	for _, txn := range dbTxns {
-		if txn.Type == "Trade" {
+		if (txn.Type == "Trade" || txn.Type == "ESPP_VEST" || txn.Type == "RSU_VEST") && txn.ListingExchange != "" {
+			if _, exists := exchangeMap[txn.Symbol]; !exists {
+				exchangeMap[txn.Symbol] = txn.ListingExchange
+			}
+		}
+	}
+
+	for _, txn := range dbTxns {
+		if txn.Type == "Trade" || txn.Type == "ESPP_VEST" || txn.Type == "RSU_VEST" {
+			listingExchange := txn.ListingExchange
+			if listingExchange == "" {
+				if ex, ok := exchangeMap[txn.Symbol]; ok {
+					listingExchange = ex
+				}
+			}
+
 			data.Trades = append(data.Trades, models.Trade{
 				TransactionID:   txn.TransactionID,
 				Symbol:          txn.Symbol,
 				AssetCategory:   txn.AssetCategory,
 				Currency:        txn.Currency,
-				ListingExchange: txn.ListingExchange,
+				ListingExchange: listingExchange,
 				DateTime:        txn.DateTime,
 				Quantity:        txn.Quantity,
 				Price:           txn.Price,
 				Proceeds:        txn.Proceeds,
 				Commission:      txn.Commission,
 				BuySell:         txn.BuySell,
+				TaxCostBasis:    txn.TaxCostBasis,
 				YahooSymbol:     txn.YahooSymbol,
 			})
 		} else {
@@ -280,9 +297,16 @@ func (p *Parser) UpdateSymbolMapping(userHash, symbol, exchange, yahooSymbol str
 		return fmt.Errorf("user not found")
 	}
 
-	return p.DB.Model(&models.Transaction{}).
-		Where("user_id = ? AND symbol = ? AND listing_exchange = ? AND type = ?", user.ID, symbol, exchange, "Trade").
-		Update("yahoo_symbol", yahooSymbol).Error
+	query := p.DB.Model(&models.Transaction{}).
+		Where("user_id = ? AND symbol = ? AND type IN ?", user.ID, symbol, []string{"Trade", "ESPP_VEST", "RSU_VEST"})
+
+	if exchange != "" {
+		query = query.Where("(listing_exchange = ? OR listing_exchange = '')", exchange)
+	} else {
+		query = query.Where("listing_exchange = ''")
+	}
+
+	return query.Update("yahoo_symbol", yahooSymbol).Error
 }
 
 // ParseBytes parses raw XML bytes into FlexQueryData.

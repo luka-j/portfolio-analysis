@@ -3,7 +3,7 @@ import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaCh
 import NavBar from '../components/NavBar'
 import {
   getPortfolioValue, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
-  uploadFlexQuery,
+  uploadFlexQuery, uploadEtradeBenefits, uploadEtradeSales,
   type PortfolioValueResponse, type DailyValue,
 } from '../api'
 
@@ -129,6 +129,40 @@ export default function LandingPage() {
     }
   }
 
+  const handleEtradeBenefitsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadMsg('')
+    try {
+      const res = await uploadEtradeBenefits(file)
+      setUploadMsg(`Benefits Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
+      await loadData()
+    } catch (err) {
+      setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleEtradeSalesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadMsg('')
+    try {
+      const res = await uploadEtradeSales(file)
+      setUploadMsg(`Sales Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
+      await loadData()
+    } catch (err) {
+      setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
   // Build chart data based on mode.
   // - 'value': raw portfolio value
   // - 'twr': real cumulative TWR % from backend (fix 1.3)
@@ -166,10 +200,20 @@ export default function LandingPage() {
             <h1 className="text-2xl font-bold text-slate-100">Dashboard</h1>
             <p className="text-slate-400 text-sm mt-1">Your portfolio overview</p>
           </div>
-          <label className={`px-7 py-3.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-indigo-500/20 ${uploading ? 'bg-slate-700 text-slate-400' : 'bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 border border-indigo-500/30'}`}>
-            {uploading ? 'Uploading...' : '↑ Upload FlexQuery'}
-            <input type="file" accept=".xml" onChange={handleUpload} className="hidden" disabled={uploading} />
-          </label>
+          <div className="flex gap-3">
+            <label className={`px-5 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-indigo-500/20 ${uploading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 border border-indigo-500/30'}`}>
+              {uploading ? 'Uploading...' : '↑ FlexQuery'}
+              <input type="file" accept=".xml" onChange={handleUpload} className="hidden" disabled={uploading} />
+            </label>
+            <label className={`px-5 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-emerald-500/20 ${uploading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30'}`}>
+              {uploading ? 'Uploading...' : '↑ E*Trade Benefits'}
+              <input type="file" accept=".xlsx" onChange={handleEtradeBenefitsUpload} className="hidden" disabled={uploading} />
+            </label>
+            <label className={`px-5 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-amber-500/20 ${uploading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border border-amber-500/30'}`}>
+              {uploading ? 'Uploading...' : '↑ E*Trade Sales'}
+              <input type="file" accept=".xlsx" onChange={handleEtradeSalesUpload} className="hidden" disabled={uploading} />
+            </label>
+          </div>
         </div>
 
         {uploadMsg && (

@@ -120,6 +120,12 @@ export interface UploadResponse {
   cash_transactions_count: number;
 }
 
+export interface EtradeUploadResponse {
+  message: string;
+  saved_count: number;
+  parsed_count: number;
+}
+
 export interface TradeEntry {
   date: string;
   side: string;
@@ -129,6 +135,7 @@ export interface TradeEntry {
   converted_price: number;
   commission: number;
   proceeds: number;
+  tax_cost_basis?: number;
 }
 
 export interface TradesResponse {
@@ -144,6 +151,24 @@ export async function uploadFlexQuery(file: File): Promise<UploadResponse> {
   const form = new FormData();
   form.append('file', file);
   return request<UploadResponse>('/portfolio/upload', {
+    method: 'POST',
+    body: form,
+  });
+}
+
+export async function uploadEtradeBenefits(file: File): Promise<EtradeUploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  return request<EtradeUploadResponse>('/portfolio/upload/etrade/benefits', {
+    method: 'POST',
+    body: form,
+  });
+}
+
+export async function uploadEtradeSales(file: File): Promise<EtradeUploadResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  return request<EtradeUploadResponse>('/portfolio/upload/etrade/sales', {
     method: 'POST',
     body: form,
   });
