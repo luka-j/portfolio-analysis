@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --color-primary: #6366f1;
+  --color-primary-hover: #4f46e5;
+  --color-bg: #0f1117;
+  --color-surface: #1a1d2e;
+  --color-surface-hover: #232740;
+  --color-border: #2a2e42;
+  --color-text: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-green: #22c55e;
+  --color-red: #ef4444;
+  --color-amber: #f59e0b;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3f57; }
+
+/* Recharts tooltip */
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+/* Global Button & Interactive Defaults */
+button, 
+.button-like {
+  @apply px-6 py-3 rounded-xl transition-all duration-200 font-semibold;
+  cursor: pointer;
+}
+
+button:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+a {
+  @apply p-2 transition-colors duration-200;
+}

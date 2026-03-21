@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FlexQueryResponse queryName="TestQuery" type="AF">
+  <FlexStatements count="1">
+    <FlexStatement accountId="U1234567" fromDate="2024-01-02" toDate="2024-12-31" period="LastYear" whenGenerated="2025-01-01;00:00:00">
+      <Trades>
+        <Trade symbol="AAPL" assetCategory="STK" currency="USD" listingExchange="NASDAQ" dateTime="2024-01-15;10:30:00" tradeDate="2024-01-15" quantity="10" tradePrice="185.00" proceeds="-1850.00" ibCommission="-1.00" buySell="BUY" />
+        <Trade symbol="AAPL" assetCategory="STK" currency="USD" listingExchange="NASDAQ" dateTime="2024-03-20;14:00:00" tradeDate="2024-03-20" quantity="5" tradePrice="175.00" proceeds="-875.00" ibCommission="-1.00" buySell="BUY" />
+        <Trade symbol="MSFT" assetCategory="STK" currency="USD" listingExchange="NASDAQ" dateTime="2024-02-01;09:45:00" tradeDate="2024-02-01" quantity="8" tradePrice="400.00" proceeds="-3200.00" ibCommission="-1.00" buySell="BUY" />
+        <Trade symbol="VWCE.DE" assetCategory="STK" currency="EUR" listingExchange="XETRA" dateTime="2024-01-20;11:00:00" tradeDate="2024-01-20" quantity="20" tradePrice="100.00" proceeds="-2000.00" ibCommission="-2.00" buySell="BUY" />
+        <Trade symbol="AAPL" assetCategory="STK" currency="USD" listingExchange="NASDAQ" dateTime="2024-06-10;15:00:00" tradeDate="2024-06-10" quantity="-5" tradePrice="195.00" proceeds="975.00" ibCommission="-1.00" buySell="SELL" />
+        <!-- VUAA listed on two exchanges: LSE (USD) and XMIL (EUR) -->
+        <Trade symbol="VUAA" assetCategory="STK" currency="USD" listingExchange="LSE" dateTime="2024-02-10;10:00:00" tradeDate="2024-02-10" quantity="50" tradePrice="80.00" proceeds="-4000.00" ibCommission="-2.00" buySell="BUY" />
+        <Trade symbol="VUAA" assetCategory="STK" currency="EUR" listingExchange="XMIL" dateTime="2024-03-05;11:00:00" tradeDate="2024-03-05" quantity="30" tradePrice="75.00" proceeds="-2250.00" ibCommission="-2.00" buySell="BUY" />
+      </Trades>
+      <OpenPositions>
+        <OpenPosition symbol="AAPL" assetCategory="STK" currency="USD" quantity="10" markPrice="195.00" positionValue="1950.00" costBasisPrice="180.00" />
+        <OpenPosition symbol="MSFT" assetCategory="STK" currency="USD" quantity="8" markPrice="420.00" positionValue="3360.00" costBasisPrice="400.00" />
+        <OpenPosition symbol="VWCE.DE" assetCategory="STK" currency="EUR" quantity="20" markPrice="110.00" positionValue="2200.00" costBasisPrice="100.00" />
+      </OpenPositions>
+      <CashTransactions>
+        <CashTransaction type="Deposits/Withdrawals" currency="USD" amount="-10000.00" dateTime="2024-01-10;08:00:00" reportDate="2024-01-10" description="Electronic Fund Transfer" symbol="" />
+        <CashTransaction type="Deposits/Withdrawals" currency="USD" amount="-3000.00" dateTime="2024-03-15;08:00:00" reportDate="2024-03-15" description="Electronic Fund Transfer" symbol="" />
+        <CashTransaction type="Dividends" currency="USD" amount="50.00" dateTime="2024-06-15;00:00:00" reportDate="2024-06-15" description="AAPL(US0378331005) Cash Dividend USD 0.25 per Share" symbol="AAPL" />
+        <CashTransaction type="Dividends" currency="EUR" amount="30.00" dateTime="2024-07-01;00:00:00" reportDate="2024-07-01" description="VWCE.DE Dividend" symbol="VWCE.DE" />
+      </CashTransactions>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>
