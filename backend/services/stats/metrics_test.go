@@ -147,6 +147,46 @@ func TestCalculateTWR_EdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 		assert.InDelta(t, 0.1, twr, 1e-9)
 	})
+
+	t.Run("Weekend cash flow skipped from daily dates but accumulated correctly", func(t *testing.T) {
+		// Simulate a situation where market is closed on the weekend.
+		// Day 1 (Friday): Portfolio ends at 1000.
+		// Day 2 (Saturday): Deposit 500 (ESPP/RSU vest lands on a Saturday). No pricing available.
+		// Day 3 (Monday): Portfolio opens at 1650.
+		// Return for Friday -> Monday is evaluated correctly incorporating Saturday's cash flow.
+		// (1650 / (1000 + 500)) - 1 = 10%
+		dv := []models.DailyValue{
+			{Date: "2023-01-06", Value: 1000}, // Friday
+			{Date: "2023-01-09", Value: 1650}, // Monday
+		}
+		cf := []models.CashFlow{
+			{Date: time.Date(2023, 1, 7, 0, 0, 0, 0, time.UTC), Amount: -500}, // Saturday
+		}
+		twr, err := CalculateTWR(dv, cf)
+		assert.NoError(t, err)
+		assert.InDelta(t, 0.1, twr, 1e-9)
+	})
+
+	t.Run("Multiple missing days and multiple cash flows", func(t *testing.T) {
+		// Day 1: 1000
+		// Gap containing two deposits and one withdrawal
+		// Day 5: 2200
+		dv := []models.DailyValue{
+			{Date: "2023-01-01", Value: 1000},
+			{Date: "2023-01-05", Value: 2200},
+		}
+		cf := []models.CashFlow{
+			{Date: time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC), Amount: -500}, // Deposit
+			{Date: time.Date(2023, 1, 3, 0, 0, 0, 0, time.UTC), Amount: -700}, // Deposit
+			{Date: time.Date(2023, 1, 4, 0, 0, 0, 0, time.UTC), Amount: 200},  // Withdrawal
+		}
+		// Net cashflow: -1000 (net deposit of 1000)
+		// Base becomes 1000 + 1000 = 2000
+		// End is 2200. Return is 2200 / 2000 - 1 = 10%
+		twr, err := CalculateTWR(dv, cf)
+		assert.NoError(t, err)
+		assert.InDelta(t, 0.1, twr, 1e-9)
+	})
 }
 
 func TestCalculateBenchmarkMetrics_EdgeCases(t *testing.T) {

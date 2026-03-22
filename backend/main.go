@@ -19,6 +19,7 @@ import (
 	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/market"
 	"gofolio-analysis/services/portfolio"
+	"gofolio-analysis/services/tax"
 )
 
 func main() {
@@ -29,12 +30,14 @@ func main() {
 
 	// Build services.
 	marketSvc := market.NewYahooFinanceService(database)
-	fxSvc := fx.NewService(marketSvc)
+	cnbSvc := market.NewCNBProvider(database)
+	fxSvc := fx.NewService(marketSvc, cnbSvc)
 	parser := flexquery.NewParser(database)
 	portfolioSvc := portfolio.NewService(marketSvc, fxSvc)
+	taxSvc := tax.NewService(fxSvc)
 
 	// Build Gin engine.
-	r := setupRouter(cfg, parser, marketSvc, fxSvc, portfolioSvc)
+	r := setupRouter(cfg, parser, marketSvc, fxSvc, portfolioSvc, taxSvc)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -62,7 +65,7 @@ func main() {
 }
 
 // setupRouter creates the Gin engine with all routes wired. Exported for testing.
-func setupRouter(cfg *config.Config, parser *flexquery.Parser, marketSvc market.Provider, fxSvc *fx.Service, portfolioSvc *portfolio.Service) *gin.Engine {
+func setupRouter(cfg *config.Config, parser *flexquery.Parser, marketSvc market.Provider, fxSvc *fx.Service, portfolioSvc *portfolio.Service, taxSvc *tax.Service) *gin.Engine {
 	r := gin.Default()
 
 	// CORS middleware
@@ -106,6 +109,10 @@ func setupRouter(cfg *config.Config, parser *flexquery.Parser, marketSvc market.
 	sh := handlers.NewStatsHandler(parser, portfolioSvc, marketSvc)
 	api.GET("/portfolio/stats", sh.GetStats)
 	api.GET("/portfolio/compare", sh.Compare)
+
+	// Tax endpoints.
+	th := &handlers.TaxHandler{Parser: parser, TaxSvc: taxSvc}
+	api.GET("/tax/report", th.GetReport)
 
 	return r
 }

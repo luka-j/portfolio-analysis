@@ -23,6 +23,7 @@ go.work
 backend/testdata/pp_export.xml
 old_codereview.md
 data/*
+todo.md
 
 # Frontend
 node_modules/

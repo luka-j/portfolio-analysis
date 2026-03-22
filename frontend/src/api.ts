@@ -145,6 +145,32 @@ export interface TradesResponse {
   trades: TradeEntry[];
 }
 
+export interface TaxTransaction {
+  type: string;
+  symbol: string;
+  date: string;
+  quantity: number;
+  native_price: number;
+  currency: string;
+  exchange_rate: number;
+  cost_czk: number;
+  benefit_czk: number;
+  buy_date?: string;
+  buy_rate?: number;
+}
+
+export interface TaxReportSection {
+  total_cost_czk: number;
+  total_benefit_czk: number;
+  transactions: TaxTransaction[];
+}
+
+export interface TaxReportResponse {
+  year: number;
+  employment_income: TaxReportSection;
+  investment_income: TaxReportSection;
+}
+
 // ---------- API Calls ----------
 
 export async function uploadFlexQuery(file: File): Promise<UploadResponse> {
@@ -251,3 +277,7 @@ export const updateSymbolMapping = (symbol: string, yahooSymbol: string, exchang
     body: JSON.stringify({ yahoo_symbol: yahooSymbol }),
   });
 };
+
+export async function getTaxReport(year: number): Promise<TaxReportResponse> {
+  return request<TaxReportResponse>(`/tax/report?year=${year}`);
+}

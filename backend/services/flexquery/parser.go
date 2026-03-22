@@ -256,6 +256,11 @@ func (p *Parser) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 				}
 			}
 
+			buySell := txn.BuySell
+			if txn.Type == "ESPP_VEST" || txn.Type == "RSU_VEST" {
+				buySell = txn.Type
+			}
+
 			data.Trades = append(data.Trades, models.Trade{
 				TransactionID:   txn.TransactionID,
 				Symbol:          txn.Symbol,
@@ -267,7 +272,7 @@ func (p *Parser) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 				Price:           txn.Price,
 				Proceeds:        txn.Proceeds,
 				Commission:      txn.Commission,
-				BuySell:         txn.BuySell,
+				BuySell:         buySell,
 				TaxCostBasis:    txn.TaxCostBasis,
 				YahooSymbol:     txn.YahooSymbol,
 			})

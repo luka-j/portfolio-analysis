@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage'
 import LandingPage from './pages/LandingPage'
 import PortfolioPage from './pages/PortfolioPage'
 import AnalysisPage from './pages/AnalysisPage'
+import TaxPage from './pages/TaxPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!hasToken()) {
@@ -19,6 +20,7 @@ export default function App() {
       <Route path="/" element={<ProtectedRoute><LandingPage /></ProtectedRoute>} />
       <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
       <Route path="/analysis" element={<ProtectedRoute><AnalysisPage /></ProtectedRoute>} />
+      <Route path="/tax" element={<ProtectedRoute><TaxPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

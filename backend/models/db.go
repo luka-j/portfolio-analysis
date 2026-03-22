@@ -44,4 +44,5 @@ type MarketData struct {
 	Close    float64
 	AdjClose float64
 	Volume   int64
+	Provider string    `gorm:"default:'Yahoo'"`
 }

@@ -73,7 +73,9 @@ func (s *Service) reconstructFromTrades(trades []models.Trade) []models.Holding 
 	for _, h := range posMap {
 		result = append(result, *h)
 	}
-	sort.Slice(result, func(i, j int) bool { return posKey(result[i].Symbol, result[i].ListingExchange) < posKey(result[j].Symbol, result[j].ListingExchange) })
+	sort.Slice(result, func(i, j int) bool {
+		return posKey(result[i].Symbol, result[i].ListingExchange) < posKey(result[j].Symbol, result[j].ListingExchange)
+	})
 	return result
 }
 
@@ -136,7 +138,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currencies []strin
 
 		posVal := models.PositionValue{
 			Symbol:          h.Symbol,
-			ListingExchange:  h.ListingExchange,
+			ListingExchange: h.ListingExchange,
 			YahooSymbol:     yMap[k],
 			Quantity:        h.Quantity,
 			NativeCurrency:  h.Currency,
@@ -553,7 +555,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		if idx := strings.Index(pk, "@"); idx != -1 {
 			baseSymbol = pk[:idx]
 		}
-		
+
 		if ys, ok := yMap[pk]; ok && ys != "" {
 			querySymbol = ys
 		} else {
@@ -878,10 +880,10 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 		return nil, err
 	}
 
-	// Build a map of date -> net cash flow amount for that day.
-	cfByDate := make(map[string]float64)
-	for _, cf := range cashFlows {
-		cfByDate[cf.Date.Format("2006-01-02")] += cf.Amount
+	cfIdx := 0
+	// Skip any cash flows that occur on or before the first daily value date.
+	for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= hist.Data[0].Date {
+		cfIdx++
 	}
 
 	// Chain sub-period returns.
@@ -897,10 +899,15 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 		curValue := hist.Data[i].Value
 		dateStr := hist.Data[i].Date
 
-		// Adjust the previous period's ending value for any cash flows that
-		// arrived at the START of today.  A deposit (negative amount in our
-		// convention) adds to the base; a withdrawal subtracts.
-		cfAmount := cfByDate[dateStr]
+		// Accumulate any cash flows that arrived strictly after the previous
+		// period's date and on or before the current period's date.
+		// A deposit (negative amount in our convention) adds to the base; a withdrawal subtracts.
+		cfAmount := 0.0
+		for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= dateStr {
+			cfAmount += cashFlows[cfIdx].Amount
+			cfIdx++
+		}
+
 		adjustedPrev := prevValue - cfAmount
 
 		if adjustedPrev > 0 {

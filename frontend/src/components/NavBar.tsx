@@ -31,6 +31,7 @@ export default function NavBar() {
         <NavLink to="/" className={linkClass} end>Dashboard</NavLink>
         <NavLink to="/portfolio" className={linkClass}>Portfolio</NavLink>
         <NavLink to="/analysis" className={linkClass}>Analysis</NavLink>
+        <NavLink to="/tax" className={linkClass}>Tax</NavLink>
       </div>
 
       <button

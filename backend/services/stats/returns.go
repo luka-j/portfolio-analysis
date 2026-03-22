@@ -113,14 +113,12 @@ func CalculateTWR(dailyValues []models.DailyValue, cashFlows []models.CashFlow) 
 		return 0, fmt.Errorf("need at least 2 daily values for TWR")
 	}
 
-	// Build a set of cash flow dates (normalised to date only).
-	cfDates := make(map[string]float64)
-	for _, cf := range cashFlows {
-		ds := cf.Date.Format("2006-01-02")
-		cfDates[ds] += cf.Amount
+	cfIdx := 0
+	// Skip any cash flows that occur on or before the first daily value date.
+	for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= dailyValues[0].Date {
+		cfIdx++
 	}
 
-	// Chain sub-period returns.
 	product := 1.0
 
 	for i := 1; i < len(dailyValues); i++ {
@@ -128,11 +126,14 @@ func CalculateTWR(dailyValues []models.DailyValue, cashFlows []models.CashFlow) 
 		curValue := dailyValues[i].Value
 		dateStr := dailyValues[i].Date
 
-		// If there's a cash flow on this day, we assume it happened at the START of the day.
-		// cfAmount is negative for deposits, so subtracting it from prevValue simulates
-		// adding the incoming capital to the base of the return period.
-		cfAmount := cfDates[dateStr]
-		
+		// Accumulate any cash flows that occurred strictly after the previous period's date
+		// and on or before the current period's date.
+		cfAmount := 0.0
+		for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= dateStr {
+			cfAmount += cashFlows[cfIdx].Amount
+			cfIdx++
+		}
+
 		adjustedPrevValue := prevValue - cfAmount
 
 		// If the portfolio was effectively empty yesterday but money was deposited today,

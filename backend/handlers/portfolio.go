@@ -44,9 +44,9 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":                "upload successful",
-		"positions_count":        len(data.OpenPositions),
-		"trades_count":           len(data.Trades),
+		"message":                 "upload successful",
+		"positions_count":         len(data.OpenPositions),
+		"trades_count":            len(data.Trades),
 		"cash_transactions_count": len(data.CashTransactions),
 	})
 }
@@ -96,9 +96,6 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 		return
 	}
 
-	// Cleanup pass for previously inserted $0 placeholders that caused the charting artifacts
-	h.Parser.DB.Where("user_id = ? AND type = ? AND price = 0", user.ID, "RSU_VEST").Delete(&models.Transaction{})
-
 	saved := 0
 	for _, txn := range txns {
 		var existing models.Transaction
@@ -108,10 +105,6 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 		).First(&existing).Error
 
 		if err == nil {
-			// Update in place to repair historical records that were incorrectly priced
-			existing.Price = txn.Price
-			existing.Proceeds = txn.Proceeds
-			existing.TaxCostBasis = txn.TaxCostBasis
 			if err := h.Parser.DB.Save(&existing).Error; err == nil {
 				saved++
 			}

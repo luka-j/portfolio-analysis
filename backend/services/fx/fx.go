@@ -11,11 +11,12 @@ import (
 // Service provides currency conversion using Yahoo Finance FX pairs.
 type Service struct {
 	MarketProvider market.Provider
+	CNBProvider    *market.CNBProvider
 }
 
 // NewService creates a new FX service.
-func NewService(mp market.Provider) *Service {
-	return &Service{MarketProvider: mp}
+func NewService(mp market.Provider, cnb *market.CNBProvider) *Service {
+	return &Service{MarketProvider: mp, CNBProvider: cnb}
 }
 
 // GetRate returns the exchange rate from one currency to another on a given date.
@@ -24,6 +25,22 @@ func NewService(mp market.Provider) *Service {
 func (s *Service) GetRate(from, to string, date time.Time) (float64, error) {
 	if from == to || from == "Original" || to == "Original" || from == "original" || to == "original" {
 		return 1.0, nil
+	}
+
+	if s.CNBProvider != nil {
+		if to == "CZK" {
+			return s.CNBProvider.GetRate(from, date)
+		}
+		if from == "CZK" {
+			rate, err := s.CNBProvider.GetRate(to, date)
+			if err != nil {
+				return 0, err
+			}
+			if rate == 0 {
+				return 0, fmt.Errorf("zero rate from CNB for CZK→%s", to)
+			}
+			return 1.0 / rate, nil
+		}
 	}
 
 	// Yahoo Finance FX symbol convention: FROMTO=X

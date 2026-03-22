@@ -22,6 +22,7 @@ import (
 	"gofolio-analysis/services/flexquery"
 	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/portfolio"
+	"gofolio-analysis/services/tax"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -114,11 +115,12 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{})
 
 	mockMarket := newMockMarketProvider()
-	fxSvc := fx.NewService(mockMarket)
+	fxSvc := fx.NewService(mockMarket, nil) // CNB is nil for this test
 	parser := flexquery.NewParser(db)
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
+	taxSvc := tax.NewService(fxSvc)
 
-	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc)
+	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc)
 	ts := httptest.NewServer(router)
 
 	cleanup := func() {
@@ -428,20 +430,20 @@ func TestGetPortfolioTrades(t *testing.T) {
 			require.Len(t, trades, 3, "AAPL should have 3 trades")
 
 			first := trades[0].(map[string]interface{})
-			assert.Equal(t, "BUY", first["side"])
-			assert.Equal(t, 10.0, first["quantity"])
-			assert.Equal(t, 185.0, first["price"])
+			assert.Equal(t, "SELL", first["side"])
+			assert.Equal(t, 5.0, first["quantity"])
+			assert.Equal(t, 195.0, first["price"])
 			assert.Equal(t, "USD", first["native_currency"])
-			assert.Equal(t, "2024-01-15", first["date"])
+			assert.Equal(t, "2024-06-10", first["date"])
 
 			// ConvertedPrice should be price * USDCZK rate (23.50)
-			assert.InDelta(t, 185.0*23.50, first["converted_price"].(float64), 0.01,
+			assert.InDelta(t, 195.0*23.50, first["converted_price"].(float64), 0.01,
 				"converted price should be native price * USDCZK rate")
 
 			last := trades[2].(map[string]interface{})
-			assert.Equal(t, "SELL", last["side"])
-			assert.Equal(t, 5.0, last["quantity"])
-			assert.Equal(t, 195.0, last["price"])
+			assert.Equal(t, "BUY", last["side"])
+			assert.Equal(t, 10.0, last["quantity"])
+			assert.Equal(t, 185.0, last["price"])
 	})
 
 	t.Run("AAPL trades in native currency", func(t *testing.T) {
@@ -606,11 +608,12 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	// Add TSLA at $300
 	mockMarket.addPrice("TSLA", 300.0)
 
-	fxSvc := fx.NewService(mockMarket)
+	fxSvc := fx.NewService(mockMarket, nil)
 	parser := flexquery.NewParser(db)
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
+	taxSvc := tax.NewService(fxSvc)
 
-	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc)
+	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc)
 	tsServer := httptest.NewServer(router)
 	defer tsServer.Close()
 
@@ -740,5 +743,30 @@ func TestPortfolioValueAccountingModels(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestGetTaxReport(t *testing.T) {
+	ts, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	uploadFlexQuery(t, ts, testToken)
+
+	resp := doGet(t, ts, "/api/v1/tax/report?year=2024", testToken)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	err := json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(2024), result["year"])
+
+	inv := result["investment_income"].(map[string]interface{})
+	assert.Greater(t, inv["total_cost_czk"].(float64), 0.0)
+	assert.Greater(t, inv["total_benefit_czk"].(float64), 0.0)
+
+	txs := inv["transactions"].([]interface{})
+	require.NotEmpty(t, txs)
 }
 

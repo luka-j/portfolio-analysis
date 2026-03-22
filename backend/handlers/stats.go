@@ -94,15 +94,21 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 		}
 	}
 
-	fromDateStr := from.Format("2006-01-02")
-	toDateStr := to.Format("2006-01-02")
+	actualFromStr := ""
+	actualToStr := ""
+	if len(hist.Data) > 0 {
+		actualFromStr = hist.Data[0].Date
+		actualToStr = hist.Data[len(hist.Data)-1].Date
+	}
 
 	for _, cf := range cashFlows {
 		cfDateStr := cf.Date.Format("2006-01-02")
-		// Real cashflows are only tracked strictly AFTER the from date
-		if cfDateStr > fromDateStr && cfDateStr <= toDateStr {
-			twrCashFlows = append(twrCashFlows, cf)
-			mwrCashFlows = append(mwrCashFlows, cf)
+		// Real cashflows are scoped precisely to the time frame covered by the priced history data
+		if actualToStr != "" {
+			if cfDateStr > actualFromStr && cfDateStr <= actualToStr {
+				twrCashFlows = append(twrCashFlows, cf)
+				mwrCashFlows = append(mwrCashFlows, cf)
+			}
 		}
 	}
 
