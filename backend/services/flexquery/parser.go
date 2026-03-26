@@ -132,8 +132,7 @@ func (p *Parser) ParseAndSave(r io.Reader, userHash string) (*models.FlexQueryDa
 	// 2. Insert Trades (with deduplication via IB's TransactionID)
 	for _, t := range data.Trades {
 		// Filter out FX conversions (AssetCategory == "CASH" or XXX.YYY symbols)
-		isFXTrade := t.AssetCategory == "CASH" || (len(t.Symbol) == 7 && t.Symbol[3] == '.')
-		if isFXTrade {
+		if models.IsFXTrade(t) {
 			continue
 		}
 
@@ -236,8 +235,8 @@ func (p *Parser) ParseAndSave(r io.Reader, userHash string) (*models.FlexQueryDa
 // LoadSaved loads all historical transactions from the DB for a user.
 func (p *Parser) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 	var user models.User
-	if err := p.DB.Where(models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
-		return nil, fmt.Errorf("failed to get or create user: %w", err)
+	if err := p.DB.Where(models.User{TokenHash: userHash}).First(&user).Error; err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
 	var dbTxns []models.Transaction

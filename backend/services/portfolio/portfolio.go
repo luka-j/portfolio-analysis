@@ -2,11 +2,13 @@ package portfolio
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
 
 	"gofolio-analysis/models"
+	"gofolio-analysis/services/fifo"
 	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/market"
 )
@@ -22,9 +24,9 @@ func NewService(mp market.Provider, fxSvc *fx.Service) *Service {
 	return &Service{MarketProvider: mp, FXService: fxSvc}
 }
 
-// isFXTrade returns true if the trade is considered a currency conversion trade.
+// isFXTrade delegates to the centralized check in models.
 func isFXTrade(t models.Trade) bool {
-	return t.AssetCategory == "CASH" || (len(t.Symbol) == 7 && t.Symbol[3] == '.')
+	return models.IsFXTrade(t)
 }
 
 // posKey returns a composite key for a (symbol, exchange) pair.
@@ -95,25 +97,20 @@ func (s *Service) getYahooSymbolMap(data *models.FlexQueryData) map[string]strin
 	return m
 }
 
-// GetCurrentValue returns the portfolio value in multiple currencies.
-func (s *Service) GetCurrentValue(data *models.FlexQueryData, currencies []string, acctModel models.AccountingModel) (*models.PortfolioValueResponse, error) {
+// GetCurrentValue returns the portfolio value in the requested display currency.
+func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) (*models.PortfolioValueResponse, error) {
 	holdings := s.GetCurrentHoldings(data)
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	lookback := today.AddDate(0, 0, -5)
 
-	// Build a cost basis, realized GL, and commissions map for each currency.
-	costBasisMap := s.computeCostBasisMulti(data, currencies, acctModel)
-	realizedGLMap := s.computeRealizedGLMulti(data, currencies, acctModel)
-	commissionsMap := s.computeCommissionsMulti(data, currencies, acctModel)
-
-	totals := make(map[string]float64)
-	for _, c := range currencies {
-		totals[c] = 0
-	}
+	costBasisMap := s.computeCostBasis(data, currency, acctModel)
+	realizedGLMap := s.computeRealizedGL(data, currency, acctModel)
+	commissionsMap := s.computeCommissions(data, currency, acctModel)
 
 	yMap := s.getYahooSymbolMap(data)
 
+	var totalValue float64
 	var positions []models.PositionValue
 	for _, h := range holdings {
 		k := posKey(h.Symbol, h.ListingExchange)
@@ -124,125 +121,59 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currencies []strin
 
 		prices, err := s.MarketProvider.GetHistory(querySymbol, lookback, today)
 		if err != nil {
-			fmt.Printf("Warning: fetching price for %s (mapped to %s): %v\n", h.Symbol, querySymbol, err)
+			log.Printf("Warning: fetching price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
 		}
 
 		latestPrice := 0.0
 		if len(prices) > 0 {
-			latestPrice = prices[len(prices)-1].AdjClose // fix 1.4: use split-adjusted price
+			latestPrice = prices[len(prices)-1].AdjClose
 			if latestPrice == 0 {
 				latestPrice = prices[len(prices)-1].Close
 			}
 		}
 		nativeValue := h.Quantity * latestPrice
 
-		posVal := models.PositionValue{
+		var convertedPrice, convertedValue float64
+		if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+			convertedPrice = latestPrice
+			convertedValue = nativeValue
+		} else {
+			convertedPrice, err = s.FXService.ConvertSpot(latestPrice, h.Currency, currency)
+			if err != nil {
+				return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, currency, err)
+			}
+			convertedValue, err = s.FXService.ConvertSpot(nativeValue, h.Currency, currency)
+			if err != nil {
+				return nil, fmt.Errorf("converting value %s to %s: %w", h.Currency, currency, err)
+			}
+		}
+		totalValue += convertedValue
+
+		positions = append(positions, models.PositionValue{
 			Symbol:          h.Symbol,
 			ListingExchange: h.ListingExchange,
 			YahooSymbol:     yMap[k],
 			Quantity:        h.Quantity,
 			NativeCurrency:  h.Currency,
-			Prices:          make(map[string]float64),
-			CostBases:       costBasisMap[k],
-			RealizedGLs:     realizedGLMap[k],
-			Values:          make(map[string]float64),
-			Commissions:     commissionsMap[k],
-		}
-
-		for _, cur := range currencies {
-			var convertedPrice, convertedValue float64
-			if cur == "Original" || cur == "original" {
-				convertedPrice = latestPrice
-				convertedValue = nativeValue
-			} else {
-				convertedPrice, err = s.FXService.ConvertSpot(latestPrice, h.Currency, cur)
-				if err != nil {
-					return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, cur, err)
-				}
-				convertedValue, err = s.FXService.ConvertSpot(nativeValue, h.Currency, cur)
-				if err != nil {
-					return nil, fmt.Errorf("converting %s to %s: %w", h.Currency, cur, err)
-				}
-			}
-			posVal.Prices[cur] = convertedPrice
-			posVal.Values[cur] = convertedValue
-			totals[cur] += convertedValue
-		}
-		positions = append(positions, posVal)
+			Price:           convertedPrice,
+			CostBasis:       costBasisMap[k],
+			RealizedGL:      realizedGLMap[k],
+			Value:           convertedValue,
+			Commission:      commissionsMap[k],
+		})
 	}
 
 	return &models.PortfolioValueResponse{
-		Values:    totals,
+		Value:     totalValue,
+		Currency:  currency,
 		Positions: positions,
 	}, nil
 }
 
-// computeCostBasisMulti returns a map of symbol -> (currency -> average cost basis per share).
-// It uses the FIFO lots algorithm: only lots that are still open (not matched by sells) contribute
-// to the cost basis, giving the correct weighted average for the current position.
-func (s *Service) computeCostBasisMulti(data *models.FlexQueryData, currencies []string, acctModel models.AccountingModel) map[string]map[string]float64 {
-	type lot struct {
-		qty   float64
-		price float64
-		date  time.Time
-		curr  string
-	}
-
-	type matchedSell struct {
-		qty       float64
-		sellPrice float64
-		costPrice float64
-		sellDate  time.Time
-		costDate  time.Time
-		curr      string
-		comm      float64
-	}
-
-	matchLotsFIFO := func(trades []models.Trade) ([]lot, []matchedSell) {
-		var openLots []lot
-		var matchedSells []matchedSell
-		for _, t := range trades {
-			if t.BuySell == "TRANSFER_IN" {
-				continue
-			}
-			if t.Quantity > 0 {
-				openLots = append(openLots, lot{qty: t.Quantity, price: t.Price, date: t.DateTime, curr: t.Currency})
-			} else if t.Quantity < 0 {
-				sellQty := -t.Quantity
-				sellPrice := t.Price
-				comm := t.Commission
-
-				for sellQty > 0 && len(openLots) > 0 {
-					matchQty := openLots[0].qty
-					if matchQty > sellQty {
-						matchQty = sellQty
-					}
-
-					matchedSells = append(matchedSells, matchedSell{
-						qty:       matchQty,
-						sellPrice: sellPrice,
-						costPrice: openLots[0].price,
-						sellDate:  t.DateTime,
-						costDate:  openLots[0].date,
-						curr:      t.Currency,
-						comm:      comm,
-					})
-
-					// allocate commission fully to the first matched chunk to avoid double counting
-					comm = 0
-
-					openLots[0].qty -= matchQty
-					sellQty -= matchQty
-					if openLots[0].qty <= 1e-9 {
-						openLots = openLots[1:]
-					}
-				}
-			}
-		}
-		return openLots, matchedSells
-	}
-
-	result := make(map[string]map[string]float64)
+// computeCostBasis returns a map of posKey -> average cost basis per share in the given currency.
+// Only open FIFO lots contribute, giving the weighted average for the current position.
+func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) map[string]float64 {
+	result := make(map[string]float64)
 
 	tradesByKey := make(map[string][]models.Trade)
 	for _, t := range data.Trades {
@@ -255,131 +186,60 @@ func (s *Service) computeCostBasisMulti(data *models.FlexQueryData, currencies [
 			return trades[i].DateTime.Before(trades[j].DateTime)
 		})
 
-		// Run FIFO to find remaining open lots.
-		openLots, _ := matchLotsFIFO(trades)
+		openLots, _ := fifo.Match(trades)
 
 		nativeCurrency := ""
 		if len(openLots) > 0 {
-			nativeCurrency = openLots[0].curr
+			nativeCurrency = openLots[0].Curr
 		} else if len(trades) > 0 {
 			nativeCurrency = trades[0].Currency
 		}
 
-		result[key] = make(map[string]float64)
+		if len(openLots) == 0 {
+			result[key] = 0
+			continue
+		}
 
-		for _, cur := range currencies {
-			if len(openLots) == 0 {
-				result[key][cur] = 0
-				continue
-			}
-
-			// Weighted average cost basis over remaining FIFO lots.
-			var totalCost, totalQty float64
-			for _, l := range openLots {
-				var priceInCur float64
-				if cur == "Original" || cur == "original" || acctModel == models.AccountingModelOriginal {
-					priceInCur = l.price
-				} else if acctModel == models.AccountingModelSpot {
-					priceInCur, _ = s.FXService.ConvertSpot(l.price, l.curr, cur)
-				} else {
-					priceInCur, _ = s.FXService.Convert(l.price, l.curr, cur, l.date)
-				}
-				totalCost += l.qty * priceInCur
-				totalQty += l.qty
-			}
-			if totalQty > 0 {
-				result[key][cur] = totalCost / totalQty
+		var totalCost, totalQty float64
+		for _, l := range openLots {
+			var priceInCur float64
+			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+				priceInCur = l.Price
+			} else if acctModel == models.AccountingModelSpot {
+				priceInCur, _ = s.FXService.ConvertSpot(l.Price, l.Curr, currency)
 			} else {
-				// Fallback: spot convert the native cost basis
-				converted, _ := s.FXService.ConvertSpot(0, nativeCurrency, cur)
-				result[key][cur] = converted
+				priceInCur, _ = s.FXService.Convert(l.Price, l.Curr, currency, l.Date)
 			}
+			totalCost += l.Qty * priceInCur
+			totalQty += l.Qty
+		}
+		if totalQty > 0 {
+			result[key] = totalCost / totalQty
+		} else {
+			converted, _ := s.FXService.ConvertSpot(0, nativeCurrency, currency)
+			result[key] = converted
 		}
 	}
 
-	// Also handle any symbols that appear only in OpenPositions (no matching trades).
+	// Also handle symbols that appear only in OpenPositions (no matching trades).
 	for _, op := range data.OpenPositions {
 		if _, seen := result[op.Symbol]; seen {
 			continue
 		}
-		result[op.Symbol] = make(map[string]float64)
-		for _, cur := range currencies {
-			if cur == "Original" || cur == "original" || acctModel == models.AccountingModelOriginal {
-				result[op.Symbol][cur] = op.CostBasisPerShare
-			} else if acctModel == models.AccountingModelSpot {
-				converted, _ := s.FXService.ConvertSpot(op.CostBasisPerShare, op.Currency, cur)
-				result[op.Symbol][cur] = converted
-			}
+		if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+			result[op.Symbol] = op.CostBasisPerShare
+		} else if acctModel == models.AccountingModelSpot {
+			converted, _ := s.FXService.ConvertSpot(op.CostBasisPerShare, op.Currency, currency)
+			result[op.Symbol] = converted
 		}
 	}
 
 	return result
 }
 
-// computeRealizedGLMulti computes total realized gain/loss in multiple currencies.
-func (s *Service) computeRealizedGLMulti(data *models.FlexQueryData, currencies []string, acctModel models.AccountingModel) map[string]map[string]float64 {
-	type lot struct {
-		qty   float64
-		price float64
-		date  time.Time
-		curr  string
-	}
-
-	type matchedSell struct {
-		qty       float64
-		sellPrice float64
-		costPrice float64
-		sellDate  time.Time
-		costDate  time.Time
-		curr      string
-		comm      float64
-	}
-
-	matchLotsFIFO := func(trades []models.Trade) ([]lot, []matchedSell) {
-		var openLots []lot
-		var matchedSells []matchedSell
-		for _, t := range trades {
-			if t.BuySell == "TRANSFER_IN" {
-				continue
-			}
-			if t.Quantity > 0 {
-				openLots = append(openLots, lot{qty: t.Quantity, price: t.Price, date: t.DateTime, curr: t.Currency})
-			} else if t.Quantity < 0 {
-				sellQty := -t.Quantity
-				sellPrice := t.Price
-				comm := t.Commission
-
-				for sellQty > 0 && len(openLots) > 0 {
-					matchQty := openLots[0].qty
-					if matchQty > sellQty {
-						matchQty = sellQty
-					}
-
-					matchedSells = append(matchedSells, matchedSell{
-						qty:       matchQty,
-						sellPrice: sellPrice,
-						costPrice: openLots[0].price,
-						sellDate:  t.DateTime,
-						costDate:  openLots[0].date,
-						curr:      t.Currency,
-						comm:      comm,
-					})
-
-					// allocate commission fully to the first matched chunk to avoid double counting
-					comm = 0
-
-					openLots[0].qty -= matchQty
-					sellQty -= matchQty
-					if openLots[0].qty <= 1e-9 {
-						openLots = openLots[1:]
-					}
-				}
-			}
-		}
-		return openLots, matchedSells
-	}
-
-	result := make(map[string]map[string]float64)
+// computeRealizedGL computes total realized gain/loss per position in the given currency.
+func (s *Service) computeRealizedGL(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) map[string]float64 {
+	result := make(map[string]float64)
 	tradesByKey := make(map[string][]models.Trade)
 	for _, t := range data.Trades {
 		k := posKey(t.Symbol, t.ListingExchange)
@@ -391,50 +251,45 @@ func (s *Service) computeRealizedGLMulti(data *models.FlexQueryData, currencies 
 			return trades[i].DateTime.Before(trades[j].DateTime)
 		})
 
-		result[key] = make(map[string]float64)
-		_, matchedSells := matchLotsFIFO(trades)
+		_, matchedSells := fifo.Match(trades)
 
-		for _, cur := range currencies {
-			var realizedGL float64
+		var realizedGL float64
+		for _, m := range matchedSells {
+			var profit float64
+			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+				profit = m.Qty * (m.SellPrice - m.CostPrice)
+			} else if acctModel == models.AccountingModelSpot {
+				sellPriceSpot, _ := s.FXService.ConvertSpot(m.SellPrice, m.Curr, currency)
+				costPriceSpot, _ := s.FXService.ConvertSpot(m.CostPrice, m.Curr, currency)
+				profit = m.Qty * (sellPriceSpot - costPriceSpot)
+			} else {
+				sellPriceHist, _ := s.FXService.Convert(m.SellPrice, m.Curr, currency, m.SellDate)
+				costPriceHist, _ := s.FXService.Convert(m.CostPrice, m.Curr, currency, m.CostDate)
+				profit = m.Qty * (sellPriceHist - costPriceHist)
+			}
+			realizedGL += profit
 
-			for _, m := range matchedSells {
-				var profit float64
-				if cur == "Original" || cur == "original" || acctModel == models.AccountingModelOriginal {
-					profit = m.qty * (m.sellPrice - m.costPrice)
+			if m.Comm != 0 {
+				if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+					realizedGL += m.Comm
 				} else if acctModel == models.AccountingModelSpot {
-					sellPriceSpot, _ := s.FXService.ConvertSpot(m.sellPrice, m.curr, cur)
-					costPriceSpot, _ := s.FXService.ConvertSpot(m.costPrice, m.curr, cur)
-					profit = m.qty * (sellPriceSpot - costPriceSpot)
+					commSpot, _ := s.FXService.ConvertSpot(m.Comm, m.Curr, currency)
+					realizedGL += commSpot
 				} else {
-					sellPriceHist, _ := s.FXService.Convert(m.sellPrice, m.curr, cur, m.sellDate)
-					costPriceHist, _ := s.FXService.Convert(m.costPrice, m.curr, cur, m.costDate)
-					profit = m.qty * (sellPriceHist - costPriceHist)
-				}
-
-				realizedGL += profit
-
-				if m.comm != 0 {
-					if cur == "Original" || cur == "original" || acctModel == models.AccountingModelOriginal {
-						realizedGL += m.comm
-					} else if acctModel == models.AccountingModelSpot {
-						commSpot, _ := s.FXService.ConvertSpot(m.comm, m.curr, cur)
-						realizedGL += commSpot
-					} else {
-						commHist, _ := s.FXService.Convert(m.comm, m.curr, cur, m.sellDate)
-						realizedGL += commHist
-					}
+					commHist, _ := s.FXService.Convert(m.Comm, m.Curr, currency, m.SellDate)
+					realizedGL += commHist
 				}
 			}
-			result[key][cur] = realizedGL
 		}
+		result[key] = realizedGL
 	}
 
 	return result
 }
 
-// computeCommissionsMulti sums all trade commissions per symbol@exchange in multiple currencies.
-func (s *Service) computeCommissionsMulti(data *models.FlexQueryData, currencies []string, acctModel models.AccountingModel) map[string]map[string]float64 {
-	result := make(map[string]map[string]float64)
+// computeCommissions sums all trade commissions per position in the given currency.
+func (s *Service) computeCommissions(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) map[string]float64 {
+	result := make(map[string]float64)
 
 	tradesByKey := make(map[string][]models.Trade)
 	for _, t := range data.Trades {
@@ -446,25 +301,22 @@ func (s *Service) computeCommissionsMulti(data *models.FlexQueryData, currencies
 	}
 
 	for key, trades := range tradesByKey {
-		result[key] = make(map[string]float64)
-		for _, cur := range currencies {
-			var total float64
-			for _, t := range trades {
-				if t.Commission == 0 {
-					continue
-				}
-				var comm float64
-				if cur == "Original" || cur == "original" || acctModel == models.AccountingModelOriginal {
-					comm = t.Commission
-				} else if acctModel == models.AccountingModelSpot {
-					comm, _ = s.FXService.ConvertSpot(t.Commission, t.Currency, cur)
-				} else {
-					comm, _ = s.FXService.Convert(t.Commission, t.Currency, cur, t.DateTime)
-				}
-				total += comm
+		var total float64
+		for _, t := range trades {
+			if t.Commission == 0 {
+				continue
 			}
-			result[key][cur] = total
+			var comm float64
+			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+				comm = t.Commission
+			} else if acctModel == models.AccountingModelSpot {
+				comm, _ = s.FXService.ConvertSpot(t.Commission, t.Currency, currency)
+			} else {
+				comm, _ = s.FXService.Convert(t.Commission, t.Currency, currency, t.DateTime)
+			}
+			total += comm
 		}
+		result[key] = total
 	}
 
 	return result
@@ -565,7 +417,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 
 		prices, err := s.MarketProvider.GetHistory(querySymbol, from, to)
 		if err != nil {
-			fmt.Printf("Warning: fetching %s historical data (mapped to %s): %v\n", pk, querySymbol, err)
+			log.Printf("Warning: fetching %s historical data (mapped to %s): %v\n", pk, querySymbol, err)
 			prices = []models.PricePoint{}
 		}
 
@@ -634,7 +486,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 			points, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to)
 			if err != nil {
 				// If FX pair fails, we'll fall back to spot; leave cache empty for this pair.
-				fmt.Printf("Warning: pre-fetching FX %s: %v\n", fxSymbol, err)
+				log.Printf("Warning: pre-fetching FX %s: %v\n", fxSymbol, err)
 				continue
 			}
 			pc := make(map[string]float64)

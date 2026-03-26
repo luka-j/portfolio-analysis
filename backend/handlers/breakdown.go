@@ -48,7 +48,7 @@ func (h *BreakdownHandler) GetBreakdown(c *gin.Context) {
 	}
 
 	// GetCurrentValue uses spot accounting model for breakdown (we only need current weights).
-	result, err := h.PortfolioSvc.GetCurrentValue(data, []string{currency}, models.AccountingModelSpot)
+	result, err := h.PortfolioSvc.GetCurrentValue(data, currency, models.AccountingModelSpot)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "fetching portfolio: " + err.Error()})
 		return

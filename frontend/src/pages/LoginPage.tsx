@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { setToken, getPortfolioValue } from '../api'
+import { setToken, verifyToken } from '../api'
 
 export default function LoginPage() {
   const [token, setTokenValue] = useState('')
@@ -19,16 +19,16 @@ export default function LoginPage() {
     setToken(token.trim())
 
     try {
-      await getPortfolioValue()
-      navigate('/')
-    } catch (err) {
-      // 404 means token is valid but no portfolio yet — that's fine
-      if (err instanceof Error && err.message === 'no portfolio uploaded') {
+      const valid = await verifyToken()
+      if (valid) {
         navigate('/')
       } else {
         setError('Invalid token. Please try again.')
         setToken('')
       }
+    } catch {
+      setError('Invalid token. Please try again.')
+      setToken('')
     } finally {
       setLoading(false)
     }

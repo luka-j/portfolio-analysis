@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +27,9 @@ func NewPortfolioHandler(parser *flexquery.Parser, ps *portfolio.Service) *Portf
 
 // Upload handles POST /api/v1/portfolio/upload
 func (h *PortfolioHandler) Upload(c *gin.Context) {
+	// Limit upload to 10 MB to prevent abuse.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+
 	userHash := c.GetString(middleware.UserHashKey)
 
 	file, _, err := c.Request.FormFile("file")
@@ -133,14 +135,9 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 		return
 	}
 
-	currStr := c.DefaultQuery("currencies", "USD,EUR,CZK")
-	currencies := strings.Split(currStr, ",")
-	for i := range currencies {
-		currencies[i] = strings.TrimSpace(currencies[i])
-	}
-
+	currency := c.DefaultQuery("currency", "USD")
 	acctModel := parseAccountingModel(c)
-	result, err := h.PortfolioService.GetCurrentValue(data, currencies, acctModel)
+	result, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

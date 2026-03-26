@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -13,7 +14,7 @@ import (
 )
 
 // Init connects to the database via GORM and auto-migrates all tables.
-func Init(dsn string) *gorm.DB {
+func Init(dsn string) (*gorm.DB, error) {
 	// Setup quiet logger for production, standard for dev
 	newLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
@@ -25,15 +26,15 @@ func Init(dsn string) *gorm.DB {
 		},
 	)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: newLogger,
 	})
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		return nil, fmt.Errorf("connecting to database: %w", err)
 	}
 
 	log.Println("Migrating database schemas...")
-	err = db.AutoMigrate(
+	err = database.AutoMigrate(
 		&models.User{},
 		&models.Transaction{},
 		&models.MarketData{},
@@ -41,14 +42,14 @@ func Init(dsn string) *gorm.DB {
 		&models.EtfBreakdown{},
 	)
 	if err != nil {
-		log.Fatalf("Failed to migrate database: %v", err)
+		return nil, fmt.Errorf("migrating database: %w", err)
 	}
 
 	// Cleanup any corrupted zero-price items previously saved due to Yahoo JSON null values
-	result := db.Where("close = 0 AND volume != -1").Delete(&models.MarketData{})
+	result := database.Where("close = 0 AND volume != -1").Delete(&models.MarketData{})
 	if result.RowsAffected > 0 {
 		log.Printf("Cleaned up %d corrupted zero-price market data rows", result.RowsAffected)
 	}
 
-	return db
+	return database, nil
 }

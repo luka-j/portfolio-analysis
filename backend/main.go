@@ -28,7 +28,10 @@ func main() {
 	cfg := config.Load()
 
 	// Connect to Database via GORM
-	database := db.Init(cfg.DatabaseURL)
+	database, err := db.Init(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Database init failed: %v", err)
+	}
 
 	// Build services.
 	marketSvc := market.NewYahooFinanceService(database)
@@ -55,8 +58,8 @@ func main() {
 		cfg.BreakdownProviders,
 		allFundamentals,
 		allBreakdowns,
+		marketSvc,
 	)
-	fundamentalsSvc.QuoteTypeFetcher = marketSvc
 	breakdownService := breakdownsvc.NewService(database)
 
 	// Build Gin engine.
@@ -108,7 +111,7 @@ func setupRouter(
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+		c.Writer.Header().Set("Access-Control-Allow-Origin", cfg.CORSOrigin)
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Auth-Token")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")

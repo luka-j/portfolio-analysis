@@ -1,6 +1,15 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// IsFXTrade returns true if the trade is a currency conversion (FX) trade.
+func IsFXTrade(t Trade) bool {
+	cat := strings.ToUpper(t.AssetCategory)
+	return cat == "CASH" || (len(t.Symbol) == 7 && t.Symbol[3] == '.')
+}
 
 // ---------- Domain types ----------
 
@@ -118,25 +127,26 @@ type UploadResponse struct {
 	CashTransactionsCount int    `json:"cash_transactions_count"`
 }
 
-// PositionValue shows one position's value in multiple currencies.
+// PositionValue shows one position's value in the requested display currency.
 type PositionValue struct {
-	Symbol          string             `json:"symbol"`
-	ListingExchange string             `json:"listing_exchange,omitempty"`
-	Quantity        float64            `json:"quantity"`
-	NativeCurrency  string             `json:"native_currency"`
-	YahooSymbol     string             `json:"yahoo_symbol,omitempty"`
-	Prices          map[string]float64 `json:"prices"`
-	CostBases       map[string]float64 `json:"cost_bases"`
-	RealizedGLs     map[string]float64 `json:"realized_gls"`
-	Values          map[string]float64 `json:"values"`
-	Commissions     map[string]float64 `json:"commissions"`
-	BondDuration    *float64           `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
+	Symbol          string   `json:"symbol"`
+	ListingExchange string   `json:"listing_exchange,omitempty"`
+	Quantity        float64  `json:"quantity"`
+	NativeCurrency  string   `json:"native_currency"`
+	YahooSymbol     string   `json:"yahoo_symbol,omitempty"`
+	Price           float64  `json:"price"`
+	CostBasis       float64  `json:"cost_basis"`
+	RealizedGL      float64  `json:"realized_gl"`
+	Value           float64  `json:"value"`
+	Commission      float64  `json:"commission"`
+	BondDuration    *float64 `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
 }
 
 // PortfolioValueResponse is the response for GET /portfolio/value.
 type PortfolioValueResponse struct {
-	Values    map[string]float64 `json:"values"`
-	Positions []PositionValue    `json:"positions"`
+	Value     float64         `json:"value"`
+	Currency  string          `json:"currency"`
+	Positions []PositionValue `json:"positions"`
 }
 
 // TradeEntry is a frontend-friendly representation of a single trade.

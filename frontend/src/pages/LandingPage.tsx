@@ -4,10 +4,10 @@ import NavBar from '../components/NavBar'
 import {
   getPortfolioValue, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
   uploadFlexQuery, uploadEtradeBenefits, uploadEtradeSales,
-  type PortfolioValueResponse, type DailyValue,
+  type DailyValue,
 } from '../api'
+import { formatCurrencyCompact, formatDate, CURRENCIES } from '../utils/format'
 
-const CURRENCIES = ['CZK', 'USD', 'EUR']
 const PERIODS = [
   { label: '1M', months: 1 },
   { label: '3M', months: 3 },
@@ -15,16 +15,6 @@ const PERIODS = [
   { label: '1Y', months: 12 },
   { label: 'All', months: 0 },
 ]
-
-function formatCurrency(value: number, currency: string): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency', currency, minimumFractionDigits: 0, maximumFractionDigits: 0,
-  }).format(value)
-}
-
-function formatDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
 
 function getFromDate(months: number): string {
   if (months === 0) return '2000-01-01'
@@ -37,7 +27,7 @@ export default function LandingPage() {
   const [currency, setCurrency] = useState('CZK')
   const [period, setPeriod] = useState(0)
   const [chartMode, setChartMode] = useState<'value' | 'twr' | 'mwr'>('value')
-  const [portfolioValue, setPortfolioValue] = useState<PortfolioValueResponse | null>(null)
+  const [portfolioValues, setPortfolioValues] = useState<Record<string, number>>({})
   const [history, setHistory] = useState<DailyValue[]>([])
   const [twrHistory, setTwrHistory] = useState<DailyValue[]>([]) // real TWR curve from backend
   const [stats, setStats] = useState<Record<string, unknown> | null>(null)
@@ -56,15 +46,16 @@ export default function LandingPage() {
     setLoading(true)
     setError('')
     try {
-      const [val, hist, st] = await Promise.all([
-        getPortfolioValue(CURRENCIES.join(',')),
-        getPortfolioHistory(getFromDate(period), formatDate(new Date()), currency),
+      // Fetch each currency value independently (new scalar API) + stats — all in parallel.
+      const [czk, usd, eur, st] = await Promise.all([
+        getPortfolioValue('CZK'),
+        getPortfolioValue('USD'),
+        getPortfolioValue('EUR'),
         getPortfolioStats(getFromDate(period), formatDate(new Date()), currency),
       ])
       // Ignore if a newer call already started.
       if (gen !== loadGenRef.current) return
-      setPortfolioValue(val)
-      setHistory(hist.data)
+      setPortfolioValues({ CZK: czk.value, USD: usd.value, EUR: eur.value })
       setStats(st.statistics)
     } catch (err) {
       if (gen !== loadGenRef.current) return
@@ -239,7 +230,7 @@ export default function LandingPage() {
             >
               <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">{cur}</p>
               <p className="text-2xl font-bold mt-2 text-slate-100">
-                {loading ? '—' : formatCurrency(portfolioValue?.values[cur] ?? 0, cur)}
+                {loading ? '—' : formatCurrencyCompact(portfolioValues[cur] ?? 0, cur)}
               </p>
             </div>
           ))}
@@ -301,7 +292,7 @@ export default function LandingPage() {
                     contentStyle={{ background: '#1a1d2e', border: '1px solid #2a2e42', borderRadius: '12px', fontSize: '13px', color: '#e2e8f0' }}
                     labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
                     formatter={(value) => [
-                      chartMode === 'value' ? formatCurrency(Number(value), currency) : `${Number(value).toFixed(2)}%`,
+                      chartMode === 'value' ? formatCurrencyCompact(Number(value), currency) : `${Number(value).toFixed(2)}%`,
                       chartLabel
                     ]}
                   />

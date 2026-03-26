@@ -32,7 +32,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (resp.status === 401) {
     clearToken();
-    window.location.href = '/login';
     throw new Error('Unauthorized');
   }
 
@@ -52,16 +51,17 @@ export interface PositionValue {
   quantity: number;
   native_currency: string;
   yahoo_symbol?: string;
-  prices: Record<string, number>;
-  cost_bases: Record<string, number>;
-  realized_gls: Record<string, number>;
-  values: Record<string, number>;
-  commissions: Record<string, number>;
+  price: number;
+  cost_basis: number;
+  realized_gl: number;
+  value: number;
+  commission: number;
   bond_duration?: number; // bond ETF: effective duration in years
 }
 
 export interface PortfolioValueResponse {
-  values: Record<string, number>;
+  value: number;
+  currency: string;
   positions: PositionValue[];
 }
 
@@ -201,8 +201,8 @@ export async function uploadEtradeSales(file: File): Promise<EtradeUploadRespons
   });
 }
 
-export async function getPortfolioValue(currencies = 'USD,EUR,CZK', accountingModel = 'historical'): Promise<PortfolioValueResponse> {
-  return request<PortfolioValueResponse>(`/portfolio/value?currencies=${currencies}&accounting_model=${accountingModel}`);
+export async function getPortfolioValue(currency = 'USD', accountingModel = 'historical'): Promise<PortfolioValueResponse> {
+  return request<PortfolioValueResponse>(`/portfolio/value?currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}`);
 }
 
 export async function getPortfolioHistory(

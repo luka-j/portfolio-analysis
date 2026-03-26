@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -305,11 +306,11 @@ func (s *YahooFinanceService) GetETFBreakdown(symbol string) (*ETFSummaryResult,
 }
 
 func (s *YahooFinanceService) doQuoteSummary(symbol, crumb string) (*ETFSummaryResult, error) {
-	url := fmt.Sprintf(
+	summaryURL := fmt.Sprintf(
 		"https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=topHoldings,fundProfile&crumb=%s",
-		symbol, crumb,
+		url.PathEscape(symbol), url.QueryEscape(crumb),
 	)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", summaryURL, nil)
 	if err != nil {
 		return nil, err
 	}

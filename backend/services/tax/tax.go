@@ -46,7 +46,10 @@ type TaxReportResponse struct {
 }
 
 func posKey(symbol, exchange string) string {
-	return symbol
+	if exchange == "" {
+		return symbol
+	}
+	return symbol + "@" + exchange
 }
 
 // GetReport generates the tax figures for the specified calendar year.

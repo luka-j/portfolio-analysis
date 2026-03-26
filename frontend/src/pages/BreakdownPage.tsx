@@ -2,8 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import NavBar from '../components/NavBar'
 import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } from '../api'
-
-const CURRENCIES = ['USD', 'EUR', 'CZK']
+import { CURRENCIES } from '../utils/format'
 
 // Curated colour palette — cycles for larger sections.
 const PALETTE = [

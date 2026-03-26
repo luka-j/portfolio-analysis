@@ -12,6 +12,7 @@ type Config struct {
 	DataDir            string
 	DatabaseURL        string
 	AllowedTokenHashes []string // SHA-256 hashes of allowed tokens; empty = open mode
+	CORSOrigin         string   // CORS_ORIGIN, default "http://localhost:5173"
 
 	// External API keys for fundamentals data.
 	FMPAPIKey string // FMP_API_KEY
@@ -31,6 +32,7 @@ func Load() *Config {
 		Port:        getEnv("PORT", "8080"),
 		DataDir:     getEnv("DATA_DIR", "./data"),
 		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=gofolio port=5432 sslmode=disable"),
+		CORSOrigin:  getEnv("CORS_ORIGIN", "http://localhost:5173"),
 
 		FMPAPIKey: getEnv("FMP_API_KEY", ""),
 

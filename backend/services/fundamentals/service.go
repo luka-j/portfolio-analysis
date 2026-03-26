@@ -101,6 +101,7 @@ func NewService(
 	db *gorm.DB,
 	funProviders []FundamentalsProvider,
 	bdProviders []ETFBreakdownProvider,
+	qtFetcher QuoteTypeFetcher,
 ) *Service {
 	fStates := make(map[string]*perProviderState, len(funProviders))
 	for _, p := range funProviders {
@@ -118,6 +119,7 @@ func NewService(
 	}
 	return &Service{
 		DB:                    db,
+		QuoteTypeFetcher:      qtFetcher,
 		fundamentalsProviders: funProviders,
 		breakdownProviders:    bdProviders,
 		fundamentalsStates:    fStates,
@@ -133,6 +135,7 @@ func BuildFromConfig(
 	breakdownOrder string,
 	allFundamentals map[string]FundamentalsProvider,
 	allBreakdowns map[string]ETFBreakdownProvider,
+	qtFetcher QuoteTypeFetcher,
 ) *Service {
 	var funProviders []FundamentalsProvider
 	for _, name := range splitNames(fundamentalsOrder) {
@@ -146,7 +149,7 @@ func BuildFromConfig(
 			bdProviders = append(bdProviders, p)
 		}
 	}
-	return NewService(db, funProviders, bdProviders)
+	return NewService(db, funProviders, bdProviders, qtFetcher)
 }
 
 func splitNames(s string) []string {

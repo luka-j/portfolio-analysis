@@ -71,6 +71,9 @@ func (s *Service) GetRate(from, to string, date time.Time) (float64, error) {
 			}
 		}
 	}
+	if best.Close == 0 {
+		return 0, fmt.Errorf("all FX rates zero for %s→%s on %s", from, to, date.Format("2006-01-02"))
+	}
 	return best.Close, nil
 }
 

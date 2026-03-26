@@ -5,8 +5,8 @@ import {
   getPortfolioStats, getPortfolioHistory, getMarketHistory, comparePortfolio,
   type StatsResponse, type DailyValue, type BenchmarkResult,
 } from '../api'
+import { formatDate, CURRENCIES_WITH_ORIGINAL } from '../utils/format'
 
-const CURRENCIES = ['CZK', 'USD', 'EUR', 'Original']
 const PERIODS = [
   { label: '1M', months: 1 },
   { label: '3M', months: 3 },
@@ -16,7 +16,6 @@ const PERIODS = [
 ]
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6']
 
-function formatDate(d: Date): string { return d.toISOString().slice(0, 10) }
 function getFromDate(months: number): string {
   if (months === 0) return '2000-01-01'
   const d = new Date(); d.setMonth(d.getMonth() - months)
@@ -129,7 +128,7 @@ export default function AnalysisPage() {
         {/* Controls bar */}
         <div className="flex items-center gap-4 mb-8 flex-wrap">
           <div className="flex items-center gap-1 bg-[#1a1d2e] rounded-xl p-1 border border-[#2a2e42]">
-            {CURRENCIES.map(cur => (
+            {CURRENCIES_WITH_ORIGINAL.map(cur => (
               <button key={cur} onClick={() => setCurrency(cur)}
                 className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
                   currency === cur ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-400 hover:text-slate-200'

@@ -1,23 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import NavBar from '../components/NavBar'
+import SymbolMappingModal from '../components/SymbolMappingModal'
 import { getPortfolioValue, getPortfolioTrades, updateSymbolMapping, type PositionValue, type TradeEntry } from '../api'
-
-const CURRENCIES = ['CZK', 'USD', 'EUR', 'Original']
-
-function formatCurrency(value: number, currency: string, nativeCurrency?: string): string {
-  const cur = currency === 'Original' ? (nativeCurrency || 'USD') : currency
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency', currency: cur, minimumFractionDigits: 2, maximumFractionDigits: 2,
-    }).format(value)
-  } catch (e) {
-    return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + cur
-  }
-}
-
-function formatNumber(value: number, decimals = 2): string {
-  return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
-}
+import { formatCurrency, formatNumber, CURRENCIES_WITH_ORIGINAL } from '../utils/format'
 
 export default function PortfolioPage() {
   const [currency, setCurrency] = useState('CZK')
@@ -27,15 +12,18 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  // Modal state for symbol mapping
+  const [mappingTarget, setMappingTarget] = useState<{ symbol: string; yahooSymbol?: string; exchange?: string } | null>(null)
 
   const loadData = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const val = await getPortfolioValue(CURRENCIES.join(','), acctModel)
-      const sorted = val.positions.sort((a, b) => (b.values[currency] || 0) - (a.values[currency] || 0))
+      // New API: one currency at a time; returns flat scalar fields.
+      const val = await getPortfolioValue(currency, acctModel)
+      const sorted = [...val.positions].sort((a, b) => (b.value || 0) - (a.value || 0))
       setPositions(sorted)
-      setTotalValue(val.values[currency] || 0)
+      setTotalValue(val.value || 0)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load')
     } finally {
@@ -48,33 +36,32 @@ export default function PortfolioPage() {
   // Derive portfolio-level totals from the positions array.
   const totals = positions.reduce(
     (acc, pos) => {
-      const price = pos.prices[currency] || 0
-      const costBasis = pos.cost_bases[currency] || 0
+      const price = pos.price || 0
+      const costBasis = pos.cost_basis || 0
       if (costBasis > 0) {
         acc.unrealizedGL += (price - costBasis) * pos.quantity
         acc.hasUnrealized = true
       }
-      acc.realizedGL += pos.realized_gls?.[currency] || 0
-      acc.commission += pos.commissions?.[currency] || 0
+      acc.realizedGL += pos.realized_gl || 0
+      acc.commission += pos.commission || 0
       return acc
     },
     { unrealizedGL: 0, realizedGL: 0, commission: 0, hasUnrealized: false }
   )
 
-  const handleMapSymbol = async (e: React.MouseEvent, symbol: string, currentYahooSymbol?: string, exchange?: string) => {
+  const handleMapSymbol = (e: React.MouseEvent, symbol: string, currentYahooSymbol?: string, exchange?: string) => {
     e.stopPropagation()
-    const mapped = window.prompt(`Map ${symbol} to Yahoo Finance ticker:`, currentYahooSymbol || symbol)
-    if (mapped !== null) {
-      try {
-        await updateSymbolMapping(symbol, mapped, exchange)
-        // Refetch to see updated mappings
-        const data = await getPortfolioValue(CURRENCIES.join(','), acctModel)
-        const sorted = data.positions.sort((a, b) => (b.values[currency] || 0) - (a.values[currency] || 0))
-        setPositions(sorted)
-        setTotalValue(data.values[currency] || 0)
-      } catch (err) {
-        window.alert('Failed to map symbol')
-      }
+    setMappingTarget({ symbol, yahooSymbol: currentYahooSymbol, exchange })
+  }
+
+  const handleMapConfirm = async (yahooSymbol: string) => {
+    if (!mappingTarget) return
+    try {
+      await updateSymbolMapping(mappingTarget.symbol, yahooSymbol, mappingTarget.exchange)
+      setMappingTarget(null)
+      await loadData()
+    } catch {
+      window.alert('Failed to map symbol')
     }
   }
 
@@ -86,6 +73,14 @@ export default function PortfolioPage() {
   return (
     <div className="min-h-screen bg-[#0f1117] flex flex-col">
       <NavBar />
+      {mappingTarget && (
+        <SymbolMappingModal
+          symbol={mappingTarget.symbol}
+          currentYahooSymbol={mappingTarget.yahooSymbol}
+          onConfirm={handleMapConfirm}
+          onClose={() => setMappingTarget(null)}
+        />
+      )}
       <main className="flex-1 flex items-center justify-center py-8">
         <div className="max-w-7xl w-full px-6">
         <div className="flex items-center justify-between mb-8">
@@ -104,7 +99,7 @@ export default function PortfolioPage() {
               ))}
             </div>
             <div className="flex items-center gap-1 bg-[#1a1d2e] rounded-xl p-1 border border-[#2a2e42]">
-              {CURRENCIES.map(cur => (
+              {CURRENCIES_WITH_ORIGINAL.map(cur => (
                 <button key={cur} onClick={() => setCurrency(cur)}
                   className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
                     currency === cur ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-400 hover:text-slate-200'
@@ -144,11 +139,11 @@ export default function PortfolioPage() {
 
             {/* Rows */}
             {positions.map(pos => {
-              const value = pos.values[currency] || 0
-              const price = pos.prices[currency] || 0
-              const costBasis = pos.cost_bases[currency] || 0
-              const realizedGLNative = pos.realized_gls[currency] || 0
-              const commission = pos.commissions?.[currency] || 0
+              const value = pos.value || 0
+              const price = pos.price || 0
+              const costBasis = pos.cost_basis || 0
+              const realizedGLNative = pos.realized_gl || 0
+              const commission = pos.commission || 0
               const pct = totalValue > 0 ? (value / totalValue) * 100 : 0
               const unrealizedGL = costBasis > 0
                 ? (price - costBasis) * pos.quantity
@@ -199,9 +194,9 @@ export default function PortfolioPage() {
                     </div>
                     <div className="col-span-1 text-right text-sm text-slate-300">{formatNumber(pos.quantity, 0)}</div>
                     <div className="col-span-2 text-right text-sm text-slate-300">
-                      <div>{formatNumber(pos.prices[currency] || 0)} {currency === 'Original' ? pos.native_currency : currency}</div>
-                      {(pos.cost_bases[currency] || 0) > 0 && (
-                        <div className="text-xs text-slate-500">Cost: {formatNumber(pos.cost_bases[currency])} {currency === 'Original' ? pos.native_currency : ''}</div>
+                      <div>{formatNumber(pos.price || 0)} {currency === 'Original' ? pos.native_currency : currency}</div>
+                      {(pos.cost_basis || 0) > 0 && (
+                        <div className="text-xs text-slate-500">Cost: {formatNumber(pos.cost_basis)} {currency === 'Original' ? pos.native_currency : ''}</div>
                       )}
                     </div>
                     <div className="col-span-2 text-right text-sm font-medium text-slate-200">

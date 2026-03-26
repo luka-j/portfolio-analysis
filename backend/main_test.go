@@ -134,7 +134,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	fmpProvider := fundamentals.NewFMPProvider("", cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
 	allFundamentals := map[string]fundamentals.FundamentalsProvider{"FMP": fmpProvider}
 	allBreakdowns := map[string]fundamentals.ETFBreakdownProvider{}
-	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns)
+	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns, nil)
 	breakdownService := breakdownsvc.NewService(db)
 
 	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
@@ -640,7 +640,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	fmpProvider2 := fundamentals.NewFMPProvider("", cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
 	allFundamentals2 := map[string]fundamentals.FundamentalsProvider{"FMP": fmpProvider2}
 	allBreakdowns2 := map[string]fundamentals.ETFBreakdownProvider{}
-	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2)
+	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2, nil)
 	breakdownService2 := breakdownsvc.NewService(db)
 
 	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2)

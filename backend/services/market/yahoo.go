@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"time"
 
@@ -187,11 +188,11 @@ func (s *YahooFinanceService) GetQuoteType(symbol string) (string, error) {
 		return "", fmt.Errorf("rate limiter: %w", err)
 	}
 
-	url := fmt.Sprintf(
+	chartURL := fmt.Sprintf(
 		"https://query1.finance.yahoo.com/v8/finance/chart/%s?range=1d&interval=1d",
-		symbol,
+		url.PathEscape(symbol),
 	)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", chartURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -242,9 +243,9 @@ func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) 
 		return nil, fmt.Errorf("rate limiter cancelled: %w", err)
 	}
 
-	url := fmt.Sprintf(
+	chartURL := fmt.Sprintf(
 		"https://query1.finance.yahoo.com/v8/finance/chart/%s?period1=%d&period2=%d&interval=1d&includeAdjustedClose=true",
-		symbol, from.Unix(), to.Add(24*time.Hour).Unix(),
+		url.PathEscape(symbol), from.Unix(), to.Add(24*time.Hour).Unix(),
 	)
 
 	var body []byte
@@ -261,7 +262,7 @@ func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) 
 			}
 		}
 
-		req, err := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequest("GET", chartURL, nil)
 		if err != nil {
 			return nil, err
 		}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import NavBar from '../components/NavBar';
 import { getTaxReport } from '../api';
 import type { TaxReportResponse, TaxTransaction } from '../api';
+import { escapeCSVField } from '../utils/format';
 
 export default function TaxPage() {
   const [year, setYear] = useState<number>(new Date().getFullYear() - 1);
@@ -71,8 +72,8 @@ export default function TaxPage() {
     }
 
     const csvContent = [
-      headers.join(','),
-      ...rows.map(e => e.join(','))
+      headers.map(escapeCSVField).join(','),
+      ...rows.map(e => e.map(escapeCSVField).join(','))
     ].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

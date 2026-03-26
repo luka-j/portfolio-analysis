@@ -41,7 +41,7 @@ func (s *Service) Calculate(positions []models.PositionValue, currency string) (
 	var posValues []positionWithValue
 	totalPortfolioValue := 0.0
 	for _, pos := range positions {
-		v := pos.Values[currency]
+		v := pos.Value
 		if v <= 0 {
 			continue
 		}
