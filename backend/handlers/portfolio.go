@@ -146,6 +146,21 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 		return
 	}
 
+	// Enrich bond ETF positions with effective duration from asset_fundamentals.
+	for i := range result.Positions {
+		pos := &result.Positions[i]
+		eff := pos.YahooSymbol
+		if eff == "" {
+			eff = pos.Symbol
+		}
+		var fund models.AssetFundamental
+		if err := h.Parser.DB.Select("asset_type, duration").Where("symbol = ?", eff).First(&fund).Error; err == nil {
+			if fund.AssetType == "Bond ETF" && fund.Duration != nil {
+				result.Positions[i].BondDuration = fund.Duration
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 

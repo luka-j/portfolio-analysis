@@ -15,7 +15,9 @@ import (
 	"gofolio-analysis/db"
 	"gofolio-analysis/handlers"
 	"gofolio-analysis/middleware"
+	breakdownsvc "gofolio-analysis/services/breakdown"
 	"gofolio-analysis/services/flexquery"
+	"gofolio-analysis/services/fundamentals"
 	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/market"
 	"gofolio-analysis/services/portfolio"
@@ -36,13 +38,38 @@ func main() {
 	portfolioSvc := portfolio.NewService(marketSvc, fxSvc)
 	taxSvc := tax.NewService(fxSvc)
 
+	// Build fundamentals / breakdown providers from config.
+	fmpProvider := fundamentals.NewFMPProvider(cfg.FMPAPIKey, cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
+	yahooBreakdownProvider := fundamentals.NewYahooBreakdownProvider(marketSvc, 30, 500)
+
+	allFundamentals := map[string]fundamentals.FundamentalsProvider{
+		"FMP": fmpProvider,
+	}
+	allBreakdowns := map[string]fundamentals.ETFBreakdownProvider{
+		"Yahoo": yahooBreakdownProvider,
+	}
+
+	fundamentalsSvc := fundamentals.BuildFromConfig(
+		database,
+		cfg.FundamentalsProviders,
+		cfg.BreakdownProviders,
+		allFundamentals,
+		allBreakdowns,
+	)
+	fundamentalsSvc.QuoteTypeFetcher = marketSvc
+	breakdownService := breakdownsvc.NewService(database)
+
 	// Build Gin engine.
-	r := setupRouter(cfg, parser, marketSvc, fxSvc, portfolioSvc, taxSvc)
+	r := setupRouter(cfg, parser, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: r,
 	}
+
+	// Start background fundamentals fetcher. ctx is cancelled on shutdown.
+	ctx, cancelFundamentals := context.WithCancel(context.Background())
+	fundamentalsSvc.StartBackgroundFetcher(ctx)
 
 	go func() {
 		log.Printf("Starting gofolio-analysis on :%s", cfg.Port)
@@ -56,16 +83,27 @@ func main() {
 	<-quit
 	log.Println("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	cancelFundamentals()
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	if err := srv.Shutdown(ctx2); err != nil {
 		log.Fatal("Server forced to shutdown: ", err)
 	}
 	log.Println("Server exiting")
 }
 
 // setupRouter creates the Gin engine with all routes wired. Exported for testing.
-func setupRouter(cfg *config.Config, parser *flexquery.Parser, marketSvc market.Provider, fxSvc *fx.Service, portfolioSvc *portfolio.Service, taxSvc *tax.Service) *gin.Engine {
+func setupRouter(
+	cfg *config.Config,
+	parser *flexquery.Parser,
+	marketSvc market.Provider,
+	fxSvc *fx.Service,
+	portfolioSvc *portfolio.Service,
+	taxSvc *tax.Service,
+	fundamentalsSvc *fundamentals.Service,
+	breakdownService *breakdownsvc.Service,
+) *gin.Engine {
 	r := gin.Default()
 
 	// CORS middleware
@@ -113,6 +151,10 @@ func setupRouter(cfg *config.Config, parser *flexquery.Parser, marketSvc market.
 	// Tax endpoints.
 	th := &handlers.TaxHandler{Parser: parser, TaxSvc: taxSvc}
 	api.GET("/tax/report", th.GetReport)
+
+	// Breakdown endpoint.
+	bh := handlers.NewBreakdownHandler(parser, portfolioSvc, breakdownService, fundamentalsSvc)
+	api.GET("/portfolio/breakdown", bh.GetBreakdown)
 
 	return r
 }

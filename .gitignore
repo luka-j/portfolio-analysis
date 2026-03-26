@@ -24,6 +24,7 @@ backend/testdata/pp_export.xml
 old_codereview.md
 data/*
 todo.md
+run.ps1
 
 # Frontend
 node_modules/

@@ -40,6 +40,7 @@ type xmlTrades struct {
 type xmlTrade struct {
 	Symbol          string `xml:"symbol,attr"`
 	AssetCategory   string `xml:"assetCategory,attr"`
+	SubCategory     string `xml:"subCategory,attr"`
 	Currency        string `xml:"currency,attr"`
 	ListingExchange string `xml:"listingExchange,attr"`
 	DateTime        string `xml:"dateTime,attr"`
@@ -59,6 +60,7 @@ type xmlTransfers struct {
 type xmlTransfer struct {
 	Symbol          string `xml:"symbol,attr"`
 	AssetCategory   string `xml:"assetCategory,attr"`
+	SubCategory     string `xml:"subCategory,attr"`
 	Currency        string `xml:"currency,attr"`
 	ListingExchange string `xml:"listingExchange,attr"`
 	DateTime        string `xml:"dateTime,attr"`
@@ -75,6 +77,7 @@ type xmlOpenPositions struct {
 type xmlOpenPosition struct {
 	Symbol        string `xml:"symbol,attr"`
 	AssetCategory string `xml:"assetCategory,attr"`
+	SubCategory   string `xml:"subCategory,attr"`
 	Currency      string `xml:"currency,attr"`
 	Quantity      string `xml:"quantity,attr"`
 	MarkPrice     string `xml:"markPrice,attr"`
@@ -137,22 +140,28 @@ func (p *Parser) ParseAndSave(r io.Reader, userHash string) (*models.FlexQueryDa
 		// If IB provided a stable ID, use it for O(1) dedup.
 		// Fallback to the old float-matching query only for legacy rows without an ID.
 		if t.TransactionID != "" {
-			var count int64
-			p.DB.Model(&models.Transaction{}).Where(
-				"user_id = ? AND transaction_id = ?",
-				user.ID, t.TransactionID,
-			).Count(&count)
-			if count > 0 {
+			var existing models.Transaction
+			err := p.DB.Where("user_id = ? AND transaction_id = ?", user.ID, t.TransactionID).
+				First(&existing).Error
+			if err == nil {
+				// Row already exists. Patch asset_category in case it was stored before
+				// subCategory resolution was added (old rows have "STK" instead of "ETF").
+				if existing.AssetCategory != t.AssetCategory {
+					p.DB.Model(&existing).Update("asset_category", t.AssetCategory)
+				}
 				log.Printf("Duplicate Trade skipped (id=%s): %s", t.TransactionID, t.Symbol)
 				continue
 			}
 		} else {
-			var count int64
-			p.DB.Model(&models.Transaction{}).Where(
+			var existing models.Transaction
+			err := p.DB.Where(
 				"user_id = ? AND type = ? AND symbol = ? AND date_time = ? AND quantity >= ? AND quantity <= ? AND price >= ? AND price <= ?",
 				user.ID, "Trade", t.Symbol, t.DateTime, t.Quantity-1e-8, t.Quantity+1e-8, t.Price-1e-8, t.Price+1e-8,
-			).Count(&count)
-			if count > 0 {
+			).First(&existing).Error
+			if err == nil {
+				if existing.AssetCategory != t.AssetCategory {
+					p.DB.Model(&existing).Update("asset_category", t.AssetCategory)
+				}
 				log.Printf("Duplicate Trade skipped: %s %v qty=%v price=%v", t.Symbol, t.DateTime, t.Quantity, t.Price)
 				continue
 			}
@@ -335,7 +344,7 @@ func (p *Parser) ParseBytes(raw []byte) (*models.FlexQueryData, error) {
 		data.Trades = append(data.Trades, models.Trade{
 			TransactionID:   t.TradeID,
 			Symbol:          t.Symbol,
-			AssetCategory:   t.AssetCategory,
+			AssetCategory:   resolveAssetCategory(t.AssetCategory, t.SubCategory),
 			Currency:        t.Currency,
 			ListingExchange: t.ListingExchange,
 			DateTime:        dt,
@@ -376,7 +385,7 @@ func (p *Parser) ParseBytes(raw []byte) (*models.FlexQueryData, error) {
 
 		data.Trades = append(data.Trades, models.Trade{
 			Symbol:          tr.Symbol,
-			AssetCategory:   tr.AssetCategory,
+			AssetCategory:   resolveAssetCategory(tr.AssetCategory, tr.SubCategory),
 			Currency:        tr.Currency,
 			ListingExchange: tr.ListingExchange,
 			DateTime:        dt,
@@ -392,7 +401,7 @@ func (p *Parser) ParseBytes(raw []byte) (*models.FlexQueryData, error) {
 	for _, op := range stmt.OpenPositions.Items {
 		data.OpenPositions = append(data.OpenPositions, models.OpenPosition{
 			Symbol:        op.Symbol,
-			AssetCategory: op.AssetCategory,
+			AssetCategory: resolveAssetCategory(op.AssetCategory, op.SubCategory),
 			Currency:      op.Currency,
 			Quantity:      parseFloat(op.Quantity),
 			MarkPrice:         parseFloat(op.MarkPrice),
@@ -445,6 +454,15 @@ func parseIBDateTime(dateTime, fallback string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unrecognised IB date format: %q", s)
+}
+
+// resolveAssetCategory returns a normalised asset category.
+// IB reports assetCategory="STK" for both stocks and ETFs; subCategory="ETF" distinguishes them.
+func resolveAssetCategory(assetCat, subCat string) string {
+	if assetCat == "STK" && subCat == "ETF" {
+		return "ETF"
+	}
+	return assetCat
 }
 
 func parseFloat(s string) float64 {

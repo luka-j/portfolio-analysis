@@ -130,6 +130,7 @@ type PositionValue struct {
 	RealizedGLs     map[string]float64 `json:"realized_gls"`
 	Values          map[string]float64 `json:"values"`
 	Commissions     map[string]float64 `json:"commissions"`
+	BondDuration    *float64           `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
 }
 
 // PortfolioValueResponse is the response for GET /portfolio/value.
@@ -203,4 +204,24 @@ type CompareResponse struct {
 	Currency        string            `json:"currency"`
 	AccountingModel string            `json:"accounting_model"`
 	Benchmarks      []BenchmarkResult `json:"benchmarks"`
+}
+
+// BreakdownEntry represents one slice of a portfolio breakdown dimension.
+type BreakdownEntry struct {
+	Label      string  `json:"label"`
+	Value      float64 `json:"value"`      // portfolio value in display currency
+	Percentage float64 `json:"percentage"` // 0–100
+}
+
+// BreakdownSection is one dimension of portfolio breakdown (e.g. "By Country").
+type BreakdownSection struct {
+	Title   string           `json:"title"`
+	Note    string           `json:"note,omitempty"` // optional explanatory note shown in GUI
+	Entries []BreakdownEntry `json:"entries"`
+}
+
+// BreakdownResponse is the response for GET /portfolio/breakdown.
+type BreakdownResponse struct {
+	Currency string             `json:"currency"`
+	Sections []BreakdownSection `json:"sections"`
 }

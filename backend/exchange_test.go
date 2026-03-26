@@ -14,7 +14,7 @@ import (
 // TestExchangeAwarePositions verifies that the same symbol traded on two different
 // exchanges (VUAA@LSE and VUAA@XMIL) produces two independent portfolio positions.
 func TestExchangeAwarePositions(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	// The sample XML contains VUAA traded on two exchanges:
@@ -63,7 +63,7 @@ func TestExchangeAwarePositions(t *testing.T) {
 // TestExchangeAwareTradesFilter verifies that the ?exchange= query parameter
 // properly scopes trade history to a single listing.
 func TestExchangeAwareTradesFilter(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)

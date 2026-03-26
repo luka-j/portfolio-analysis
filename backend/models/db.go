@@ -46,3 +46,30 @@ type MarketData struct {
 	Volume   int64
 	Provider string    `gorm:"default:'Yahoo'"`
 }
+
+// AssetFundamental stores fundamentals for a single security (stock, ETF, commodity).
+// Symbol is the effective ticker used to query external APIs (YahooSymbol if set, else broker Symbol).
+type AssetFundamental struct {
+	ID          uint      `gorm:"primaryKey"`
+	Symbol      string    `gorm:"uniqueIndex;not null"` // effective ticker (e.g. AAPL, VWCE.DE)
+	Name        string
+	AssetType   string    `gorm:"index"` // "Stock", "ETF", "Bond ETF", "Commodity", "Unknown"
+	Country     string    `gorm:"index"`
+	Sector      string    `gorm:"index"`
+	Exchange    string
+	Duration    *float64  // bond ETF: effective duration in years (from Yahoo bondHoldings)
+	DataSource  string    // provider that supplied this record, e.g. "FMP"
+	LastUpdated time.Time `gorm:"index"`
+}
+
+// EtfBreakdown stores aggregate country or sector weights for an ETF.
+// One row per (fund_symbol, dimension, label) triple — e.g. ("VWCE.DE", "sector", "Technology", 0.25).
+type EtfBreakdown struct {
+	ID          uint      `gorm:"primaryKey"`
+	FundSymbol  string    `gorm:"uniqueIndex:idx_etf_bd;not null;index"` // e.g. "VWCE.DE"
+	Dimension   string    `gorm:"uniqueIndex:idx_etf_bd;not null"`        // "sector" or "country"
+	Label       string    `gorm:"uniqueIndex:idx_etf_bd;not null"`        // e.g. "Technology", "United States"
+	Weight      float64                                                   // fraction 0.0–1.0
+	DataSource  string                                                    // "Yahoo"
+	LastUpdated time.Time `gorm:"index"`
+}

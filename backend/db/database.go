@@ -37,6 +37,8 @@ func Init(dsn string) *gorm.DB {
 		&models.User{},
 		&models.Transaction{},
 		&models.MarketData{},
+		&models.AssetFundamental{},
+		&models.EtfBreakdown{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)

@@ -19,7 +19,9 @@ import (
 
 	"gofolio-analysis/config"
 	"gofolio-analysis/models"
+	breakdownsvc "gofolio-analysis/services/breakdown"
 	"gofolio-analysis/services/flexquery"
+	"gofolio-analysis/services/fundamentals"
 	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/portfolio"
 	"gofolio-analysis/services/tax"
@@ -96,23 +98,31 @@ func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time) ([]mo
 
 // ---------- Test helpers ----------
 
-func setupTestServer(t *testing.T) (*httptest.Server, func()) {
+func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	t.Helper()
 
 	tmpDir, err := os.MkdirTemp("", "gofolio-test-*")
 	require.NoError(t, err)
 
 	cfg := &config.Config{
-		Port:              "0",
-		DataDir:           tmpDir,
+		Port:               "0",
+		DataDir:            tmpDir,
 		AllowedTokenHashes: nil, // open mode
+		// Default free-tier limits; no real API keys in tests.
+		FMPRequestsPerMinute: 10,
+		FMPRequestsPerDay:    250,
+		FundamentalsProviders: "FMP",
+		BreakdownProviders:    "Yahoo",
 	}
 
 	// Setup in-memory sqlite for tests
 	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", filepath.Base(tmpDir))
 	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
 	require.NoError(t, err)
-	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{})
+	db.AutoMigrate(
+		&models.User{}, &models.Transaction{}, &models.MarketData{},
+		&models.AssetFundamental{}, &models.EtfBreakdown{},
+	)
 
 	mockMarket := newMockMarketProvider()
 	fxSvc := fx.NewService(mockMarket, nil) // CNB is nil for this test
@@ -120,7 +130,14 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
 	taxSvc := tax.NewService(fxSvc)
 
-	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc)
+	// Build fundamentals and breakdown services (no real API keys = no external calls).
+	fmpProvider := fundamentals.NewFMPProvider("", cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
+	allFundamentals := map[string]fundamentals.FundamentalsProvider{"FMP": fmpProvider}
+	allBreakdowns := map[string]fundamentals.ETFBreakdownProvider{}
+	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns)
+	breakdownService := breakdownsvc.NewService(db)
+
+	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
 	ts := httptest.NewServer(router)
 
 	cleanup := func() {
@@ -128,7 +145,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 		os.RemoveAll(tmpDir)
 	}
 
-	return ts, cleanup
+	return ts, db, cleanup
 }
 
 func uploadFlexQuery(t *testing.T, ts *httptest.Server, token string) {
@@ -180,7 +197,7 @@ func readBody(t *testing.T, resp *http.Response) string {
 const testToken = "my-secret-test-token"
 
 func TestUploadFlexQuery(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -219,7 +236,7 @@ func TestUploadFlexQuery(t *testing.T) {
 }
 
 func TestAuthRequired(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	req, err := http.NewRequest("GET", ts.URL+"/api/v1/portfolio/value", nil)
@@ -233,7 +250,7 @@ func TestAuthRequired(t *testing.T) {
 }
 
 func TestGetPortfolioValue(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -260,7 +277,7 @@ func TestGetPortfolioValue(t *testing.T) {
 }
 
 func TestGetPortfolioHistory(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -285,7 +302,7 @@ func TestGetPortfolioHistory(t *testing.T) {
 }
 
 func TestGetMarketHistory(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	resp := doGet(t, ts, "/api/v1/market/history?symbol=AAPL&from=2024-06-01&to=2024-06-05", testToken)
@@ -304,7 +321,7 @@ func TestGetMarketHistory(t *testing.T) {
 }
 
 func TestGetPortfolioStats(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -331,7 +348,7 @@ func TestGetPortfolioStats(t *testing.T) {
 }
 
 func TestComparePortfolio(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -358,7 +375,7 @@ func TestComparePortfolio(t *testing.T) {
 }
 
 func TestMultipleUsers(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	// Upload with user 1.
@@ -377,7 +394,7 @@ func TestMultipleUsers(t *testing.T) {
 }
 
 func TestAccountingModels(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -406,7 +423,7 @@ func TestAccountingModels(t *testing.T) {
 }
 
 func TestGetPortfolioTrades(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -509,7 +526,7 @@ func TestGetPortfolioTrades(t *testing.T) {
 }
 
 func TestCostBasisInPortfolioValue(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -597,12 +614,19 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 		Port:               "0",
 		DataDir:            tmpDir,
 		AllowedTokenHashes: nil,
+		FMPRequestsPerMinute: 10,
+		FMPRequestsPerDay:    250,
+		FundamentalsProviders: "FMP",
+		BreakdownProviders:    "Yahoo",
 	}
 
 	// Setup in-memory sqlite for tests
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{})
+	db.AutoMigrate(
+		&models.User{}, &models.Transaction{}, &models.MarketData{},
+		&models.AssetFundamental{}, &models.EtfBreakdown{},
+	)
 
 	mockMarket := newMockMarketProvider()
 	// Add TSLA at $300
@@ -613,7 +637,13 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
 	taxSvc := tax.NewService(fxSvc)
 
-	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc)
+	fmpProvider2 := fundamentals.NewFMPProvider("", cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
+	allFundamentals2 := map[string]fundamentals.FundamentalsProvider{"FMP": fmpProvider2}
+	allBreakdowns2 := map[string]fundamentals.ETFBreakdownProvider{}
+	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2)
+	breakdownService2 := breakdownsvc.NewService(db)
+
+	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2)
 	tsServer := httptest.NewServer(router)
 	defer tsServer.Close()
 
@@ -662,7 +692,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 		tsla.Quantity, tsla.Prices["USD"], tsla.CostBases["USD"], (tsla.Prices["USD"]-tsla.CostBases["USD"])*tsla.Quantity)
 }
 func TestMapSymbol(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -698,7 +728,7 @@ func TestMapSymbol(t *testing.T) {
 }
 
 func TestPortfolioValueAccountingModels(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -746,7 +776,7 @@ func TestPortfolioValueAccountingModels(t *testing.T) {
 }
 
 func TestGetTaxReport(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -770,3 +800,58 @@ func TestGetTaxReport(t *testing.T) {
 	require.NotEmpty(t, txs)
 }
 
+func TestGetPortfolioBreakdown(t *testing.T) {
+	ts, db, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	// Upload sample portfolio.
+	uploadFlexQuery(t, ts, testToken)
+
+	// Seed AssetFundamental rows so the breakdown has something to work with.
+	now := time.Now().UTC()
+	db.Create(&models.AssetFundamental{
+		Symbol: "AAPL", Name: "Apple Inc.", AssetType: "Stock",
+		Country: "US", Sector: "Technology",
+		DataSource: "test", LastUpdated: now,
+	})
+	db.Create(&models.AssetFundamental{
+		Symbol: "VWCE.DE", Name: "Vanguard FTSE All-World ETF", AssetType: "ETF",
+		DataSource: "test", LastUpdated: now,
+	})
+	// Seed aggregate breakdown for VWCE.DE.
+	db.Create(&models.EtfBreakdown{
+		FundSymbol: "VWCE.DE", Dimension: "sector", Label: "Technology",
+		Weight: 0.25, DataSource: "test", LastUpdated: now,
+	})
+	db.Create(&models.EtfBreakdown{
+		FundSymbol: "VWCE.DE", Dimension: "sector", Label: "Healthcare",
+		Weight: 0.15, DataSource: "test", LastUpdated: now,
+	})
+	db.Create(&models.EtfBreakdown{
+		FundSymbol: "VWCE.DE", Dimension: "country", Label: "United States",
+		Weight: 0.60, DataSource: "test", LastUpdated: now,
+	})
+
+	resp := doGet(t, ts, "/api/v1/portfolio/breakdown?currency=USD", testToken)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result models.BreakdownResponse
+	err := json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+
+	assert.Equal(t, "USD", result.Currency)
+	// Expect 4 sections: By Asset Type, By Asset, By Country, By Sector.
+	assert.Len(t, result.Sections, 4)
+
+	// Each section's entries should sum to ~100% of the total.
+	for _, section := range result.Sections {
+		var totalPct float64
+		for _, e := range section.Entries {
+			totalPct += e.Percentage
+		}
+		// Allow ±5% rounding tolerance.
+		assert.InDelta(t, 100.0, totalPct, 5.0, "section %q percentages should sum to ~100", section.Title)
+	}
+}

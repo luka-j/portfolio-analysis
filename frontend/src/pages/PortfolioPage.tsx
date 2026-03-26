@@ -191,6 +191,9 @@ export default function PortfolioPage() {
                           {pos.yahoo_symbol && pos.yahoo_symbol !== pos.symbol && (
                             <span className="text-indigo-400/80">mapped: {pos.yahoo_symbol}</span>
                           )}
+                          {pos.bond_duration != null && (
+                            <span className="text-amber-400/80">dur: {pos.bond_duration.toFixed(2)}y</span>
+                          )}
                         </div>
                       </div>
                     </div>

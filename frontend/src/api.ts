@@ -57,6 +57,7 @@ export interface PositionValue {
   realized_gls: Record<string, number>;
   values: Record<string, number>;
   commissions: Record<string, number>;
+  bond_duration?: number; // bond ETF: effective duration in years
 }
 
 export interface PortfolioValueResponse {
@@ -280,4 +281,27 @@ export const updateSymbolMapping = (symbol: string, yahooSymbol: string, exchang
 
 export async function getTaxReport(year: number): Promise<TaxReportResponse> {
   return request<TaxReportResponse>(`/tax/report?year=${year}`);
+}
+
+// ---- Portfolio Breakdown ----
+
+export interface BreakdownEntry {
+  label: string;
+  value: number;
+  percentage: number;
+}
+
+export interface BreakdownSection {
+  title: string;
+  note?: string;
+  entries: BreakdownEntry[];
+}
+
+export interface BreakdownResponse {
+  currency: string;
+  sections: BreakdownSection[];
+}
+
+export async function getPortfolioBreakdown(currency = 'USD'): Promise<BreakdownResponse> {
+  return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}`);
 }

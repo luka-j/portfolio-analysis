@@ -13,7 +13,7 @@ import (
 )
 
 func TestStatsBoundaryBug(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	// Upload sample flexquery
@@ -70,7 +70,7 @@ func TestStatsBoundaryBug(t *testing.T) {
 }
 
 func TestStatsInitialDepositBug(t *testing.T) {
-	ts, cleanup := setupTestServer(t)
+	ts, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	// Upload sample flexquery

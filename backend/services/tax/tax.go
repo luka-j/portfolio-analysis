@@ -76,13 +76,18 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 			return nil, fmt.Errorf("getting fx rate for %s on %s: %w", t.Symbol, t.DateTime.Format("2006-01-02"), err)
 		}
 
-		var costNative float64
-		var benefitNative float64 = t.Price * t.Quantity
-
+		// For Czech tax purposes:
+		//   ESPP: the taxable employment income is the discount (gain) only.
+		//         benefitNative = (vestPrice − taxCostBasis) × qty
+		//         costNative    = 0  (the employee's own purchase price is not taxable income)
+		//   RSU:  the full vest value is income; there is no employee cost.
+		//         benefitNative = vestPrice × qty
+		//         costNative    = 0
+		var benefitNative float64
 		if t.BuySell == "ESPP_VEST" && t.TaxCostBasis != nil {
-			costNative = *t.TaxCostBasis * t.Quantity
+			benefitNative = (t.Price - *t.TaxCostBasis) * t.Quantity
 		} else {
-			costNative = 0
+			benefitNative = t.Price * t.Quantity
 		}
 
 		tx := TaxTransaction{
@@ -93,7 +98,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 			NativePrice:  t.Price,
 			Currency:     t.Currency,
 			ExchangeRate: rate,
-			CostCZK:      costNative * rate,
+			CostCZK:      0,
 			BenefitCZK:   benefitNative * rate,
 		}
 

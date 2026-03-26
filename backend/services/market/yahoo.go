@@ -26,17 +26,22 @@ type Provider interface {
 // YahooFinanceService fetches historical OHLCV data from Yahoo Finance
 // and caches results in the database.
 type YahooFinanceService struct {
-	DB         *gorm.DB
-	HTTPClient *http.Client
-	limiter    *rate.Limiter // 3 requests/second to avoid Yahoo 429s
+	DB             *gorm.DB
+	HTTPClient     *http.Client
+	limiter        *rate.Limiter // 3 requests/second for chart API
+	summaryLimiter *rate.Limiter // 1 request/second for quoteSummary API (more restricted)
+	crumbMgr       *CrumbManager
 }
 
 // NewYahooFinanceService creates a new Yahoo Finance service backed by DB caching.
 func NewYahooFinanceService(db *gorm.DB) *YahooFinanceService {
+	client := &http.Client{Timeout: 30 * time.Second}
 	return &YahooFinanceService{
-		DB:         db,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
-		limiter:    rate.NewLimiter(rate.Limit(3), 5), // 3 req/s, burst of 5
+		DB:             db,
+		HTTPClient:     client,
+		limiter:        rate.NewLimiter(rate.Limit(3), 5), // 3 req/s, burst of 5
+		summaryLimiter: rate.NewLimiter(rate.Limit(1), 2), // 1 req/s, burst of 2
+		crumbMgr:       newCrumbManager(client),
 	}
 }
 
@@ -85,7 +90,7 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time) ([]m
 			lastErr = err
 			// Insert a dummy marker at the start of the failing range to prevent future queries.
 			// "No data returned" means Yahoo doesn't know the ticker or date (e.g. pre-IPO).
-			if err.Error() == fmt.Sprintf("no data returned for symbol %s", symbol) || 
+			if err.Error() == fmt.Sprintf("no data returned for symbol %s", symbol) ||
 				err.Error() == "yahoo finance error: No data found, symbol may be delisted" {
 				_ = s.saveCache(symbol, []models.PricePoint{
 					{Date: rng[0], Volume: -1},
@@ -94,7 +99,7 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time) ([]m
 			}
 			continue
 		}
-		
+
 		if len(points) > 0 {
 			// If points start long after the requested start (e.g. IPO), add a dummy at the request start.
 			if points[0].Date.After(rng[0].AddDate(0, 0, 5)) {
@@ -151,6 +156,9 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time) ([]m
 type yahooChartResponse struct {
 	Chart struct {
 		Result []struct {
+			Meta struct {
+				QuoteType string `json:"quoteType"`
+			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
 				Quote []struct {
@@ -170,6 +178,62 @@ type yahooChartResponse struct {
 			Description string `json:"description"`
 		} `json:"error"`
 	} `json:"chart"`
+}
+
+// GetQuoteType returns the Yahoo Finance asset class for a symbol mapped to our internal type string
+// ("Stock", "ETF", "Commodity", or "" if unknown). Uses a minimal 1-day request — no premium quota.
+func (s *YahooFinanceService) GetQuoteType(symbol string) (string, error) {
+	if err := s.limiter.Wait(context.Background()); err != nil {
+		return "", fmt.Errorf("rate limiter: %w", err)
+	}
+
+	url := fmt.Sprintf(
+		"https://query1.finance.yahoo.com/v8/finance/chart/%s?range=1d&interval=1d",
+		symbol,
+	)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", yahooUserAgent)
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("yahoo quoteType request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("yahoo quoteType HTTP %d for %s", resp.StatusCode, symbol)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading yahoo quoteType response: %w", err)
+	}
+
+	var yResp yahooChartResponse
+	if err := json.Unmarshal(body, &yResp); err != nil {
+		return "", fmt.Errorf("parsing yahoo quoteType: %w", err)
+	}
+	if yResp.Chart.Error != nil || len(yResp.Chart.Result) == 0 {
+		return "", nil // symbol not found on Yahoo
+	}
+	return yahooQuoteTypeToAssetType(yResp.Chart.Result[0].Meta.QuoteType), nil
+}
+
+// yahooQuoteTypeToAssetType maps Yahoo's quoteType field to our internal AssetType strings.
+func yahooQuoteTypeToAssetType(qt string) string {
+	switch qt {
+	case "EQUITY":
+		return "Stock"
+	case "ETF", "MUTUALFUND":
+		return "ETF"
+	case "FUTURE":
+		return "Commodity"
+	default:
+		return ""
+	}
 }
 
 func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) ([]models.PricePoint, error) {
@@ -201,7 +265,7 @@ func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) 
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 gofolio-analysis/1.0")
+		req.Header.Set("User-Agent", yahooUserAgent)
 
 		resp, err := s.HTTPClient.Do(req)
 		if err != nil {
