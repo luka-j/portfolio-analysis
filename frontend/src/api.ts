@@ -158,6 +158,8 @@ export interface TaxTransaction {
   benefit_czk: number;
   buy_date?: string;
   buy_rate?: number;
+  buy_commission?: number;
+  sell_commission?: number;
 }
 
 export interface TaxReportSection {

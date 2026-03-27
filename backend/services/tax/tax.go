@@ -2,6 +2,7 @@ package tax
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -20,17 +21,19 @@ func NewService(fxSvc *fx.Service) *Service {
 }
 
 type TaxTransaction struct {
-	Type          string  `json:"type"`          // "ESPP_VEST", "RSU_VEST", or "SELL"
-	Symbol        string  `json:"symbol"`
-	Date          string  `json:"date"`          // YYYY-MM-DD
-	Quantity      float64 `json:"quantity"`
-	NativePrice   float64 `json:"native_price"`
-	Currency      string  `json:"currency"`
-	ExchangeRate  float64 `json:"exchange_rate"` // CZK rate for the primary event
-	CostCZK       float64 `json:"cost_czk"`
-	BenefitCZK    float64 `json:"benefit_czk"`
-	BuyDate       string  `json:"buy_date,omitempty"` // For paired sells
-	BuyRate       float64 `json:"buy_rate,omitempty"` // Exchange rate on buy
+	Type            string  `json:"type"`                       // "ESPP_VEST", "RSU_VEST", or "SELL"
+	Symbol          string  `json:"symbol"`
+	Date            string  `json:"date"`                       // YYYY-MM-DD
+	Quantity        float64 `json:"quantity"`
+	NativePrice     float64 `json:"native_price"`
+	Currency        string  `json:"currency"`
+	ExchangeRate    float64 `json:"exchange_rate"`              // CZK rate for the primary event
+	CostCZK         float64 `json:"cost_czk"`
+	BenefitCZK      float64 `json:"benefit_czk"`
+	BuyDate         string  `json:"buy_date,omitempty"`         // For paired sells
+	BuyRate         float64 `json:"buy_rate,omitempty"`         // Exchange rate on buy
+	BuyCommission   float64 `json:"buy_commission,omitempty"`   // Pro-rated buy commission, native currency
+	SellCommission  float64 `json:"sell_commission,omitempty"`  // Pro-rated sell commission, native currency
 }
 
 type TaxReportSection struct {
@@ -80,17 +83,16 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 		}
 
 		// For Czech tax purposes:
-		//   ESPP: the taxable employment income is the discount (gain) only.
-		//         benefitNative = (vestPrice − taxCostBasis) × qty
-		//         costNative    = 0  (the employee's own purchase price is not taxable income)
+		//   ESPP: the full vest FMV is the benefit; the employee's purchase price is the cost.
+		//         benefitNative = vestPrice × qty
+		//         costNative    = taxCostBasis × qty
 		//   RSU:  the full vest value is income; there is no employee cost.
 		//         benefitNative = vestPrice × qty
 		//         costNative    = 0
-		var benefitNative float64
+		benefitNative := t.Price * t.Quantity
+		var costCZK float64
 		if t.BuySell == "ESPP_VEST" && t.TaxCostBasis != nil {
-			benefitNative = (t.Price - *t.TaxCostBasis) * t.Quantity
-		} else {
-			benefitNative = t.Price * t.Quantity
+			costCZK = *t.TaxCostBasis * t.Quantity * rate
 		}
 
 		tx := TaxTransaction{
@@ -101,7 +103,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 			NativePrice:  t.Price,
 			Currency:     t.Currency,
 			ExchangeRate: rate,
-			CostCZK:      0,
+			CostCZK:      costCZK,
 			BenefitCZK:   benefitNative * rate,
 		}
 
@@ -112,10 +114,12 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 
 	// --------- Investment Income (FIFO) ---------
 	type lot struct {
-		qty   float64
-		price float64
-		date  time.Time
-		curr  string
+		qty        float64
+		origQty    float64 // original qty at purchase, for commission pro-rating
+		price      float64
+		date       time.Time
+		curr       string
+		commission float64 // absolute value of buy commission, native currency
 	}
 	openLots := make(map[string][]lot)
 
@@ -130,10 +134,12 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 		if t.Quantity > 0 {
 			// Buy, Transfer, ESPP, RSU
 			openLots[k] = append(openLots[k], lot{
-				qty:   t.Quantity,
-				price: t.Price,
-				date:  t.DateTime,
-				curr:  t.Currency,
+				qty:        t.Quantity,
+				origQty:    t.Quantity,
+				price:      t.Price,
+				date:       t.DateTime,
+				curr:       t.Currency,
+				commission: math.Abs(t.Commission),
 			})
 		} else if t.Quantity < 0 {
 			// Sell
@@ -144,6 +150,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 			// We need the sell rate if it falls inside the target year
 			inTargetYear := (t.DateTime.Year() == year)
 			var sellRate float64
+			totalSellQty := sellQty // capture full sell qty for pro-rating sell commission
 			if inTargetYear {
 				var err error
 				sellRate, err = s.FXService.GetRate(sellCurrency, "CZK", t.DateTime)
@@ -151,6 +158,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 					return nil, fmt.Errorf("getting sell fx for %s on %s: %w", t.Symbol, t.DateTime, err)
 				}
 			}
+			sellCommissionTotal := math.Abs(t.Commission)
 
 			// FIFO match
 			lots := openLots[k]
@@ -166,21 +174,28 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 						return nil, fmt.Errorf("getting buy fx for %s on %s: %w", t.Symbol, lots[0].date, err)
 					}
 
-					benefitCZK := matchQty * sellPrice * sellRate
-					costCZK := matchQty * lots[0].price * buyRate
+					// Pro-rate buy commission by the fraction of the original lot consumed
+					buyComm := matchQty / lots[0].origQty * lots[0].commission
+					// Pro-rate sell commission by the fraction of the total sell quantity
+					sellComm := matchQty / totalSellQty * sellCommissionTotal
+
+					benefitCZK := matchQty*sellPrice*sellRate - sellComm*sellRate
+					costCZK := matchQty*lots[0].price*buyRate + buyComm*buyRate
 
 					tx := TaxTransaction{
-						Type:         "SELL",
-						Symbol:       t.Symbol,
-						Date:         t.DateTime.Format("2006-01-02"),
-						Quantity:     matchQty,
-						NativePrice:  sellPrice,
-						Currency:     sellCurrency,
-						ExchangeRate: sellRate,
-						CostCZK:      costCZK,
-						BenefitCZK:   benefitCZK,
-						BuyDate:      lots[0].date.Format("2006-01-02"),
-						BuyRate:      buyRate,
+						Type:           "SELL",
+						Symbol:         t.Symbol,
+						Date:           t.DateTime.Format("2006-01-02"),
+						Quantity:       matchQty,
+						NativePrice:    sellPrice,
+						Currency:       sellCurrency,
+						ExchangeRate:   sellRate,
+						CostCZK:        costCZK,
+						BenefitCZK:     benefitCZK,
+						BuyDate:        lots[0].date.Format("2006-01-02"),
+						BuyRate:        buyRate,
+						BuyCommission:  buyComm,
+						SellCommission: sellComm,
 					}
 					resp.InvestmentIncome.Transactions = append(resp.InvestmentIncome.Transactions, tx)
 					resp.InvestmentIncome.TotalCostCZK += tx.CostCZK

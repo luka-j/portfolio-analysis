@@ -1,295 +1,259 @@
-import { useEffect, useState } from 'react';
-import NavBar from '../components/NavBar';
-import { getTaxReport } from '../api';
-import type { TaxReportResponse, TaxTransaction } from '../api';
-import { escapeCSVField } from '../utils/format';
+import { useEffect, useState } from 'react'
+import NavBar from '../components/NavBar'
+import { getTaxReport } from '../api'
+import type { TaxReportResponse, TaxTransaction } from '../api'
+import { escapeCSVField } from '../utils/format'
 
 export default function TaxPage() {
-  const [year, setYear] = useState<number>(new Date().getFullYear() - 1);
-  const [report, setReport] = useState<TaxReportResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [year, setYear] = useState<number>(new Date().getFullYear() - 1)
+  const [report, setReport] = useState<TaxReportResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     async function fetchReport() {
-      setLoading(true);
-      setError('');
+      setLoading(true)
+      setError('')
       try {
-        const data = await getTaxReport(year);
-        setReport(data);
+        const data = await getTaxReport(year)
+        setReport(data)
       } catch (err: unknown) {
-        if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError(String(err));
-        }
+        setError(err instanceof Error ? err.message : String(err))
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
     }
-    fetchReport();
-  }, [year]);
+    fetchReport()
+  }, [year])
 
   const exportToCSV = (transactions: TaxTransaction[], filename: string, isInvestment: boolean) => {
-    if (!transactions || transactions.length === 0) return;
+    if (!transactions || transactions.length === 0) return
 
-    let headers, rows;
+    let headers, rows
     if (isInvestment) {
-      headers = [
-        'Symbol', 'Sale Date', 'Buy Date', 'Quantity', 'Sell Price', 'Currency',
-        'Buy Rate', 'Sell Rate', 'Cost CZK', 'Benefit CZK', 'Net Profit CZK'
-      ];
+      headers = ['Symbol', 'Sale Date', 'Buy Date', 'Quantity', 'Sell Price', 'Currency', 'Buy Rate', 'Sell Rate', 'Buy Commission', 'Sell Commission', 'Cost CZK', 'Benefit CZK', 'Net Profit CZK']
       rows = transactions.map(t => [
-        t.symbol,
-        t.date,
-        t.buy_date || '',
-        t.quantity.toString(),
-        t.native_price.toFixed(4),
-        t.currency,
-        t.buy_rate ? t.buy_rate.toFixed(4) : '',
-        t.exchange_rate.toFixed(4),
-        t.cost_czk.toFixed(2),
-        t.benefit_czk.toFixed(2),
-        (t.benefit_czk - t.cost_czk).toFixed(2)
-      ]);
+        t.symbol, t.date, t.buy_date || '', t.quantity.toString(), t.native_price.toFixed(4), t.currency,
+        t.buy_rate ? t.buy_rate.toFixed(4) : '', t.exchange_rate.toFixed(4),
+        t.buy_commission ? t.buy_commission.toFixed(4) : '0', t.sell_commission ? t.sell_commission.toFixed(4) : '0',
+        t.cost_czk.toFixed(2), t.benefit_czk.toFixed(2), (t.benefit_czk - t.cost_czk).toFixed(2)
+      ])
     } else {
-      headers = [
-        'Type', 'Symbol', 'Date', 'Quantity', 'Native Price', 'Currency',
-        'Exchange Rate', 'Cost CZK', 'Benefit CZK', 'Net Profit CZK'
-      ];
+      headers = ['Type', 'Symbol', 'Date', 'Quantity', 'Native Price', 'Currency', 'Exchange Rate', 'Cost CZK', 'Benefit CZK', 'Net Profit CZK']
       rows = transactions.map(t => [
-        t.type,
-        t.symbol,
-        t.date,
-        t.quantity.toString(),
-        t.native_price.toFixed(4),
-        t.currency,
-        t.exchange_rate.toFixed(4),
-        t.cost_czk.toFixed(2),
-        t.benefit_czk.toFixed(2),
-        (t.benefit_czk - t.cost_czk).toFixed(2)
-      ]);
+        t.type, t.symbol, t.date, t.quantity.toString(), t.native_price.toFixed(4), t.currency,
+        t.exchange_rate.toFixed(4), t.cost_czk.toFixed(2), t.benefit_czk.toFixed(2), (t.benefit_czk - t.cost_czk).toFixed(2)
+      ])
     }
 
-    const csvContent = [
-      headers.map(escapeCSVField).join(','),
-      ...rows.map(e => e.map(escapeCSVField).join(','))
-    ].join('\n');
+    const csvContent = [headers.map(escapeCSVField).join(','), ...rows.map(e => e.map(escapeCSVField).join(','))].join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a'); link.href = url; link.setAttribute('download', filename); document.body.appendChild(link); link.click(); document.body.removeChild(link)
+  }
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i);
+  const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i)
 
   return (
-    <div className="min-h-screen bg-[#0f1117] flex flex-col text-slate-200 selection:bg-indigo-500/30 font-sans tracking-tight">
+    <div className="min-h-screen bg-[#0f1117] flex flex-col text-slate-200">
       <NavBar />
-      <main className="flex-1 flex items-center justify-center py-12 animate-fade-in">
-        <div className="max-w-7xl w-full px-6">
-        <div className="flex flex-col sm:flex-row items-baseline justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Tax Calculation</h1>
-            <p className="text-slate-400">View your Czech Republic tax figures for specific years.</p>
-          </div>
-          <div className="mt-4 sm:mt-0 flex items-center space-x-4">
-            <label htmlFor="year-select" className="text-sm font-medium text-slate-300">
-              Tax Year:
-            </label>
+      <div className="w-full flex-1 flex justify-center">
+        <main className="py-8 px-12 max-w-7xl w-full flex flex-col items-center">
+
+        <div className="flex flex-col items-center mb-8 text-center">
+          <h1 className="text-3xl font-semibold text-slate-100">Tax Report</h1>
+          <p className="text-sm text-slate-500 mt-4 max-w-xl">
+            Income and capital gains for Czech tax purposes, based on FIFO reconciliation.
+          </p>
+
+          <div className="flex items-center gap-3 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-2xl p-1.5 shadow-xl ring-1 ring-white/5 mt-6">
+            <label className="pl-4 text-sm text-slate-500">Year</label>
             <select
-              id="year-select"
               value={year}
               onChange={(e) => setYear(Number(e.target.value))}
-              className="block w-full pl-3 pr-10 py-2 text-base border-gray-600 bg-slate-800 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md shadow-sm"
+              className="bg-transparent text-slate-100 font-medium text-sm py-2 pr-5 pl-1 focus:outline-none cursor-pointer hover:text-indigo-400 transition-colors"
             >
-              {years.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
+              {years.map(y => <option key={y} value={y} className="bg-[#1a1d2e]">{y}</option>)}
             </select>
           </div>
         </div>
 
         {loading ? (
-          <div className="animate-pulse flex space-x-4">
-            <div className="h-4 bg-slate-700 rounded w-1/4"></div>
-            <div className="h-4 bg-slate-700 rounded w-3/4"></div>
+          <div className="flex flex-col items-center justify-center py-40 gap-4 text-slate-700">
+            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-[10px] font-black uppercase tracking-[0.3em]">Processing gain/loss matrix…</span>
           </div>
         ) : error ? (
-          <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded relative" role="alert">
-            <strong className="font-bold">Error loading tax report: </strong>
-            <span className="block sm:inline">{error}</span>
+          <div className="bg-red-500/10 border border-red-500/20 rounded-3xl px-10 py-6 text-red-400 text-xs font-black uppercase tracking-widest text-center shadow-2xl">
+            {error}
           </div>
         ) : report ? (
-          <div className="flex flex-col gap-12">
+          <div className="flex flex-col gap-16 w-full max-w-6xl pb-12">
+            
             {/* Section 1: Employment Income */}
-            <div className="bg-slate-800 shadow rounded-xl overflow-hidden border border-slate-700">
-              <div className="px-4 py-5 sm:px-6 flex justify-between items-center border-b border-slate-700 bg-slate-900/50">
-                <div>
-                  <h3 className="text-lg leading-6 font-medium text-white">Employment Income (Stock Plans)</h3>
-                  <p className="mt-1 max-w-2xl text-sm text-slate-400">Section 6 - ESPP and RSU Vests</p>
-                </div>
-                <button
-                  onClick={() => exportToCSV(report.employment_income.transactions, `employment_income_${year}.csv`, false)}
-                  disabled={!report.employment_income.transactions?.length}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Export Employment Income to CSV (Excel Format)"
-              >
-                Export to CSV
-              </button>
-            </div>
-            <div className="px-4 py-5 sm:p-6 text-slate-300">
-              <dl className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 bg-slate-900/30 p-4 rounded-md mb-6 border border-slate-700 pb-2 shadow-inner">
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-400">Total Cost</dt>
-                  <dd className="mt-1 text-2xl font-semibold text-rose-400">{report.employment_income.total_cost_czk.toLocaleString('cs-CZ')} CZK</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-400">Total Benefit</dt>
-                  <dd className="mt-1 text-2xl font-semibold text-emerald-400">{report.employment_income.total_benefit_czk.toLocaleString('cs-CZ')} CZK</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-400">Net Profit</dt>
-                  <dd className="mt-1 text-2xl font-semibold text-white">{(report.employment_income.total_benefit_czk - report.employment_income.total_cost_czk).toLocaleString('cs-CZ')} CZK</dd>
-                </div>
-              </dl>
-              
-              <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
-                <table className="min-w-full divide-y divide-slate-700">
-                  <thead className="bg-slate-800">
-                    <tr>
-                      <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider sm:pl-6">Type</th>
-                      <th scope="col" className="px-3 py-3.5 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Symbol</th>
-                      <th scope="col" className="px-3 py-3.5 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Date</th>
-                      <th scope="col" className="px-3 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Qty</th>
-                        <th scope="col" className="px-3 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Price (Native)</th>
-                        <th scope="col" className="px-3 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">CNB Rate</th>
-                        <th scope="col" className="px-3 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Cost (CZK)</th>
-                        <th scope="col" className="px-3 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Benefit (CZK)</th>
-                        <th scope="col" className="px-3 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">P/L (CZK)</th>
-                      </tr>
-                    </thead>
-                  <tbody className="bg-slate-900 divide-y divide-slate-800">
-                    {report.employment_income.transactions && report.employment_income.transactions.length > 0 ? (
-                      report.employment_income.transactions.map((tx, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
-                          <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm flex items-center gap-2 font-medium text-white sm:pl-6">
-                            <span className={`w-2 h-2 rounded-full ${tx.type === 'ESPP_VEST' ? 'bg-indigo-400' : 'bg-fuchsia-400'}`}></span>
-                            {tx.type}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-sm text-slate-300 font-semibold">{tx.symbol}</td>
-                          <td className="whitespace-nowrap px-3 py-4 text-sm text-slate-400">{tx.date}</td>
-                          <td className="whitespace-nowrap px-3 py-4 text-sm text-slate-300 text-right">{tx.quantity}</td>
-                            <td className="whitespace-nowrap px-3 py-4 text-sm text-slate-300 text-right">{tx.native_price.toFixed(2)} {tx.currency}</td>
-                            <td className="whitespace-nowrap px-3 py-4 text-sm text-slate-400 text-right font-mono text-xs">{tx.exchange_rate.toFixed(4)}</td>
-                            <td className="whitespace-nowrap px-3 py-4 text-sm text-rose-300 text-right">{tx.cost_czk.toLocaleString('cs-CZ', {maximumFractionDigits: 2})}</td>
-                            <td className="whitespace-nowrap px-3 py-4 text-sm text-emerald-300 text-bold text-right">{tx.benefit_czk.toLocaleString('cs-CZ', {maximumFractionDigits: 2})}</td>
-                            <td className={`whitespace-nowrap px-3 py-4 text-sm font-semibold text-right ${(tx.benefit_czk - tx.cost_czk) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {(tx.benefit_czk - tx.cost_czk) > 0 ? '+' : ''}{(tx.benefit_czk - tx.cost_czk).toLocaleString('cs-CZ', {maximumFractionDigits: 2})}
-                            </td>
-                          </tr>
-                        ))
-                    ) : (
-                      <tr>
-                        <td colSpan={8} className="whitespace-nowrap py-10 text-center text-sm text-slate-500">
-                          No employment income transactions found for {year}.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+            <section className="flex flex-col items-center">
+              <div className="flex flex-col items-center mb-6 text-center w-full">
+                <h2 className="text-2xl font-semibold text-slate-100">Employment Income</h2>
+                <p className="text-sm text-slate-500 mt-2">Section 6 — ESPP and RSU Vests</p>
               </div>
-            </div>
-          </div>
 
-          {/* Section 2: Investment Income */}
-          <div className="bg-slate-800 shadow rounded-xl overflow-hidden border border-slate-700">
-            <div className="px-4 py-5 sm:px-6 flex justify-between items-center border-b border-slate-700 bg-slate-900/50">
-              <div>
-                <h3 className="text-lg leading-6 font-medium text-white">Investment Income (Sales)</h3>
-                <p className="mt-1 max-w-2xl text-sm text-slate-400">Section 10 - Paired via FIFO</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 w-full">
+                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                  <p className="text-xs text-slate-500 mb-2">Total Cost</p>
+                  <p className="text-xl font-semibold tabular-nums text-rose-400">{report.employment_income.total_cost_czk.toLocaleString('cs-CZ')} CZK</p>
+                </div>
+                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                  <p className="text-xs text-slate-500 mb-2">Total Benefit</p>
+                  <p className="text-xl font-semibold tabular-nums text-emerald-400">{report.employment_income.total_benefit_czk.toLocaleString('cs-CZ')} CZK</p>
+                </div>
+                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                  <p className="text-xs text-slate-500 mb-2">Net Taxable</p>
+                  <p className="text-xl font-semibold tabular-nums text-white">{(report.employment_income.total_benefit_czk - report.employment_income.total_cost_czk).toLocaleString('cs-CZ')} CZK</p>
+                </div>
               </div>
-              <button
-                onClick={() => exportToCSV(report.investment_income.transactions, `investment_income_${year}.csv`, true)}
-                disabled={!report.investment_income.transactions?.length}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Export Investment Income to CSV (Excel Format)"
-              >
-                Export to CSV
-              </button>
-            </div>
-            <div className="px-4 py-5 sm:p-6 text-slate-300">
-              <dl className="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 bg-slate-900/30 p-4 rounded-md mb-6 border border-slate-700 pb-2 shadow-inner">
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-400">Total Cost</dt>
-                  <dd className="mt-1 text-2xl font-semibold text-rose-400">{report.investment_income.total_cost_czk.toLocaleString('cs-CZ')} CZK</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-400">Total Benefit</dt>
-                  <dd className="mt-1 text-2xl font-semibold text-emerald-400">{report.investment_income.total_benefit_czk.toLocaleString('cs-CZ')} CZK</dd>
-                </div>
-                <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-slate-400">Net Profit</dt>
-                  <dd className="mt-1 text-2xl font-semibold text-white">{(report.investment_income.total_benefit_czk - report.investment_income.total_cost_czk).toLocaleString('cs-CZ')} CZK</dd>
-                </div>
-              </dl>
-              
-              <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
-                <table className="min-w-full divide-y divide-slate-700">
-                  <thead className="bg-slate-800">
-                    <tr>
-                      <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider sm:pl-6">Symbol</th>
-                      <th scope="col" className="px-2 py-3.5 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Sale Date</th>
-                      <th scope="col" className="px-2 py-3.5 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">Paired Buy</th>
-                      <th scope="col" className="px-2 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Qty</th>
-                      <th scope="col" className="px-2 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Sell Price</th>
-                      <th scope="col" className="px-2 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Rates</th>
-                      <th scope="col" className="px-2 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Cost (CZK)</th>
-                      <th scope="col" className="px-2 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">Benefit (CZK)</th>
-                      <th scope="col" className="px-2 py-3.5 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">P/L (CZK)</th>
+
+              <div className="flex justify-end w-full mb-3">
+                <button
+                  onClick={() => exportToCSV(report.employment_income.transactions, `employment_${year}.csv`, false)}
+                  className="glass px-5 py-2 rounded-xl text-sm text-indigo-400 hover:text-indigo-300 transition-all"
+                >
+                  Export CSV
+                </button>
+              </div>
+
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
+                      <th className="text-left py-2.5 px-4">Event</th>
+                      <th className="text-left py-2.5 px-4">Security</th>
+                      <th className="text-left py-2.5 px-4">Date</th>
+                      <th className="text-right py-2.5 px-4">Qty</th>
+                      <th className="text-right py-2.5 px-4">FMV</th>
+                      <th className="text-right py-2.5 px-4">Cost Basis</th>
+                      <th className="text-right py-2.5 px-4">Income (CZK)</th>
                     </tr>
                   </thead>
-                  <tbody className="bg-slate-900 divide-y divide-slate-800">
-                    {report.investment_income.transactions && report.investment_income.transactions.length > 0 ? (
-                      report.investment_income.transactions.map((tx, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
-                          <td className="whitespace-nowrap py-3 pl-4 pr-3 text-sm font-bold text-white sm:pl-6">{tx.symbol}</td>
-                          <td className="whitespace-nowrap px-2 py-3 text-sm text-slate-300">{tx.date}</td>
-                          <td className="whitespace-nowrap px-2 py-3 text-sm text-slate-400">{tx.buy_date}</td>
-                          <td className="whitespace-nowrap px-2 py-3 text-sm text-slate-300 text-right">{tx.quantity.toLocaleString('cs-CZ')}</td>
-                          <td className="whitespace-nowrap px-2 py-3 text-sm text-slate-300 text-right">{tx.native_price.toFixed(2)} {tx.currency}</td>
-                          <td className="whitespace-nowrap px-2 py-3 text-xs font-mono text-slate-500 text-right leading-tight">
-                            Buy: {tx.buy_rate?.toFixed(3)} <br/>
-                            Sell: {tx.exchange_rate.toFixed(3)}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-3 text-sm text-rose-300 text-right">{tx.cost_czk.toLocaleString('cs-CZ', {maximumFractionDigits: 2})}</td>
-                          <td className="whitespace-nowrap px-2 py-3 text-sm text-emerald-300 text-right">{tx.benefit_czk.toLocaleString('cs-CZ', {maximumFractionDigits: 2})}</td>
-                          <td className={`whitespace-nowrap px-2 py-3 text-sm font-semibold text-right ${(tx.benefit_czk - tx.cost_czk) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {(tx.benefit_czk - tx.cost_czk) > 0 ? '+' : ''}{(tx.benefit_czk - tx.cost_czk).toLocaleString('cs-CZ', {maximumFractionDigits: 2})}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={9} className="whitespace-nowrap py-10 text-center text-sm text-slate-500">
-                          No investment income (sales) found for {year}.
+                  <tbody className="divide-y divide-white/[0.04]">
+                    {report.employment_income.transactions?.map((tx, idx) => {
+                      const costBasisPerShare = tx.cost_czk > 0.001 ? tx.cost_czk / (tx.quantity * tx.exchange_rate) : 0
+                      return (
+                      <tr key={idx} className="hover:bg-white/[0.02] transition-colors group">
+                        <td className="py-2.5 px-4">
+                          <span className={`px-3 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider border ${tx.type === 'ESPP_VEST' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20'}`}>{tx.type}</span>
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-200 font-bold group-hover:text-white transition-colors uppercase tracking-tight">{tx.symbol}</td>
+                        <td className="py-2.5 px-4 text-slate-500 text-xs tabular-nums">{tx.date}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-bold text-right tabular-nums">{tx.quantity}</td>
+                        <td className="py-2.5 px-4 text-right">
+                          <div className="text-xs font-black text-slate-300 tabular-nums">{tx.native_price.toFixed(2)} {tx.currency}</div>
+                          <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          {costBasisPerShare > 0.001
+                            ? <>
+                                <div className="text-xs font-black text-slate-400 tabular-nums">{costBasisPerShare.toFixed(2)} {tx.currency}</div>
+                                <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
+                              </>
+                            : <div className="text-xs font-black text-slate-700">—</div>
+                          }
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-black tabular-nums text-emerald-400">
+                          +{tx.benefit_czk.toLocaleString('cs-CZ', {maximumFractionDigits: 0})}
                         </td>
                       </tr>
-                    )}
+                    )})}
                   </tbody>
                 </table>
               </div>
-            </div>
+            </section>
+
+            {/* Section 2: Investment Income */}
+            <section className="flex flex-col items-center">
+              <div className="flex flex-col items-center mb-6 text-center w-full">
+                <h2 className="text-2xl font-semibold text-slate-100">Investment Income</h2>
+                <p className="text-sm text-slate-500 mt-2">Section 10 — Realised sales, paired via FIFO</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 w-full">
+                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                  <p className="text-xs text-slate-500 mb-2">Cost Basis</p>
+                  <p className="text-xl font-semibold tabular-nums text-rose-400">{report.investment_income.total_cost_czk.toLocaleString('cs-CZ')} CZK</p>
+                </div>
+                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                  <p className="text-xs text-slate-500 mb-2">Proceeds</p>
+                  <p className="text-xl font-semibold tabular-nums text-emerald-400">{report.investment_income.total_benefit_czk.toLocaleString('cs-CZ')} CZK</p>
+                </div>
+                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                  <p className="text-xs text-slate-500 mb-2">Net Gain</p>
+                  <p className="text-xl font-semibold tabular-nums text-white">{(report.investment_income.total_benefit_czk - report.investment_income.total_cost_czk).toLocaleString('cs-CZ')} CZK</p>
+                </div>
+              </div>
+
+              <div className="flex justify-end w-full mb-3">
+                <button
+                  onClick={() => exportToCSV(report.investment_income.transactions, `investment_${year}.csv`, true)}
+                  className="glass px-5 py-2 rounded-xl text-sm text-emerald-400 hover:text-emerald-300 transition-all"
+                >
+                  Export CSV
+                </button>
+              </div>
+
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
+                      <th className="text-left py-2.5 px-4">Security</th>
+                      <th className="text-left py-2.5 px-4">Buy Date</th>
+                      <th className="text-left py-2.5 px-4">Sell Date</th>
+                      <th className="text-right py-2.5 px-4">Qty</th>
+                      <th className="text-right py-2.5 px-4">Buy Price</th>
+                      <th className="text-right py-2.5 px-4">Sell Price</th>
+                      <th className="text-right py-2.5 px-4">Commissions</th>
+                      <th className="text-right py-2.5 px-4">Delta (CZK)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.04]">
+                    {report.investment_income.transactions?.map((tx, idx) => {
+                      const buyPriceNative = tx.buy_rate ? tx.cost_czk / (tx.quantity * tx.buy_rate) : 0
+                      const delta = tx.benefit_czk - tx.cost_czk
+                      return (
+                      <tr key={idx} className="hover:bg-white/[0.02] transition-colors group">
+                        <td className="py-2.5 px-4 text-slate-200 font-bold group-hover:text-white transition-colors uppercase tracking-tight">{tx.symbol}</td>
+                        <td className="py-2.5 px-4 text-slate-500 text-xs tabular-nums">{tx.buy_date ?? '—'}</td>
+                        <td className="py-2.5 px-4 text-slate-500 text-xs tabular-nums">{tx.date}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-bold text-right tabular-nums">{tx.quantity.toLocaleString('cs-CZ')}</td>
+                        <td className="py-2.5 px-4 text-right">
+                          <div className="text-xs font-black text-slate-400 tabular-nums">{buyPriceNative.toFixed(2)} {tx.currency}</div>
+                          <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.buy_rate?.toFixed(3) ?? '—'}</div>
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          <div className="text-xs font-black text-slate-300 tabular-nums">{tx.native_price.toFixed(2)} {tx.currency}</div>
+                          <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          {(tx.buy_commission ?? 0) > 0.0001
+                            ? <div className="text-xs font-black text-slate-500 tabular-nums">−{tx.buy_commission!.toFixed(2)} {tx.currency}</div>
+                            : <div className="text-xs font-black text-slate-700">—</div>
+                          }
+                          {(tx.sell_commission ?? 0) > 0.0001
+                            ? <div className="text-xs font-black text-slate-500 tabular-nums mt-0.5">−{tx.sell_commission!.toFixed(2)} {tx.currency}</div>
+                            : null
+                          }
+                        </td>
+                        <td className={`py-2.5 px-4 text-right font-black tabular-nums ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {delta > 0 ? '+' : ''}{delta.toLocaleString('cs-CZ', {maximumFractionDigits: 0})}
+                        </td>
+                      </tr>
+                    )})}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
-        </div>
-      ) : null}
-        </div>
-      </main>
+        ) : null}
+        </main>
+      </div>
     </div>
-);
+  )
 }

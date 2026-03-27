@@ -4,7 +4,6 @@ import NavBar from '../components/NavBar'
 import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } from '../api'
 import { CURRENCIES } from '../utils/format'
 
-// Curated colour palette — cycles for larger sections.
 const PALETTE = [
   '#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd',
   '#22d3ee', '#38bdf8', '#7dd3fc', '#bae6fd',
@@ -22,12 +21,14 @@ interface SectionCardProps {
 }
 
 const CUSTOM_TOOLTIP_STYLE = {
-  backgroundColor: '#1e2030',
-  border: '1px solid #2a2e42',
-  borderRadius: '8px',
-  padding: '8px 12px',
+  backgroundColor: 'rgba(26,29,46,0.98)',
+  border: '1px solid rgba(99,102,241,0.3)',
+  borderRadius: '20px',
+  padding: '12px 20px',
   color: '#e2e8f0',
-  fontSize: '13px',
+  fontSize: '12px',
+  backdropFilter: 'blur(32px)',
+  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
 }
 
 function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: BreakdownEntry }> }) {
@@ -35,26 +36,28 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   const d = payload[0].payload
   return (
     <div style={CUSTOM_TOOLTIP_STYLE}>
-      <p className="font-semibold text-slate-200 mb-0.5">{d.label}</p>
-      <p className="text-indigo-300">{d.percentage.toFixed(1)}%</p>
+      <p className="font-black text-slate-100 mb-1 uppercase tracking-widest">{d.label}</p>
+      <p className="text-indigo-400 font-black text-sm">{d.percentage.toFixed(1)}%</p>
     </div>
   )
 }
 
 function SectionCard({ section, formatValue }: SectionCardProps) {
   const [activeIdx, setActiveIdx] = useState<number | null>(null)
-
   const pieData = section.entries.map((e) => ({ ...e, name: e.label }))
 
   return (
-    <div className="bg-[#1a1d2e]/80 border border-[#2a2e42] rounded-2xl p-8 backdrop-blur">
-      <h2 className="text-lg font-bold text-slate-100 mb-3">{section.title}</h2>
-      {section.note && (
-        <p className="text-xs text-slate-500 mb-6 leading-snug">{section.note}</p>
-      )}
-      <div className="flex flex-col md:flex-row gap-8">
+    <div className="py-2 w-full flex flex-col items-center">
+      <div className="flex flex-col items-center mb-6 text-center">
+        <h2 className="text-2xl font-semibold text-slate-100">{section.title}</h2>
+        {section.note && (
+          <p className="text-sm text-slate-500 mt-2">{section.note}</p>
+        )}
+      </div>
+      
+      <div className="flex flex-col lg:flex-row gap-12 items-center lg:items-start w-full">
         {/* Pie chart */}
-        <div className="w-full md:w-64 h-64 flex-shrink-0">
+        <div className="w-full md:w-72 h-72 flex-shrink-0 relative">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -63,9 +66,9 @@ function SectionCard({ section, formatValue }: SectionCardProps) {
                 nameKey="label"
                 cx="50%"
                 cy="50%"
-                innerRadius="55%"
-                outerRadius="80%"
-                paddingAngle={2}
+                innerRadius="60%"
+                outerRadius="95%"
+                paddingAngle={4}
                 onMouseEnter={(_, idx) => setActiveIdx(idx)}
                 onMouseLeave={() => setActiveIdx(null)}
               >
@@ -73,62 +76,60 @@ function SectionCard({ section, formatValue }: SectionCardProps) {
                   <Cell
                     key={idx}
                     fill={sectionColor(idx)}
-                    opacity={activeIdx === null || activeIdx === idx ? 1 : 0.45}
-                    style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
+                    stroke="rgba(0,0,0,0.1)"
+                    strokeWidth={1}
+                    opacity={activeIdx === null || activeIdx === idx ? 1 : 0.25}
+                    style={{ cursor: 'pointer', transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)' }}
                   />
                 ))}
               </Pie>
               <Tooltip content={<CustomTooltip />} />
             </PieChart>
           </ResponsiveContainer>
+          {/* Inner ring for depth */}
+          <div className="absolute inset-0 m-auto w-32 h-32 rounded-full border border-white/[0.03] pointer-events-none" />
         </div>
 
         {/* Table */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 w-full max-w-2xl">
+          <div className={section.entries.length > 6 ? 'overflow-y-auto max-h-[312px]' : ''}>
           <table className="w-full text-sm">
-            <thead>
-              <tr className="text-slate-500 text-xs uppercase tracking-wide">
-                <th className="text-left pb-3 pr-6">Label</th>
-                <th className="text-right pb-3 pr-6">Value</th>
-                <th className="text-right pb-3">Share</th>
+            <thead className="sticky top-0 bg-[#0f1117] z-10">
+              <tr className="text-slate-500 text-xs font-semibold border-b border-[#2a2e42]/40">
+                <th className="text-left py-4 pr-6 w-1/2">Category</th>
+                <th className="text-right py-4 pr-6 w-32">Value</th>
+                <th className="text-right py-4">Weight</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-white/[0.04]">
               {section.entries.map((e, idx) => (
                 <tr
                   key={e.label}
-                  className="border-t border-[#2a2e42]/60 hover:bg-white/3 transition-colors"
+                  className="hover:bg-white/[0.02] transition-colors group"
                   onMouseEnter={() => setActiveIdx(idx)}
                   onMouseLeave={() => setActiveIdx(null)}
                 >
-                  <td className="py-2.5 pr-6">
-                    <div className="flex items-center gap-2.5">
+                  <td className="py-4 pr-6">
+                    <div className="flex items-center gap-3">
                       <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        className={`w-2.5 h-2.5 rounded-full flex-shrink-0 transition-transform duration-300 ${activeIdx === idx ? 'scale-125' : 'group-hover:scale-110'}`}
                         style={{ backgroundColor: sectionColor(idx) }}
                       />
-                      <span className="text-slate-200" title={e.label}>
-                        {e.label}
-                      </span>
+                      <span className="text-slate-200 text-sm group-hover:text-indigo-400 transition-colors truncate max-w-[320px]" title={e.label}>{e.label}</span>
                     </div>
                   </td>
-                  <td className="py-2.5 pr-6 text-right text-slate-400 font-mono whitespace-nowrap">
+                  <td className="py-4 pr-6 text-right text-slate-400 tabular-nums text-sm">
                     {formatValue(e.value)}
                   </td>
-                  <td className="py-2.5 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <td className="py-4 text-right">
+                    <div className="flex items-center justify-end gap-3">
+                      <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
                         <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${Math.min(e.percentage, 100)}%`,
-                            backgroundColor: sectionColor(idx),
-                          }}
+                          className={`h-full rounded-full transition-all duration-700 ease-out ${activeIdx === idx ? 'opacity-100' : 'opacity-60'}`}
+                          style={{ width: `${Math.min(e.percentage, 100)}%`, backgroundColor: sectionColor(idx) }}
                         />
                       </div>
-                      <span className="text-slate-300 w-12 text-right tabular-nums">
-                        {e.percentage.toFixed(1)}%
-                      </span>
+                      <span className="text-slate-300 font-medium text-sm w-12 text-right tabular-nums">{e.percentage.toFixed(1)}%</span>
                     </div>
                   </td>
                 </tr>
@@ -138,6 +139,7 @@ function SectionCard({ section, formatValue }: SectionCardProps) {
         </div>
       </div>
     </div>
+  </div>
   )
 }
 
@@ -178,76 +180,77 @@ export default function BreakdownPage() {
   const fmt = (v: number) => formatCurrencyValue(v, currency)
 
   return (
-    <div className="min-h-screen bg-[#0d0f1a] text-slate-200 flex flex-col">
+    <div className="min-h-screen bg-[#0f1117] text-slate-200 flex flex-col">
       <NavBar />
 
-      <div className="flex-1 flex justify-center px-8 py-10">
-      <div className="w-full max-w-6xl">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-10 gap-4">
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-              Portfolio Breakdown
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Drill into your holdings by type, asset, country, and sector — ETF weights sourced from Yahoo Finance.
+      <div className="w-full flex-1 flex justify-center">
+        <main className="mx-auto py-10 px-12 max-w-6xl w-full flex flex-col items-center">
+        <div className="w-full">
+          {/* Header centered, NO italics */}
+          <div className="flex flex-col items-center mb-12 text-center">
+            <h1 className="text-3xl font-semibold text-slate-100">Portfolio Breakdown</h1>
+            <p className="text-sm text-slate-500 mt-4 leading-relaxed max-w-xl">
+              Breakdown by asset class, geography, and sector based on current holdings.
             </p>
-          </div>
 
-          {/* Currency selector */}
-          <div className="flex items-center gap-1 bg-[#1a1d2e] border border-[#2a2e42] rounded-xl p-1">
-            {CURRENCIES.map((c) => (
-              <button
-                key={c}
-                id={`breakdown-currency-${c}`}
-                onClick={() => setCurrency(c)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150 ${
-                  currency === c
-                    ? 'bg-indigo-500/25 text-indigo-300'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* States */}
-        {loading && (
-          <div className="flex items-center justify-center py-24 gap-3 text-slate-400">
-            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            Loading breakdown…
-          </div>
-        )}
-
-        {error && !loading && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-4 text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        {!loading && !error && sections.length === 0 && (
-          <div className="text-center text-slate-500 py-24">
-            No portfolio data. Upload a FlexQuery file to get started.
-          </div>
-        )}
-
-        {!loading && !error && sections.length > 0 && (
-          <>
-            {/* Data freshness note */}
-            <div className="mb-6 text-xs text-slate-600">
-              Fundamentals and ETF sector/country weights are fetched asynchronously in the background.
-              Newly added holdings may show as "Unknown" until data has been retrieved.
-            </div>
-            <div className="flex flex-col gap-8">
-              {sections.map((s) => (
-                <SectionCard key={s.title} section={s} formatValue={fmt} />
+            {/* Currency selector — centered rounded-2xl */}
+            <div className="flex items-center gap-1 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-2xl p-1.5 shadow-xl ring-1 ring-white/5 mt-6">
+              {CURRENCIES.map((c) => (
+                <button
+                  key={c}
+                  id={`breakdown-currency-${c}`}
+                  onClick={() => setCurrency(c)}
+                  className={`px-6 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    currency === c
+                      ? 'glass active text-indigo-300'
+                      : 'text-slate-500 hover:text-slate-200'
+                  }`}
+                >
+                  {c}
+                </button>
               ))}
             </div>
-          </>
-        )}
-      </div>
+          </div>
+
+          {/* States */}
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-40 gap-4 text-slate-600">
+              <div className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm">Loading breakdowns…</span>
+            </div>
+          )}
+
+          {error && !loading && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-3xl px-10 py-6 text-red-400 text-xs font-black uppercase tracking-widest text-center shadow-2xl">
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && sections.length === 0 && (
+            <div className="text-center text-slate-800 py-40 font-black uppercase tracking-[0.4em] text-[10px] opacity-40">
+               Sync required to generate breakdown matrix
+            </div>
+          )}
+
+          {!loading && !error && sections.length > 0 && (
+            <div className="flex flex-col gap-12 animate-fade-in pb-20">
+              {sections.map((s, i) => (
+                <div key={s.title} className="w-full">
+                  <SectionCard section={s} formatValue={fmt} />
+                  {i < sections.length - 1 && (
+                    <div className="mt-4 border-t border-[#2a2e42]/40 opacity-30" />
+                  )}
+                </div>
+              ))}
+              
+              <footer className="mt-12 text-[8px] font-black text-slate-800 uppercase tracking-[0.4em] text-center leading-loose max-w-2xl mx-auto opacity-30">
+                Fundamental attribution weights are derived from aggregated security metadata. 
+                Values represent your current portfolio composition.
+              </footer>
+            </div>
+          )}
+        </div>
+        </main>
       </div>
     </div>
   )

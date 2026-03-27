@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
+import { XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import NavBar from '../components/NavBar'
 import {
   getPortfolioValue, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
@@ -16,6 +16,12 @@ const PERIODS = [
   { label: 'All', months: 0 },
 ]
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  CZK: 'Kč',
+  USD: '$',
+  EUR: '€',
+}
+
 function getFromDate(months: number): string {
   if (months === 0) return '2000-01-01'
   const d = new Date()
@@ -24,21 +30,24 @@ function getFromDate(months: number): string {
 }
 
 export default function LandingPage() {
-  const [currency, setCurrency] = useState('CZK')
+  const [currencyIdx, setCurrencyIdx] = useState(0)
+  const currency = CURRENCIES[currencyIdx]
   const [period, setPeriod] = useState(0)
   const [chartMode, setChartMode] = useState<'value' | 'twr' | 'mwr'>('value')
   const [portfolioValues, setPortfolioValues] = useState<Record<string, number>>({})
   const [history, setHistory] = useState<DailyValue[]>([])
-  const [twrHistory, setTwrHistory] = useState<DailyValue[]>([]) // real TWR curve from backend
+  const [twrHistory, setTwrHistory] = useState<DailyValue[]>([])
   const [stats, setStats] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(false)
   const [error, setError] = useState('')
   const [uploadMsg, setUploadMsg] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [uploadExpanded, setUploadExpanded] = useState(false)
 
-  // Ref to track the current load generation — used to ignore stale responses (fix 2.3).
   const loadGenRef = useRef(0)
+
+  const cycleCurrency = () => setCurrencyIdx(i => (i + 1) % CURRENCIES.length)
 
   const loadData = useCallback(async () => {
     loadGenRef.current += 1
@@ -46,14 +55,12 @@ export default function LandingPage() {
     setLoading(true)
     setError('')
     try {
-      // Fetch each currency value independently (new scalar API) + stats — all in parallel.
       const [czk, usd, eur, st] = await Promise.all([
         getPortfolioValue('CZK'),
         getPortfolioValue('USD'),
         getPortfolioValue('EUR'),
         getPortfolioStats(getFromDate(period), formatDate(new Date()), currency),
       ])
-      // Ignore if a newer call already started.
       if (gen !== loadGenRef.current) return
       setPortfolioValues({ CZK: czk.value, USD: usd.value, EUR: eur.value })
       setStats(st.statistics)
@@ -67,40 +74,28 @@ export default function LandingPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Reload chart (value history + real TWR curve) when currency/period/chartMode changes.
-  // AbortController cancels any in-flight request when deps change (fix 2.3).
   useEffect(() => {
     const controller = new AbortController()
     let cancelled = false
-
     const from = getFromDate(period)
     const to = formatDate(new Date())
-
     setChartLoading(true)
-
     const fetchChart = async () => {
       try {
         const hist = await getPortfolioHistory(from, to, currency, 'historical', controller.signal)
         if (cancelled) return
         setHistory(hist.data)
-
-        // Always keep the TWR series fresh — it's cheap once the value history is cached.
         const twrHist = await getPortfolioReturns(from, to, currency, 'historical', controller.signal)
         if (cancelled) return
         setTwrHistory(twrHist.data)
       } catch {
-        // Errors already surfaced by loadData; silently swallow here.
+        // silently swallow
       } finally {
         if (!cancelled) setChartLoading(false)
       }
     }
-
     fetchChart()
-
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
+    return () => { cancelled = true; controller.abort() }
   }, [currency, period])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -154,10 +149,6 @@ export default function LandingPage() {
     }
   }
 
-  // Build chart data based on mode.
-  // - 'value': raw portfolio value
-  // - 'twr': real cumulative TWR % from backend (fix 1.3)
-  // - 'mwr': flat scalar from the stats endpoint shown as a reference (fix 1.3, partial)
   const chartData = (() => {
     if (chartMode === 'value') {
       return history.map(d => ({ date: d.date, value: d.value }))
@@ -165,9 +156,6 @@ export default function LandingPage() {
     if (chartMode === 'twr') {
       return twrHistory.map(d => ({ date: d.date, value: d.value }))
     }
-    // MWR: the backend only returns a scalar MWR for the full period.
-    // Render a flat reference line showing the MWR % alongside the simple growth curve
-    // so the user can see how the time-weighted measure compares visually.
     const mwr = typeof stats?.mwr === 'number' ? (stats.mwr as number) * 100 : null
     return history.map(d => {
       const firstValue = history[0]?.value || 1
@@ -176,151 +164,209 @@ export default function LandingPage() {
     })
   })()
 
-  const chartLabel = chartMode === 'value'
-    ? `Portfolio Value (${currency})`
-    : chartMode === 'twr' ? 'Cumulative TWR (%)' : 'Simple Growth vs MWR (%)'
+  const mwr = typeof stats?.mwr === 'number' ? (stats.mwr as number) * 100 : null
+  const twr = typeof stats?.twr === 'number' ? (stats.twr as number) * 100 : null
+
+  const currValue = portfolioValues[currency] ?? 0
 
   return (
-    <div className="min-h-screen bg-[#0f1117] flex flex-col">
+    <div className="h-screen bg-[#0f1117] flex flex-col overflow-hidden">
       <NavBar />
-      <main className="flex-1 flex items-center justify-center py-8">
-        <div className="max-w-7xl w-full px-6">
-        {/* Header row */}
-        <div className="flex items-start justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-100">Dashboard</h1>
-            <p className="text-slate-400 text-sm mt-1">Your portfolio overview</p>
+
+      {/* Hero section centered */}
+      <div className="z-10 w-full flex flex-col items-center gap-2 pointer-events-none">
+        <h1 className="text-4xl md:text-6xl font-bold text-white tabular-nums tracking-tight [text-shadow:0_0_20px_rgba(255,255,255,0.05)] flex items-baseline gap-2">
+          <button
+            className="pointer-events-auto text-indigo-300/70 hover:text-indigo-300 px-1.5 py-0.5 rounded-lg hover:bg-white/[0.07] hover:backdrop-blur-sm transition-all duration-200 active:scale-95"
+            onClick={cycleCurrency}
+            title="Switch currency"
+          >
+            {CURRENCY_SYMBOLS[currency]}
+          </button>
+          {loading ? '—' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
+        </h1>
+
+        {/* TWR / MWR secondary indicators */}
+        {(mwr !== null || twr !== null) && (
+          <div className="flex items-center gap-8">
+            {twr !== null && (
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-xs text-slate-600">TWR</span>
+                <span className={`text-base font-semibold tabular-nums ${twr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {twr >= 0 ? '+' : ''}{twr.toFixed(2)}%
+                </span>
+              </div>
+            )}
+            {mwr !== null && (
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-xs text-slate-600">MWR</span>
+                <span className={`text-base font-semibold tabular-nums ${mwr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {mwr >= 0 ? '+' : ''}{mwr.toFixed(2)}%
+                </span>
+              </div>
+            )}
           </div>
-          <div className="flex gap-3">
-            <label className={`px-5 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-indigo-500/20 ${uploading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 border border-indigo-500/30'}`}>
-              {uploading ? 'Uploading...' : '↑ FlexQuery'}
-              <input type="file" accept=".xml" onChange={handleUpload} className="hidden" disabled={uploading} />
-            </label>
-            <label className={`px-5 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-emerald-500/20 ${uploading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30'}`}>
-              {uploading ? 'Uploading...' : '↑ E*Trade Benefits'}
-              <input type="file" accept=".xlsx" onChange={handleEtradeBenefitsUpload} className="hidden" disabled={uploading} />
-            </label>
-            <label className={`px-5 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-amber-500/20 ${uploading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 border border-amber-500/30'}`}>
-              {uploading ? 'Uploading...' : '↑ E*Trade Sales'}
-              <input type="file" accept=".xlsx" onChange={handleEtradeSalesUpload} className="hidden" disabled={uploading} />
-            </label>
-          </div>
+        )}
+
+        {/* Mode selector — simple pill toggles with proper padding */}
+        <div className="pointer-events-auto flex items-center gap-1 mt-2 bg-[#1a1d2e] rounded-2xl p-1 border border-white/6">
+          {(['value', 'twr', 'mwr'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setChartMode(mode)}
+              className={`px-5 py-1.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                chartMode === mode 
+                  ? 'glass active text-indigo-300 shadow-lg' 
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {mode === 'value' ? 'Value' : mode.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main chart area with spacing from screen edge */}
+      <div className="relative flex-1 mt-auto flex flex-col justify-end px-8 mb-6">
+        
+        {/* The chart itself — axes returned and labels added */}
+        <div className="w-full h-[65%] min-h-[350px]">
+          {chartLoading || loading ? (
+            <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
+          ) : chartData.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px]">Matrix data unavailable</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.15} />
+                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis 
+                  dataKey="date" 
+                  tick={{fontSize: 9, fill: '#334155', fontWeight: 'bold'}} 
+                  tickLine={false} 
+                  axisLine={false} 
+                  interval={Math.floor(chartData.length / 6)}
+                  dy={10}
+                />
+                <YAxis 
+                  domain={['auto', 'auto']} 
+                  tick={{fontSize: 9, fill: '#334155', fontWeight: 'bold'}} 
+                  tickLine={false} 
+                  axisLine={false} 
+                  tickFormatter={(val) => chartMode === 'value' ? formatCurrencyCompact(val, currency) : `${val.toFixed(1)}%`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(26,29,46,0.98)',
+                    border: '1px solid rgba(99,102,241,0.3)',
+                    borderRadius: '24px',
+                    fontSize: '11px',
+                    color: '#e2e8f0',
+                    backdropFilter: 'blur(32px)',
+                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                  }}
+                  itemStyle={{ fontWeight: 'black', textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                  labelStyle={{ color: '#6366f1', marginBottom: '6px', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: '900', opacity: 0.8 }}
+                  formatter={(value) => [
+                    chartMode === 'value'
+                      ? formatCurrencyCompact(Number(value), currency)
+                      : `${Number(value).toFixed(2)}%`,
+                    chartMode.toUpperCase(),
+                  ]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="#6366f1"
+                  strokeWidth={1.5}
+                  fill="url(#chartGrad)"
+                  dot={false}
+                  animationDuration={1500}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
-        {uploadMsg && (
-          <div className="mb-4 px-4 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 text-sm border border-emerald-500/20">
-            {uploadMsg}
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-4 px-4 py-2 rounded-lg bg-red-500/10 text-red-400 text-sm border border-red-500/20">
-            {error}
-          </div>
-        )}
-
-        {/* Value cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          {CURRENCIES.map(cur => (
-            <div key={cur}
-              className={`bg-[#1a1d2e] rounded-2xl px-8 py-6 border transition-all duration-200 cursor-pointer ${
-                cur === currency ? 'border-indigo-500/50 shadow-lg shadow-indigo-500/10' : 'border-[#2a2e42] hover:border-[#3a3f57]'
+        {/* Period vertical pills — middle-right */}
+        <div className="absolute right-8 top-4 bottom-56 flex flex-col items-center justify-center gap-2 z-10">
+          {PERIODS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => setPeriod(p.months)}
+              className={`w-10 h-10 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 flex items-center justify-center shadow-lg ${
+                period === p.months
+                  ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-indigo-600/20'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.05] bg-[#1a1d2e]/40 border border-white/5'
               }`}
-              onClick={() => setCurrency(cur)}
             >
-              <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">{cur}</p>
-              <p className="text-2xl font-bold mt-2 text-slate-100">
-                {loading ? '—' : formatCurrencyCompact(portfolioValues[cur] ?? 0, cur)}
-              </p>
-            </div>
+              {p.label}
+            </button>
           ))}
         </div>
 
-        {/* Chart controls */}
-        <div className="bg-[#1a1d2e] rounded-2xl border border-[#2a2e42] p-6 mb-8">
-          <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-            <div className="flex items-center gap-2">
-              {(['value', 'twr', 'mwr'] as const).map(mode => (
-                <button key={mode} onClick={() => setChartMode(mode)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                    chartMode === mode ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-                  }`}
-                >
-                  {mode === 'value' ? 'Value' : mode.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-1">
-              {PERIODS.map(p => (
-                <button key={p.label} onClick={() => setPeriod(p.months)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                    period === p.months ? 'bg-white/10 text-slate-200' : 'text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {chartMode === 'twr' && (
-            <p className="text-xs text-slate-500 mb-3">
-              Cumulative Time-Weighted Return — adjusts for deposits &amp; withdrawals so capital movements don't distort the performance metric.
-            </p>
-          )}
-
-          <div className="h-[400px]">
-            {chartLoading || loading ? (
-              <div className="h-full flex items-center justify-center text-slate-500">Loading chart...</div>
-            ) : chartData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-500">No data — upload a FlexQuery file to get started</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2e42" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false}
-                    tickFormatter={(v: number) => chartMode === 'value' ? `${(v / 1000).toFixed(0)}k` : `${v.toFixed(1)}%`}
-                  />
-                  <Tooltip
-                    contentStyle={{ background: '#1a1d2e', border: '1px solid #2a2e42', borderRadius: '12px', fontSize: '13px', color: '#e2e8f0' }}
-                    labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
-                    formatter={(value) => [
-                      chartMode === 'value' ? formatCurrencyCompact(Number(value), currency) : `${Number(value).toFixed(2)}%`,
-                      chartLabel
-                    ]}
-                  />
-                  <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} fill="url(#chartGrad)" dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-
-        {/* Stats row */}
-        {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {Object.entries(stats).map(([key, val]) => {
-              if (typeof val !== 'number') return null
-              return (
-                <div key={key} className="bg-[#1a1d2e] rounded-xl px-6 py-4 border border-[#2a2e42]">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider">{key}</p>
-                  <p className={`text-lg font-semibold mt-1 ${val >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {(val * 100).toFixed(2)}%
-                  </p>
+        {/* Upload buttons — bottom right */}
+        <div
+          className="absolute bottom-4 right-8 flex flex-col items-end gap-2 z-20"
+          onMouseEnter={() => setUploadExpanded(true)}
+          onMouseLeave={() => setUploadExpanded(false)}
+        >
+          {/* Expanded options */}
+          <div className="flex flex-col items-end gap-2">
+            {([
+              { label: 'IBKR FlexQuery',   accept: '.xml',  onChange: handleUpload,               labelCls: 'text-indigo-400',  btnCls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-600',  delay: '150ms' },
+              { label: 'E*Trade Benefits', accept: '.xlsx', onChange: handleEtradeBenefitsUpload, labelCls: 'text-emerald-400', btnCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-600', delay: '75ms'  },
+              { label: 'E*Trade Sales',    accept: '.xlsx', onChange: handleEtradeSalesUpload,    labelCls: 'text-amber-400',   btnCls: 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-600',         delay: '0ms'   },
+            ] as const).map(({ label, accept, onChange, labelCls, btnCls, delay }) => (
+              <label
+                key={label}
+                className="flex items-center gap-3 cursor-pointer"
+                style={{
+                  opacity: uploadExpanded ? 1 : 0,
+                  transform: uploadExpanded ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.97)',
+                  transition: `opacity 200ms ease ${uploadExpanded ? delay : '0ms'}, transform 200ms ease ${uploadExpanded ? delay : '0ms'}`,
+                  pointerEvents: uploadExpanded ? 'auto' : 'none',
+                }}
+              >
+                <span className={`text-[9px] font-black uppercase tracking-[0.2em] whitespace-nowrap ${labelCls}`}>{label}</span>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border hover:text-white transition-all shadow-lg active:scale-95 ${btnCls}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 </div>
-              )
-            })}
+                <input type="file" accept={accept} onChange={onChange} className="hidden" disabled={uploading} />
+              </label>
+            ))}
           </div>
-        )}
+
+          {/* Trigger button */}
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-default transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
         </div>
-      </main>
+
+        {/* Status messages — bottom left */}
+        <div className="absolute bottom-4 left-8">
+          {uploading && (
+            <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
+              <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              Processing DataMatrix…
+            </div>
+          )}
+          {uploadMsg && (
+            <div className="px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-emerald-500/10 backdrop-blur-3xl">
+              {uploadMsg}
+            </div>
+          )}
+          {error && (
+            <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-red-500/10 backdrop-blur-3xl">
+              {error}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
