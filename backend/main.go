@@ -42,11 +42,11 @@ func main() {
 	taxSvc := tax.NewService(fxSvc)
 
 	// Build fundamentals / breakdown providers from config.
-	fmpProvider := fundamentals.NewFMPProvider(cfg.FMPAPIKey, cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
+	yahooFundamentalsProvider := fundamentals.NewYahooFundamentalsProvider(marketSvc, 30)
 	yahooBreakdownProvider := fundamentals.NewYahooBreakdownProvider(marketSvc, 30, 500)
 
 	allFundamentals := map[string]fundamentals.FundamentalsProvider{
-		"FMP": fmpProvider,
+		"Yahoo": yahooFundamentalsProvider,
 	}
 	allBreakdowns := map[string]fundamentals.ETFBreakdownProvider{
 		"Yahoo": yahooBreakdownProvider,

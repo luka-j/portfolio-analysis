@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,21 @@ func parseDateRange(c *gin.Context) (time.Time, time.Time, error) {
 	return from, to, nil
 }
 
+// splitCurrencies parses a comma-separated currencies string into a non-empty slice.
+// Returns ["USD"] if the input is empty.
+func splitCurrencies(s string) []string {
+	var out []string
+	for _, c := range strings.Split(s, ",") {
+		if c = strings.TrimSpace(c); c != "" {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"USD"}
+	}
+	return out
+}
+
 // parseAccountingModel extracts the accounting_model query parameter.
 func parseAccountingModel(c *gin.Context) models.AccountingModel {
 	return models.ParseAccountingModel(c.DefaultQuery("accounting_model", "historical"))
@@ -43,6 +59,12 @@ func DateRangeFromData(data *models.FlexQueryData) (time.Time, time.Time) {
 	var earliest, latest time.Time
 
 	for _, t := range data.Trades {
+		// Skip trades that don't create holdings — they must not drive the
+		// inception date, otherwise GetDailyValues returns zero-value rows
+		// before any securities are actually held.
+		if models.IsFXTrade(t) || t.BuySell == "TRANSFER_IN" {
+			continue
+		}
 		if earliest.IsZero() || t.DateTime.Before(earliest) {
 			earliest = t.DateTime
 		}

@@ -20,10 +20,10 @@ func NewService(mp market.Provider, cnb *market.CNBProvider) *Service {
 }
 
 // GetRate returns the exchange rate from one currency to another on a given date.
-// It uses Yahoo Finance FX pairs (e.g. EURUSD=X).
+// It uses CNB for CZK pairs and Yahoo Finance FX pairs (e.g. EURUSD=X) for all others.
 // If from == to, returns 1.0.
 func (s *Service) GetRate(from, to string, date time.Time) (float64, error) {
-	if from == to || from == "Original" || to == "Original" || from == "original" || to == "original" {
+	if from == to {
 		return 1.0, nil
 	}
 
@@ -77,9 +77,11 @@ func (s *Service) GetRate(from, to string, date time.Time) (float64, error) {
 	return best.Close, nil
 }
 
-// GetSpotRate returns the latest available exchange rate.
+// GetSpotRate returns the latest available exchange rate for today.
 func (s *Service) GetSpotRate(from, to string) (float64, error) {
-	return s.GetRate(from, to, time.Now().UTC())
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	return s.GetRate(from, to, today)
 }
 
 // Convert converts an amount from one currency to another on a given date.

@@ -230,7 +230,7 @@ export default function LandingPage() {
       <div className="relative flex-1 mt-auto flex flex-col justify-end px-8 mb-6">
         
         {/* The chart itself — axes returned and labels added */}
-        <div className="w-full h-[65%] min-h-[350px]">
+        <div className="w-full h-[65%] min-h-87.5">
           {chartLoading || loading ? (
             <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
           ) : chartData.length === 0 ? (
@@ -301,7 +301,7 @@ export default function LandingPage() {
               className={`w-10 h-10 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 flex items-center justify-center shadow-lg ${
                 period === p.months
                   ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-indigo-600/20'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.05] bg-[#1a1d2e]/40 border border-white/5'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
               }`}
             >
               {p.label}

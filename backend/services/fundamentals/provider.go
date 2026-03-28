@@ -16,7 +16,7 @@ type RateLimitConfig struct {
 
 // FundamentalsProvider fetches asset fundamentals (sector, country) for a symbol.
 type FundamentalsProvider interface {
-	// Name returns the canonical provider identifier (e.g. "FMP").
+	// Name returns the canonical provider identifier (e.g. "Yahoo").
 	Name() string
 	// FetchFundamentals fetches and returns fundamentals for the given ticker.
 	// Returns nil, nil when the symbol is not found (not an error).
@@ -30,6 +30,14 @@ type ETFBreakdownData struct {
 	Rows      []models.EtfBreakdown
 	IsBondETF bool
 	Duration  *float64 // nil if not available
+}
+
+// emptyToUnknown returns "Unknown" when s is empty.
+func emptyToUnknown(s string) string {
+	if s == "" {
+		return "Unknown"
+	}
+	return s
 }
 
 // ETFBreakdownProvider fetches aggregate sector/country/bond-rating breakdown for an ETF.

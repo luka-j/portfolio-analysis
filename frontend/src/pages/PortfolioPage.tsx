@@ -1,8 +1,22 @@
 import { useState, useEffect, useCallback } from 'react'
-import NavBar from '../components/NavBar'
+import PageLayout from '../components/PageLayout'
+import SegmentedControl from '../components/SegmentedControl'
+import Spinner from '../components/Spinner'
 import SymbolMappingModal from '../components/SymbolMappingModal'
 import { getPortfolioValue, getPortfolioTrades, updateSymbolMapping, type PositionValue, type TradeEntry } from '../api'
-import { formatCurrency, formatNumber, CURRENCIES_WITH_ORIGINAL } from '../utils/format'
+import { formatCurrency, formatNumber } from '../utils/format'
+
+const FX_METHOD_OPTIONS = [
+  { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the display currency, accounting for currency movements over time.' },
+  { label: 'Spot',       value: 'spot'       as const, tooltip: "Applies today's FX rate to all prices. Shows current market value converted at the current exchange rate, regardless of when trades were made." },
+]
+
+const CURRENCY_OPTIONS = [
+  { label: 'CZK',      value: 'CZK' },
+  { label: 'USD',      value: 'USD' },
+  { label: 'EUR',      value: 'EUR' },
+  { label: 'Original', value: 'Original', tooltip: 'Shows each position in its native trading currency without any conversion applied. Totals cannot be aggregated across currencies.', tooltipAlign: 'right' as const },
+]
 
 export default function PortfolioPage() {
   const [currency, setCurrency] = useState('CZK')
@@ -68,8 +82,7 @@ export default function PortfolioPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0f1117] flex flex-col">
-      <NavBar />
+    <PageLayout>
       {mappingTarget && (
         <SymbolMappingModal
           symbol={mappingTarget.symbol}
@@ -78,8 +91,6 @@ export default function PortfolioPage() {
           onClose={() => setMappingTarget(null)}
         />
       )}
-      <div className="w-full flex-1 flex justify-center">
-        <main className="py-10 px-12 max-w-7xl w-full flex flex-col items-center">
           {/* Header centered */}
           <div className="w-full flex flex-col items-center mb-16 text-center">
             <h1 className="text-3xl font-semibold text-slate-100">Portfolio Holdings</h1>
@@ -88,26 +99,8 @@ export default function PortfolioPage() {
 
         {/* Controls — centered */}
         <div className="flex flex-wrap justify-center gap-4 mb-16">
-          <div className="flex items-center gap-1 bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
-            {(['historical', 'spot'] as const).map(m => (
-              <button key={m} onClick={() => setAcctModel(m)}
-                className={`px-6 py-2 rounded-xl text-sm font-medium capitalize transition-all ${
-                  acctModel === m ? 'glass active text-indigo-300' : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >{m}</button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1 bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
-            {CURRENCIES_WITH_ORIGINAL.map(cur => (
-              <button key={cur} onClick={() => setCurrency(cur)}
-                className={`px-6 py-2 rounded-xl text-sm font-medium transition-all ${
-                  currency === cur ? 'glass active text-indigo-300' : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                {cur}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
+          <SegmentedControl label="Display Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
         </div>
 
         {error && (
@@ -117,10 +110,7 @@ export default function PortfolioPage() {
         )}
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-4 text-slate-600">
-            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Hydrating state…</span>
-          </div>
+          <Spinner label="Hydrating state…" className="py-24" />
         ) : positions.length === 0 ? (
           <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Synchronize your data.</div>
         ) : (
@@ -160,13 +150,13 @@ export default function PortfolioPage() {
                 return (
                   <div key={posKey}>
                     <div
-                      className={`grid gap-4 px-8 py-6 items-center cursor-pointer transition-all duration-300 ${isExpanded ? 'bg-[#1a1d2e] ring-1 ring-white/5 shadow-2xl z-10' : 'hover:bg-white/[0.02]'}`}
+                      className={`grid gap-4 px-8 py-6 items-center cursor-pointer transition-all duration-300 ${isExpanded ? 'bg-[#1a1d2e] ring-1 ring-white/5 shadow-2xl z-10' : 'hover:bg-white/2'}`}
                       style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
                       onClick={() => toggleExpand(pos.symbol, pos.listing_exchange)}
                     >
                       {/* Symbol cell */}
                       <div className="col-span-2 flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center text-xs font-bold text-indigo-300 border border-white/5 flex-shrink-0 shadow-lg ring-1 ring-white/5">
+                        <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center text-xs font-bold text-indigo-300 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
                           {pos.symbol.slice(0, 2)}
                         </div>
                         <div className="min-w-0">
@@ -255,7 +245,7 @@ export default function PortfolioPage() {
 
             {/* Total row — gradient bg, strong bold font */}
             <div
-              className="grid gap-4 px-8 py-8 mt-12 border-t-2 border-[#2a2e42]/60 bg-gradient-to-r from-indigo-500/[0.04] to-purple-500/[0.04] items-center rounded-3xl ring-1 ring-white/5 shadow-2xl"
+              className="grid gap-4 px-8 py-8 mt-12 border-t-2 border-[#2a2e42]/60 bg-linear-to-r from-indigo-500/4 to-purple-500/4 items-center rounded-3xl ring-1 ring-white/5 shadow-2xl"
               style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
             >
               <div className="col-span-5 flex items-center">
@@ -296,9 +286,7 @@ export default function PortfolioPage() {
             </div>
           </div>
         )}
-        </main>
-      </div>
-    </div>
+    </PageLayout>
   )
 }
 
@@ -325,10 +313,10 @@ function TradeDetail({ symbol, exchange, displayCurrency }: { symbol: string; ex
     <div className="px-10 py-8 bg-[#0f1117]">
       <div className="flex items-center gap-3 mb-5 px-5">
         <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em]">Transactional History — {symbol}</p>
+        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em]">Transaction History — {symbol}</p>
       </div>
       <div className="bg-[#1a1d2e]/40 border border-white/5 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-3xl ring-1 ring-white/5">
-        <div className={`grid ${colsClass} gap-4 px-8 py-4 text-[9px] font-black text-slate-600 uppercase tracking-widest border-b border-white/5 bg-white/[0.02]`}>
+        <div className={`grid ${colsClass} gap-4 px-8 py-4 text-[9px] font-black text-slate-600 uppercase tracking-widest border-b border-white/5 bg-white/2`}>
           <div>Execution Date</div>
           <div>Mechanism</div>
           <div className="text-right">Quantity</div>
@@ -347,7 +335,7 @@ function TradeDetail({ symbol, exchange, displayCurrency }: { symbol: string; ex
         ) : (
           <div className="divide-y divide-white/5">
             {trades.map((trade, i) => (
-              <div key={i} className={`grid ${colsClass} gap-4 px-8 py-5 text-xs hover:bg-white/[0.03] transition-colors items-center`}>
+              <div key={i} className={`grid ${colsClass} gap-4 px-8 py-5 text-xs hover:bg-white/3 transition-colors items-center`}>
                 <div className="text-slate-400 font-bold tabular-nums">{trade.date}</div>
                 <div>
                   <span className={`px-4 py-1.5 rounded-2xl text-[9px] font-black uppercase tracking-[0.15em] border ${

@@ -40,6 +40,7 @@ type cnbResponse struct {
 
 // GetRate retrieves the CZK rate for the given currency on the specific date.
 // Returns (CZK per 1 unit of currency).
+// Retries once on transient HTTP errors.
 func (p *CNBProvider) GetRate(currency string, date time.Time) (float64, error) {
 	if currency == "CZK" {
 		return 1.0, nil
@@ -57,20 +58,37 @@ func (p *CNBProvider) GetRate(currency string, date time.Time) (float64, error) 
 	}
 
 	dateStr := targetDate.Format("2006-01-02")
-	url := fmt.Sprintf("https://api.cnb.cz/cnbapi/exrates/daily?date=%s", dateStr)
+	apiURL := fmt.Sprintf("https://api.cnb.cz/cnbapi/exrates/daily?date=%s", dateStr)
 
-	req, _ := http.NewRequest("GET", url, nil)
-	resp, err := p.HTTPClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("cnb request: %w", err)
+	var body []byte
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequest("GET", apiURL, nil)
+		if err != nil {
+			return 0, fmt.Errorf("cnb request: %w", err)
+		}
+		resp, err := p.HTTPClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("cnb request: %w", err)
+			continue
+		}
+		body, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("reading cnb response: %w", err)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("cnb returned status %d", resp.StatusCode)
+			continue
+		}
+		lastErr = nil
+		break
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("cnb returned status %d", resp.StatusCode)
+	if lastErr != nil {
+		return 0, lastErr
 	}
 
-	body, _ := io.ReadAll(resp.Body)
 	var data cnbResponse
 	if err := json.Unmarshal(body, &data); err != nil {
 		return 0, fmt.Errorf("parsing cnb: %w", err)
@@ -118,9 +136,11 @@ func (p *CNBProvider) GetRate(currency string, date time.Time) (float64, error) 
 	}
 
 	if !foundMatch {
-		// Attempt a 5-day lookback directly in the DB if CNB just strictly refused or didn't provide this symbol.
+		// Fallback: look for the most recent cached rate within 7 days (weekends/holidays).
+		lookback := targetDate.AddDate(0, 0, -7)
 		var fallback models.MarketData
-		if err := p.DB.Where("symbol = ? AND date <= ? AND close > 0 AND provider = 'CNB'", symbol, targetDate).Order("date DESC").First(&fallback).Error; err == nil {
+		if err := p.DB.Where("symbol = ? AND date >= ? AND date <= ? AND close > 0 AND provider = 'CNB'",
+			symbol, lookback, targetDate).Order("date DESC").First(&fallback).Error; err == nil {
 			return fallback.Close, nil
 		}
 		return 0, fmt.Errorf("currency %s not found in CNB rates for %s", currency, dateStr)

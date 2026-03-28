@@ -127,19 +127,31 @@ type UploadResponse struct {
 	CashTransactionsCount int    `json:"cash_transactions_count"`
 }
 
-// PositionValue shows one position's value in the requested display currency.
+// PositionValue shows one position's value in one or more display currencies.
+// Prices, CostBases, and Values are maps keyed by currency code (e.g. "USD", "CZK").
+// They are populated for every currency requested via the ?currencies param.
+// The singular Price/CostBasis/Value fields hold the primary (first) currency for
+// backward compatibility.
 type PositionValue struct {
-	Symbol          string   `json:"symbol"`
-	ListingExchange string   `json:"listing_exchange,omitempty"`
-	Quantity        float64  `json:"quantity"`
-	NativeCurrency  string   `json:"native_currency"`
-	YahooSymbol     string   `json:"yahoo_symbol,omitempty"`
-	Price           float64  `json:"price"`
-	CostBasis       float64  `json:"cost_basis"`
-	RealizedGL      float64  `json:"realized_gl"`
-	Value           float64  `json:"value"`
-	Commission      float64  `json:"commission"`
-	BondDuration    *float64 `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
+	Symbol          string  `json:"symbol"`
+	ListingExchange string  `json:"listing_exchange,omitempty"`
+	Quantity        float64 `json:"quantity"`
+	NativeCurrency  string  `json:"native_currency"`
+	YahooSymbol     string  `json:"yahoo_symbol,omitempty"`
+
+	// Per-currency maps (populated when ?currencies is used).
+	Prices    map[string]float64 `json:"prices,omitempty"`
+	CostBases map[string]float64 `json:"cost_bases,omitempty"`
+	Values    map[string]float64 `json:"values,omitempty"`
+
+	// Primary-currency scalars (backward compatibility; equal to maps[primary]).
+	Price      float64  `json:"price"`
+	CostBasis  float64  `json:"cost_basis"`
+	RealizedGL float64  `json:"realized_gl"`
+	Value      float64  `json:"value"`
+	Commission float64  `json:"commission"`
+
+	BondDuration *float64 `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
 }
 
 // PortfolioValueResponse is the response for GET /portfolio/value.

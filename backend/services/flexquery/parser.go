@@ -236,7 +236,8 @@ func (p *Parser) ParseAndSave(r io.Reader, userHash string) (*models.FlexQueryDa
 func (p *Parser) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 	var user models.User
 	if err := p.DB.Where(models.User{TokenHash: userHash}).First(&user).Error; err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		// User has never uploaded data — return an empty portfolio instead of an error.
+		return &models.FlexQueryData{}, nil
 	}
 
 	var dbTxns []models.Transaction

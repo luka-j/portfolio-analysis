@@ -135,12 +135,40 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 		return
 	}
 
-	currency := c.DefaultQuery("currency", "USD")
+	// Support ?currencies=USD,CZK (plural) with ?currency=USD as fallback.
+	currenciesStr := c.DefaultQuery("currencies", c.DefaultQuery("currency", "USD"))
+	currencies := splitCurrencies(currenciesStr)
+	primaryCurrency := currencies[0]
 	acctModel := parseAccountingModel(c)
-	result, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel)
+
+	result, err := h.PortfolioService.GetCurrentValue(data, primaryCurrency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// For additional currencies, compute and merge into the per-currency maps.
+	for _, cur := range currencies[1:] {
+		extra, err := h.PortfolioService.GetCurrentValue(data, cur, acctModel)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// Index extra positions by (symbol, exchange) to match with primary results.
+		type posKey struct{ symbol, exchange string }
+		extraByKey := make(map[posKey]*models.PositionValue, len(extra.Positions))
+		for j := range extra.Positions {
+			p := &extra.Positions[j]
+			extraByKey[posKey{p.Symbol, p.ListingExchange}] = p
+		}
+		for i := range result.Positions {
+			p := &result.Positions[i]
+			if ep, ok := extraByKey[posKey{p.Symbol, p.ListingExchange}]; ok {
+				p.Prices[cur] = ep.Price
+				p.CostBases[cur] = ep.CostBasis
+				p.Values[cur] = ep.Value
+			}
+		}
 	}
 
 	// Enrich bond ETF positions with effective duration from asset_fundamentals.

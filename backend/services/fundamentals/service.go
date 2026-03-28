@@ -15,10 +15,10 @@ import (
 	"gofolio-analysis/models"
 )
 
-// QuoteTypeFetcher resolves a symbol's asset class using a free price API (no premium quota).
+// QuoteTypeFetcher resolves a symbol's asset class and display name using a free price API (no premium quota).
 // Implemented by *market.YahooFinanceService.
 type QuoteTypeFetcher interface {
-	GetQuoteType(symbol string) (string, error)
+	GetQuoteType(symbol string) (string, string, error)
 }
 
 // perProviderState tracks request counters and cooldown timers for one external provider.
@@ -193,7 +193,7 @@ func (s *Service) TriggerFetch() {
 //
 //  1. Bootstrap AssetType from the IB broker statement (already in DB, free).
 //  2. Fill remaining unknowns from Yahoo Finance quoteType (free, same API).
-//  3. FMP — country / sector for symbols still incomplete or stale.
+//  3. Fundamentals provider — name / country / sector for symbols still incomplete or stale.
 //  4. Yahoo quoteSummary — aggregate sector/country breakdown for confirmed ETFs.
 //
 // All queues are built from the database each run — safe across any restart.
@@ -209,7 +209,7 @@ func (s *Service) runFetchCycle(ctx context.Context) {
 	}
 	s.bootstrapAssetTypes(ctx, allSymbols)
 
-	// Step 3: FMP enrichment (country / sector) for stale or incomplete records.
+	// Step 3: fundamentals provider enrichment (name / country / sector) for stale or incomplete records.
 	funQueue := s.buildFundamentalsQueue(allSymbols, today)
 	if len(funQueue) > 0 {
 		log.Printf("fundamentals: queueing %d symbols for fundamentals enrichment", len(funQueue))
@@ -309,8 +309,8 @@ func (s *Service) hasMarketData(symbol string) bool {
 //  1. IB broker AssetCategory from the transactions table (already in DB).
 //  2. Yahoo Finance quoteType via a minimal 1-day chart request.
 //
-// FMP is NOT called here. Symbols that remain unknown after
-// both free sources are left for FMP in buildFundamentalsQueue.
+// The fundamentals provider is NOT called here. Symbols that remain unknown after
+// both free sources are left for the fundamentals provider in buildFundamentalsQueue.
 func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 	ibCount, yahooCount, skipCount := 0, 0, 0
 	for _, sym := range symbols {
@@ -319,8 +319,8 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 		}
 
 		// Skip if already definitively classified by IB itself.
-		// If the type was set by a different source (FMP, Yahoo, AV), let IB re-confirm —
-		// those sources can misclassify (e.g. FMP marks ETFs as Stock).
+		// If the type was set by an external source, let IB re-confirm —
+		// external sources can misclassify (e.g. quoteType maps MUTUALFUND → ETF).
 		var rec models.AssetFundamental
 		if err := s.DB.Where("symbol = ?", sym).First(&rec).Error; err == nil {
 			if isDefinitiveAssetType(rec.AssetType) && rec.DataSource == "IB" {
@@ -331,18 +331,18 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 
 		// Tier 0: IB broker category — definitive for ETF, Commodity, Bond; ambiguous for STK.
 		if ibType := s.ibAssetType(sym); ibType != "" {
-			s.seedAssetType(sym, ibType, "IB")
+			s.seedAssetType(sym, ibType, "IB", "")
 			ibCount++
 			continue
 		}
 
 		// Tier 0.5: Yahoo Finance quoteType — free, already made for pricing anyway.
 		if s.QuoteTypeFetcher != nil {
-			qt, err := s.QuoteTypeFetcher.GetQuoteType(sym)
+			qt, name, err := s.QuoteTypeFetcher.GetQuoteType(sym)
 			if err != nil {
 				log.Printf("fundamentals: Yahoo quoteType %s error: %v", sym, err)
 			} else if qt != "" {
-				s.seedAssetType(sym, qt, "Yahoo")
+				s.seedAssetType(sym, qt, "Yahoo", name)
 				yahooCount++
 				continue
 			}
@@ -385,20 +385,25 @@ func (s *Service) ibAssetType(symbol string) string {
 	}
 }
 
-// seedAssetType writes an AssetType into the DB for symbol.
+// seedAssetType writes an AssetType (and optionally a name) into the DB for symbol.
 // Creates a new record if none exists. If a record exists, only overwrites when
 // its current AssetType is empty or "Unknown" — never downgrades a richer record.
 // In particular, "Bond ETF" is never downgraded back to "ETF" even by IB.
-func (s *Service) seedAssetType(symbol, assetType, source string) {
+// name is written only when non-empty and the existing record has no name yet.
+func (s *Service) seedAssetType(symbol, assetType, source, name string) {
 	now := time.Now().UTC()
 	var rec models.AssetFundamental
 	if err := s.DB.Where("symbol = ?", symbol).First(&rec).Error; err != nil {
-		if err2 := s.DB.Create(&models.AssetFundamental{
+		newRec := models.AssetFundamental{
 			Symbol:      symbol,
 			AssetType:   assetType,
 			DataSource:  source,
 			LastUpdated: now,
-		}).Error; err2 != nil {
+		}
+		if name != "" {
+			newRec.Name = name
+		}
+		if err2 := s.DB.Create(&newRec).Error; err2 != nil {
 			log.Printf("fundamentals: seed create %s: %v", symbol, err2)
 		}
 		return
@@ -408,23 +413,26 @@ func (s *Service) seedAssetType(symbol, assetType, source string) {
 		return
 	}
 	if rec.AssetType == "" || rec.AssetType == "Unknown" || source == "IB" {
-		if err := s.DB.Model(&rec).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"asset_type":   assetType,
 			"data_source":  source,
 			"last_updated": now,
-		}).Error; err != nil {
+		}
+		if name != "" && rec.Name == "" {
+			updates["name"] = name
+		}
+		if err := s.DB.Model(&rec).Updates(updates).Error; err != nil {
 			log.Printf("fundamentals: seed update %s: %v", symbol, err)
 		}
 	}
 }
 
-// ── Tier 1: FMP queue ─────────────────────────────────────────────────────────
+// ── Tier 1: fundamentals enrichment queue ─────────────────────────────────────
 
-// buildFundamentalsQueue returns symbols for FMP enrichment, sorted oldest-first.
+// buildFundamentalsQueue returns symbols for fundamentals enrichment, sorted oldest-first.
 // A symbol is included when ALL of the following hold:
 //   - It is not updated today (data doesn't change intra-day).
-//   - Its AssetType is unresolved ("", "Unknown") OR its Country field is empty
-//     (FMP has sector/country data we haven't fetched yet).
+//   - Its AssetType is unresolved ("", "Unknown") OR its Name/Country field is empty.
 func (s *Service) buildFundamentalsQueue(symbols []string, today time.Time) []string {
 	type entry struct {
 		name        string
@@ -441,7 +449,7 @@ func (s *Service) buildFundamentalsQueue(symbols []string, today time.Time) []st
 		if sameDay(rec.LastUpdated, today) {
 			continue // fresh — skip
 		}
-		if rec.AssetType == "Unknown" || rec.AssetType == "" || rec.Country == "" {
+		if rec.AssetType == "Unknown" || rec.AssetType == "" || rec.Name == "" || rec.Country == "" {
 			queue = append(queue, entry{sym, rec.LastUpdated})
 		}
 	}
@@ -485,7 +493,7 @@ func (s *Service) fetchOneFundamentals(symbol string) {
 		}
 		if fund == nil {
 			log.Printf("fundamentals: %s profile not found for %s", p.Name(), symbol)
-			// FMP has no profile — write a stub so we don't retry too aggressively.
+			// Provider has no profile — write a stub so we don't retry too aggressively.
 			s.upsertFundamentals(symbol, &models.AssetFundamental{
 				Symbol:      symbol,
 				AssetType:   "Unknown",
@@ -582,7 +590,7 @@ func (s *Service) updateBondETFMeta(symbol string, duration *float64) {
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
-// upsertFundamentals writes/updates an AssetFundamental row (full record from FMP).
+// upsertFundamentals writes/updates an AssetFundamental row.
 func (s *Service) upsertFundamentals(symbol string, f *models.AssetFundamental) {
 	err := s.DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "symbol"}},

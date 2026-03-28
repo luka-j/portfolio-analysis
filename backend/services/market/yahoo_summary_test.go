@@ -310,3 +310,122 @@ func TestGetETFBreakdownDetectsBondETF(t *testing.T) {
 		assert.NotEqual(t, "sector", r.Dimension)
 	}
 }
+
+// ---------- GetAssetProfile tests ----------
+
+func assetProfileResponse(assetLongName, country, sector, fundLongName, priceLongName, exchangeName string) string {
+	return fmt.Sprintf(`{
+		"quoteSummary": {
+			"result": [{
+				"assetProfile": {
+					"longName": %q,
+					"country": %q,
+					"sector": %q
+				},
+				"fundProfile": {
+					"longName": %q
+				},
+				"price": {
+					"longName": %q,
+					"exchangeName": %q
+				}
+			}],
+			"error": null
+		}
+	}`, assetLongName, country, sector, fundLongName, priceLongName, exchangeName)
+}
+
+func TestGetAssetProfileStock(t *testing.T) {
+	transport := &mockSummaryTransport{
+		responses: []mockResponse{
+			{status: 200, body: "<html></html>", cookies: []*http.Cookie{{Name: "A3", Value: "ck"}}},
+			{status: 200, body: "crumb1"},
+			{status: 200, body: assetProfileResponse("Apple Inc.", "United States", "Technology", "", "Apple Inc.", "NMS")},
+		},
+	}
+	svc := buildSummaryService(transport)
+
+	profile, err := svc.GetAssetProfile("AAPL")
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	assert.Equal(t, "Apple Inc.", profile.Name)
+	assert.Equal(t, "United States", profile.Country)
+	assert.Equal(t, "Technology", profile.Sector)
+	assert.Equal(t, "NMS", profile.Exchange)
+}
+
+func TestGetAssetProfileETFFallsBackToFundProfile(t *testing.T) {
+	// ETFs don't populate assetProfile.longName — name comes from fundProfile.
+	transport := &mockSummaryTransport{
+		responses: []mockResponse{
+			{status: 200, body: "<html></html>", cookies: []*http.Cookie{{Name: "A3", Value: "ck"}}},
+			{status: 200, body: "crumb1"},
+			{status: 200, body: assetProfileResponse("", "", "", "Vanguard FTSE All-World UCITS ETF", "", "LSE")},
+		},
+	}
+	svc := buildSummaryService(transport)
+
+	profile, err := svc.GetAssetProfile("VWCE.L")
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	assert.Equal(t, "Vanguard FTSE All-World UCITS ETF", profile.Name)
+	assert.Equal(t, "", profile.Country) // ETFs have no country in assetProfile
+	assert.Equal(t, "LSE", profile.Exchange)
+}
+
+func TestGetAssetProfileFallsBackToPriceLongName(t *testing.T) {
+	// Last-resort name source when both assetProfile and fundProfile are empty.
+	transport := &mockSummaryTransport{
+		responses: []mockResponse{
+			{status: 200, body: "<html></html>", cookies: []*http.Cookie{{Name: "A3", Value: "ck"}}},
+			{status: 200, body: "crumb1"},
+			{status: 200, body: assetProfileResponse("", "", "", "", "Some Asset Name", "NYSE")},
+		},
+	}
+	svc := buildSummaryService(transport)
+
+	profile, err := svc.GetAssetProfile("XYZ")
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	assert.Equal(t, "Some Asset Name", profile.Name)
+	assert.Equal(t, "NYSE", profile.Exchange)
+}
+
+func TestGetAssetProfileSymbolNotFound(t *testing.T) {
+	transport := &mockSummaryTransport{
+		responses: []mockResponse{
+			{status: 200, body: "<html></html>", cookies: []*http.Cookie{{Name: "A3", Value: "ck"}}},
+			{status: 200, body: "crumb1"},
+			// All name/country/sector fields empty → profile is nil.
+			{status: 200, body: assetProfileResponse("", "", "", "", "", "")},
+		},
+	}
+	svc := buildSummaryService(transport)
+
+	profile, err := svc.GetAssetProfile("NOTFOUND")
+	require.NoError(t, err)
+	assert.Nil(t, profile, "symbol with no data should return nil profile")
+}
+
+func TestGetAssetProfileRetriesOn401(t *testing.T) {
+	transport := &mockSummaryTransport{
+		responses: []mockResponse{
+			// Initial crumb fetch
+			{status: 200, body: "<html></html>", cookies: []*http.Cookie{{Name: "A3", Value: "ck1"}}},
+			{status: 200, body: "crumb1"},
+			// First quoteSummary attempt → 401
+			{status: 401, body: "Unauthorized"},
+			// Crumb refresh
+			{status: 200, body: "<html></html>", cookies: []*http.Cookie{{Name: "A3", Value: "ck2"}}},
+			{status: 200, body: "crumb2"},
+			// Retry → success
+			{status: 200, body: assetProfileResponse("Microsoft Corporation", "United States", "Technology", "", "", "NMS")},
+		},
+	}
+	svc := buildSummaryService(transport)
+
+	profile, err := svc.GetAssetProfile("MSFT")
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	assert.Equal(t, "Microsoft Corporation", profile.Name)
+}

@@ -105,13 +105,10 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	require.NoError(t, err)
 
 	cfg := &config.Config{
-		Port:               "0",
-		DataDir:            tmpDir,
-		AllowedTokenHashes: nil, // open mode
-		// Default free-tier limits; no real API keys in tests.
-		FMPRequestsPerMinute: 10,
-		FMPRequestsPerDay:    250,
-		FundamentalsProviders: "FMP",
+		Port:                  "0",
+		DataDir:               tmpDir,
+		AllowedTokenHashes:    nil, // open mode
+		FundamentalsProviders: "Yahoo",
 		BreakdownProviders:    "Yahoo",
 	}
 
@@ -130,9 +127,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
 	taxSvc := tax.NewService(fxSvc)
 
-	// Build fundamentals and breakdown services (no real API keys = no external calls).
-	fmpProvider := fundamentals.NewFMPProvider("", cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
-	allFundamentals := map[string]fundamentals.FundamentalsProvider{"FMP": fmpProvider}
+	// Build fundamentals service with no providers — no external calls in tests.
+	allFundamentals := map[string]fundamentals.FundamentalsProvider{}
 	allBreakdowns := map[string]fundamentals.ETFBreakdownProvider{}
 	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns, nil)
 	breakdownService := breakdownsvc.NewService(db)
@@ -611,12 +607,10 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	cfg := &config.Config{
-		Port:               "0",
-		DataDir:            tmpDir,
-		AllowedTokenHashes: nil,
-		FMPRequestsPerMinute: 10,
-		FMPRequestsPerDay:    250,
-		FundamentalsProviders: "FMP",
+		Port:                  "0",
+		DataDir:               tmpDir,
+		AllowedTokenHashes:    nil,
+		FundamentalsProviders: "Yahoo",
 		BreakdownProviders:    "Yahoo",
 	}
 
@@ -637,8 +631,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
 	taxSvc := tax.NewService(fxSvc)
 
-	fmpProvider2 := fundamentals.NewFMPProvider("", cfg.FMPRequestsPerMinute, cfg.FMPRequestsPerDay)
-	allFundamentals2 := map[string]fundamentals.FundamentalsProvider{"FMP": fmpProvider2}
+	allFundamentals2 := map[string]fundamentals.FundamentalsProvider{}
 	allBreakdowns2 := map[string]fundamentals.ETFBreakdownProvider{}
 	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2, nil)
 	breakdownService2 := breakdownsvc.NewService(db)

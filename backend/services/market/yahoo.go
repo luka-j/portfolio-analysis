@@ -46,6 +46,18 @@ func NewYahooFinanceService(db *gorm.DB) *YahooFinanceService {
 	}
 }
 
+// NewYahooFinanceServiceWithTransport creates a YahooFinanceService with a custom
+// HTTP transport. Intended for tests that need to inject a mock transport.
+func NewYahooFinanceServiceWithTransport(transport http.RoundTripper) *YahooFinanceService {
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	return &YahooFinanceService{
+		HTTPClient:     client,
+		limiter:        rate.NewLimiter(rate.Inf, 1),
+		summaryLimiter: rate.NewLimiter(rate.Inf, 1),
+		crumbMgr:       newCrumbManager(client),
+	}
+}
+
 // GetHistory returns daily price data for the symbol in [from, to].
 func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	// Truncate dates to midnight for consistency.
@@ -159,6 +171,7 @@ type yahooChartResponse struct {
 		Result []struct {
 			Meta struct {
 				QuoteType string `json:"quoteType"`
+				LongName  string `json:"longName"`
 			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
@@ -181,11 +194,12 @@ type yahooChartResponse struct {
 	} `json:"chart"`
 }
 
-// GetQuoteType returns the Yahoo Finance asset class for a symbol mapped to our internal type string
-// ("Stock", "ETF", "Commodity", or "" if unknown). Uses a minimal 1-day request — no premium quota.
-func (s *YahooFinanceService) GetQuoteType(symbol string) (string, error) {
+// GetQuoteType returns the Yahoo Finance asset class and display name for a symbol.
+// The asset type is mapped to our internal type string ("Stock", "ETF", "Commodity", or "" if unknown).
+// The name is taken from meta.longName and may be empty. Uses a minimal 1-day request — no premium quota.
+func (s *YahooFinanceService) GetQuoteType(symbol string) (string, string, error) {
 	if err := s.limiter.Wait(context.Background()); err != nil {
-		return "", fmt.Errorf("rate limiter: %w", err)
+		return "", "", fmt.Errorf("rate limiter: %w", err)
 	}
 
 	chartURL := fmt.Sprintf(
@@ -194,33 +208,34 @@ func (s *YahooFinanceService) GetQuoteType(symbol string) (string, error) {
 	)
 	req, err := http.NewRequest("GET", chartURL, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("User-Agent", yahooUserAgent)
 
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("yahoo quoteType request: %w", err)
+		return "", "", fmt.Errorf("yahoo quoteType request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("yahoo quoteType HTTP %d for %s", resp.StatusCode, symbol)
+		return "", "", fmt.Errorf("yahoo quoteType HTTP %d for %s", resp.StatusCode, symbol)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("reading yahoo quoteType response: %w", err)
+		return "", "", fmt.Errorf("reading yahoo quoteType response: %w", err)
 	}
 
 	var yResp yahooChartResponse
 	if err := json.Unmarshal(body, &yResp); err != nil {
-		return "", fmt.Errorf("parsing yahoo quoteType: %w", err)
+		return "", "", fmt.Errorf("parsing yahoo quoteType: %w", err)
 	}
 	if yResp.Chart.Error != nil || len(yResp.Chart.Result) == 0 {
-		return "", nil // symbol not found on Yahoo
+		return "", "", nil // symbol not found on Yahoo
 	}
-	return yahooQuoteTypeToAssetType(yResp.Chart.Result[0].Meta.QuoteType), nil
+	meta := yResp.Chart.Result[0].Meta
+	return yahooQuoteTypeToAssetType(meta.QuoteType), meta.LongName, nil
 }
 
 // yahooQuoteTypeToAssetType maps Yahoo's quoteType field to our internal AssetType strings.

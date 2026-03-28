@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import NavBar from '../components/NavBar'
+import PageLayout from '../components/PageLayout'
+import Spinner from '../components/Spinner'
 import { getTaxReport } from '../api'
 import type { TaxReportResponse, TaxTransaction } from '../api'
 import { escapeCSVField } from '../utils/format'
@@ -55,10 +56,7 @@ export default function TaxPage() {
   const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i)
 
   return (
-    <div className="min-h-screen bg-[#0f1117] flex flex-col text-slate-200">
-      <NavBar />
-      <div className="w-full flex-1 flex justify-center">
-        <main className="py-8 px-12 max-w-7xl w-full flex flex-col items-center">
+    <PageLayout mainClassName="pt-8">
 
         <div className="flex flex-col items-center mb-8 text-center">
           <h1 className="text-3xl font-semibold text-slate-100">Tax Report</h1>
@@ -79,10 +77,7 @@ export default function TaxPage() {
         </div>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-40 gap-4 text-slate-700">
-            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-[10px] font-black uppercase tracking-[0.3em]">Processing gain/loss matrix…</span>
-          </div>
+          <Spinner label="Processing gain/loss matrix…" className="py-40" />
         ) : error ? (
           <div className="bg-red-500/10 border border-red-500/20 rounded-3xl px-10 py-6 text-red-400 text-xs font-black uppercase tracking-widest text-center shadow-2xl">
             {error}
@@ -134,11 +129,11 @@ export default function TaxPage() {
                       <th className="text-right py-2.5 px-4">Income (CZK)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/[0.04]">
+                  <tbody className="divide-y divide-white/4">
                     {report.employment_income.transactions?.map((tx, idx) => {
                       const costBasisPerShare = tx.cost_czk > 0.001 ? tx.cost_czk / (tx.quantity * tx.exchange_rate) : 0
                       return (
-                      <tr key={idx} className="hover:bg-white/[0.02] transition-colors group">
+                      <tr key={idx} className="hover:bg-white/2 transition-colors group">
                         <td className="py-2.5 px-4">
                           <span className={`px-3 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider border ${tx.type === 'ESPP_VEST' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20'}`}>{tx.type}</span>
                         </td>
@@ -213,12 +208,12 @@ export default function TaxPage() {
                       <th className="text-right py-2.5 px-4">Delta (CZK)</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/[0.04]">
+                  <tbody className="divide-y divide-white/4">
                     {report.investment_income.transactions?.map((tx, idx) => {
                       const buyPriceNative = tx.buy_rate ? tx.cost_czk / (tx.quantity * tx.buy_rate) : 0
                       const delta = tx.benefit_czk - tx.cost_czk
                       return (
-                      <tr key={idx} className="hover:bg-white/[0.02] transition-colors group">
+                      <tr key={idx} className="hover:bg-white/2 transition-colors group">
                         <td className="py-2.5 px-4 text-slate-200 font-bold group-hover:text-white transition-colors uppercase tracking-tight">{tx.symbol}</td>
                         <td className="py-2.5 px-4 text-slate-500 text-xs tabular-nums">{tx.buy_date ?? '—'}</td>
                         <td className="py-2.5 px-4 text-slate-500 text-xs tabular-nums">{tx.date}</td>
@@ -252,8 +247,6 @@ export default function TaxPage() {
             </section>
           </div>
         ) : null}
-        </main>
-      </div>
-    </div>
+    </PageLayout>
   )
 }

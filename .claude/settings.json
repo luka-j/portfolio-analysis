@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(go vet:*)"
+      "Bash(go vet:*)",
+      "Bash(find /d/projects/gofolio-analysis -name *.env -o -name .env -o -name docker-compose* -o -name Dockerfile*)",
+      "Bash(find /d/projects/gofolio-analysis -name docker-compose* -o -name Dockerfile* -o -name *.env*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -v \"//.*Original\")"
     ]
   }
 }

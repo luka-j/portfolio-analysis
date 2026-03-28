@@ -22,6 +22,22 @@ type ETFBreakdownResult struct {
 	Weight    float64 // fraction 0.0–1.0
 }
 
+// ETFSummaryResult is the full result from a Yahoo quoteSummary fetch for ETF breakdown data.
+type ETFSummaryResult struct {
+	Breakdowns []ETFBreakdownResult // sector, country, and bond_rating entries
+	IsBondETF  bool                 // true when bondPosition >= 50 %
+	Duration   float64              // effective duration in years; 0 if not available
+}
+
+// AssetProfileResult holds the name, country, sector, and exchange for a symbol.
+// Populated from the assetProfile (stocks), fundProfile (ETFs), and price modules.
+type AssetProfileResult struct {
+	Name     string
+	Country  string
+	Sector   string
+	Exchange string
+}
+
 // CrumbManager handles Yahoo Finance cookie+crumb authentication required by the
 // v10 quoteSummary endpoint. It maintains its own http.Client with a cookie jar so
 // that cookies are automatically captured across redirects (e.g. consent pages) and
@@ -45,16 +61,26 @@ func newCrumbManager(base *http.Client) *CrumbManager {
 }
 
 // getCrumb returns a valid crumb, refreshing cookies and crumb if stale or expired.
+// The mutex is held only for the cache check and write-back; HTTP I/O is done unlocked.
 func (cm *CrumbManager) getCrumb() (string, error) {
 	cm.mu.Lock()
-	defer cm.mu.Unlock()
 	if time.Now().Before(cm.expiry) && cm.crumb != "" {
-		return cm.crumb, nil
+		crumb := cm.crumb
+		cm.mu.Unlock()
+		return crumb, nil
 	}
-	if err := cm.fetchCrumb(); err != nil {
+	cm.mu.Unlock()
+
+	crumb, expiry, err := cm.doFetchCrumb()
+	if err != nil {
 		return "", err
 	}
-	return cm.crumb, nil
+
+	cm.mu.Lock()
+	cm.crumb = crumb
+	cm.expiry = expiry
+	cm.mu.Unlock()
+	return crumb, nil
 }
 
 // forceRefresh invalidates the cached crumb, forcing the next call to re-fetch.
@@ -67,18 +93,18 @@ func (cm *CrumbManager) forceRefresh() {
 	cm.mu.Unlock()
 }
 
-// fetchCrumb seeds the cookie jar and retrieves the crumb. Must be called with mu held.
+// doFetchCrumb seeds the cookie jar and retrieves a fresh crumb. Called without mu held.
 //
 // Seeding from fc.yahoo.com sets .yahoo.com-scoped cookies without triggering the
 // GDPR/consent redirect that finance.yahoo.com uses in some regions. Cookies set
 // during a consent redirect are scoped to consent.yahoo.com and are rejected by the
 // crumb endpoint on query2.finance.yahoo.com.
-func (cm *CrumbManager) fetchCrumb() error {
+func (cm *CrumbManager) doFetchCrumb() (crumb string, expiry time.Time, err error) {
 	// Step 1: Seed the cookie jar from fc.yahoo.com. This sets .yahoo.com cookies
 	// without a consent redirect, so the jar is populated with the right domain scope.
 	seedReq, err := http.NewRequest("GET", "https://fc.yahoo.com/", nil)
 	if err != nil {
-		return fmt.Errorf("crumb seed request: %w", err)
+		return "", time.Time{}, fmt.Errorf("crumb seed request: %w", err)
 	}
 	seedReq.Header.Set("User-Agent", yahooUserAgent)
 	seedReq.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -86,7 +112,7 @@ func (cm *CrumbManager) fetchCrumb() error {
 
 	seedResp, err := cm.client.Do(seedReq)
 	if err != nil {
-		return fmt.Errorf("crumb seed fetch: %w", err)
+		return "", time.Time{}, fmt.Errorf("crumb seed fetch: %w", err)
 	}
 	io.Copy(io.Discard, seedResp.Body)
 	seedResp.Body.Close()
@@ -95,36 +121,27 @@ func (cm *CrumbManager) fetchCrumb() error {
 	// Use query2 which is slightly more permissive than query1 for crumb issuance.
 	crumbReq, err := http.NewRequest("GET", "https://query2.finance.yahoo.com/v1/test/getcrumb", nil)
 	if err != nil {
-		return fmt.Errorf("crumb request: %w", err)
+		return "", time.Time{}, fmt.Errorf("crumb request: %w", err)
 	}
 	crumbReq.Header.Set("User-Agent", yahooUserAgent)
 
 	crumbResp, err := cm.client.Do(crumbReq)
 	if err != nil {
-		return fmt.Errorf("crumb fetch: %w", err)
+		return "", time.Time{}, fmt.Errorf("crumb fetch: %w", err)
 	}
 	defer crumbResp.Body.Close()
 
 	body, err := io.ReadAll(crumbResp.Body)
 	if err != nil {
-		return fmt.Errorf("reading crumb: %w", err)
+		return "", time.Time{}, fmt.Errorf("reading crumb: %w", err)
 	}
 
-	crumb := strings.TrimSpace(string(body))
+	crumb = strings.TrimSpace(string(body))
 	if crumb == "" || crumbResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("crumb endpoint returned status %d with body %q", crumbResp.StatusCode, crumb)
+		return "", time.Time{}, fmt.Errorf("crumb endpoint returned status %d with body %q", crumbResp.StatusCode, crumb)
 	}
 
-	cm.crumb = crumb
-	cm.expiry = time.Now().Add(50 * time.Minute) // crumbs last ~1h; refresh early
-	return nil
-}
-
-// ETFSummaryResult is the full result from a Yahoo quoteSummary fetch.
-type ETFSummaryResult struct {
-	Breakdowns []ETFBreakdownResult // sector, country, and bond_rating entries
-	IsBondETF  bool                 // true when bondPosition >= 50 %
-	Duration   float64              // effective duration in years; 0 if not available
+	return crumb, time.Now().Add(50 * time.Minute), nil // crumbs last ~1h; refresh early
 }
 
 // ---------- Yahoo quoteSummary response types ----------
@@ -140,10 +157,22 @@ type yahooSummaryResponse struct {
 				BondHoldings  struct {
 					Duration yahooRaw `json:"duration"`
 				} `json:"bondHoldings"`
-				BondRatings []map[string]yahooRaw `json:"bondRatings"`
-				SectorWeightings []map[string]yahooRaw `json:"sectorWeightings"`
+				BondRatings       []map[string]yahooRaw `json:"bondRatings"`
+				SectorWeightings  []map[string]yahooRaw `json:"sectorWeightings"`
 				CountryWeightings []map[string]yahooRaw `json:"countryWeightings"`
 			} `json:"topHoldings"`
+			AssetProfile struct {
+				LongName string `json:"longName"`
+				Country  string `json:"country"`
+				Sector   string `json:"sector"`
+			} `json:"assetProfile"`
+			FundProfile struct {
+				LongName string `json:"longName"`
+			} `json:"fundProfile"`
+			Price struct {
+				LongName     string `json:"longName"`
+				ExchangeName string `json:"exchangeName"`
+			} `json:"price"`
 		} `json:"result"`
 		Error *struct {
 			Code        string `json:"code"`
@@ -251,15 +280,15 @@ var yahooCountryLabels = map[string]string{
 
 // yahooRatingLabels maps Yahoo bond rating keys to display labels in descending quality order.
 var yahooRatingLabels = map[string]string{
-	"aaa":          "AAA",
-	"aa":           "AA",
-	"a":            "A",
-	"bbb":          "BBB",
-	"bb":           "BB",
-	"b":            "B",
-	"below_b":      "Below B",
+	"aaa":           "AAA",
+	"aa":            "AA",
+	"a":             "A",
+	"bbb":           "BBB",
+	"bb":            "BB",
+	"b":             "B",
+	"below_b":       "Below B",
 	"us_government": "US Government",
-	"other":        "Other",
+	"other":         "Other",
 }
 
 func bondRatingLabel(key string) string {
@@ -269,6 +298,32 @@ func bondRatingLabel(key string) string {
 	return strings.ToUpper(key)
 }
 
+// withSummaryAuth obtains a crumb, calls fn, and retries once on 401/403 after
+// refreshing the crumb and consuming an extra rate-limit token.
+func (s *YahooFinanceService) withSummaryAuth(fn func(crumb string) error) error {
+	crumb, err := s.crumbMgr.getCrumb()
+	if err != nil {
+		return fmt.Errorf("yahoo crumb: %w", err)
+	}
+	err = fn(crumb)
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(err.Error(), "401") && !strings.Contains(err.Error(), "403") {
+		return err
+	}
+	// Auth failure: refresh crumb and retry once.
+	s.crumbMgr.forceRefresh()
+	if limErr := s.summaryLimiter.Wait(context.Background()); limErr != nil {
+		return fmt.Errorf("summary rate limiter retry: %w", limErr)
+	}
+	newCrumb, err := s.crumbMgr.getCrumb()
+	if err != nil {
+		return fmt.Errorf("yahoo crumb refresh: %w", err)
+	}
+	return fn(newCrumb)
+}
+
 // GetETFBreakdown fetches aggregate sector/country/bond-rating weights and bond metadata
 // for an ETF from Yahoo Finance's quoteSummary endpoint.
 // Returns nil, nil when no data is available.
@@ -276,43 +331,42 @@ func (s *YahooFinanceService) GetETFBreakdown(symbol string) (*ETFSummaryResult,
 	if err := s.summaryLimiter.Wait(context.Background()); err != nil {
 		return nil, fmt.Errorf("summary rate limiter: %w", err)
 	}
-
-	crumb, err := s.crumbMgr.getCrumb()
-	if err != nil {
-		return nil, fmt.Errorf("yahoo crumb: %w", err)
-	}
-
-	result, err := s.doQuoteSummary(symbol, crumb)
-	if err != nil {
-		// On auth failure, refresh crumb and retry once.
-		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403") {
-			s.crumbMgr.forceRefresh()
-			if err2 := s.summaryLimiter.Wait(context.Background()); err2 != nil {
-				return nil, fmt.Errorf("summary rate limiter retry: %w", err2)
-			}
-			crumb, err2 := s.crumbMgr.getCrumb()
-			if err2 != nil {
-				return nil, fmt.Errorf("yahoo crumb refresh: %w", err2)
-			}
-			result, err = s.doQuoteSummary(symbol, crumb)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
-	}
-	return result, nil
+	var result *ETFSummaryResult
+	err := s.withSummaryAuth(func(crumb string) error {
+		var err error
+		result, _, err = s.doQuoteSummary(symbol, crumb, "topHoldings,fundProfile")
+		return err
+	})
+	return result, err
 }
 
-func (s *YahooFinanceService) doQuoteSummary(symbol, crumb string) (*ETFSummaryResult, error) {
+// GetAssetProfile fetches name, country, sector, and exchange for a symbol from Yahoo
+// Finance's quoteSummary endpoint. Works for both stocks (assetProfile module) and
+// ETFs/funds (fundProfile module). Returns nil, nil when the symbol is not found.
+func (s *YahooFinanceService) GetAssetProfile(symbol string) (*AssetProfileResult, error) {
+	if err := s.summaryLimiter.Wait(context.Background()); err != nil {
+		return nil, fmt.Errorf("summary rate limiter: %w", err)
+	}
+	var profile *AssetProfileResult
+	err := s.withSummaryAuth(func(crumb string) error {
+		var err error
+		_, profile, err = s.doQuoteSummary(symbol, crumb, "assetProfile,fundProfile,price")
+		return err
+	})
+	return profile, err
+}
+
+// doQuoteSummary performs a quoteSummary request for the given modules and parses
+// both ETF breakdown data and asset profile data from the response.
+// Returns (nil, nil, nil) when the symbol is not found or has no data.
+func (s *YahooFinanceService) doQuoteSummary(symbol, crumb, modules string) (*ETFSummaryResult, *AssetProfileResult, error) {
 	summaryURL := fmt.Sprintf(
-		"https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=topHoldings,fundProfile&crumb=%s",
-		url.PathEscape(symbol), url.QueryEscape(crumb),
+		"https://query2.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=%s&crumb=%s",
+		url.PathEscape(symbol), url.QueryEscape(modules), url.QueryEscape(crumb),
 	)
 	req, err := http.NewRequest("GET", summaryURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("User-Agent", yahooUserAgent)
 	req.Header.Set("Accept", "application/json")
@@ -320,44 +374,46 @@ func (s *YahooFinanceService) doQuoteSummary(symbol, crumb string) (*ETFSummaryR
 	// Use the crumb manager's jar-enabled client so session cookies are sent automatically.
 	resp, err := s.crumbMgr.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("quoteSummary request: %w", err)
+		return nil, nil, fmt.Errorf("quoteSummary request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("quoteSummary rate limit 429 for %s", symbol)
+		return nil, nil, fmt.Errorf("quoteSummary rate limit 429 for %s", symbol)
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("quoteSummary auth error %d for %s", resp.StatusCode, symbol)
+		return nil, nil, fmt.Errorf("quoteSummary auth error %d for %s", resp.StatusCode, symbol)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("quoteSummary HTTP %d for %s", resp.StatusCode, symbol)
+		return nil, nil, fmt.Errorf("quoteSummary HTTP %d for %s", resp.StatusCode, symbol)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading quoteSummary: %w", err)
+		return nil, nil, fmt.Errorf("reading quoteSummary: %w", err)
 	}
 
 	var yResp yahooSummaryResponse
 	if err := json.Unmarshal(body, &yResp); err != nil {
-		return nil, fmt.Errorf("parsing quoteSummary: %w", err)
+		return nil, nil, fmt.Errorf("parsing quoteSummary: %w", err)
 	}
 
 	if yResp.QuoteSummary.Error != nil {
-		return nil, nil // symbol not found or no data — not an error
+		return nil, nil, nil // symbol not found or no data — not an error
 	}
 	if len(yResp.QuoteSummary.Result) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	topHoldings := yResp.QuoteSummary.Result[0].TopHoldings
+	r := yResp.QuoteSummary.Result[0]
 
+	// --- ETF breakdown (topHoldings module) ---
+	var etfResult *ETFSummaryResult
+	topHoldings := r.TopHoldings
 	isBondETF := topHoldings.BondPosition.Raw >= 0.5
 	duration := topHoldings.BondHoldings.Duration.Raw
 
 	var breakdowns []ETFBreakdownResult
-
 	if isBondETF {
 		for _, ratingMap := range topHoldings.BondRatings {
 			for key, val := range ratingMap {
@@ -397,13 +453,34 @@ func (s *YahooFinanceService) doQuoteSummary(symbol, crumb string) (*ETFSummaryR
 			}
 		}
 	}
-
-	if len(breakdowns) == 0 {
-		return nil, nil
+	if len(breakdowns) > 0 {
+		etfResult = &ETFSummaryResult{
+			Breakdowns: breakdowns,
+			IsBondETF:  isBondETF,
+			Duration:   duration,
+		}
 	}
-	return &ETFSummaryResult{
-		Breakdowns: breakdowns,
-		IsBondETF:  isBondETF,
-		Duration:   duration,
-	}, nil
+
+	// --- Asset profile (assetProfile, fundProfile, price modules) ---
+	// Prefer assetProfile (populated for stocks), fall back to fundProfile (ETFs/funds),
+	// then price as a last-resort name source.
+	name := r.AssetProfile.LongName
+	if name == "" {
+		name = r.FundProfile.LongName
+	}
+	if name == "" {
+		name = r.Price.LongName
+	}
+
+	var profile *AssetProfileResult
+	if name != "" || r.AssetProfile.Country != "" || r.AssetProfile.Sector != "" {
+		profile = &AssetProfileResult{
+			Name:     name,
+			Country:  r.AssetProfile.Country,
+			Sector:   r.AssetProfile.Sector,
+			Exchange: r.Price.ExchangeName,
+		}
+	}
+
+	return etfResult, profile, nil
 }

@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
-import NavBar from '../components/NavBar'
+import PageLayout from '../components/PageLayout'
+import SegmentedControl from '../components/SegmentedControl'
+import Spinner from '../components/Spinner'
 import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } from '../api'
 import { CURRENCIES } from '../utils/format'
+
+const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
 
 const PALETTE = [
   '#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd',
@@ -57,7 +61,7 @@ function SectionCard({ section, formatValue }: SectionCardProps) {
       
       <div className="flex flex-col lg:flex-row gap-12 items-center lg:items-start w-full">
         {/* Pie chart */}
-        <div className="w-full md:w-72 h-72 flex-shrink-0 relative">
+        <div className="w-full md:w-72 h-72 shrink-0 relative">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -87,12 +91,12 @@ function SectionCard({ section, formatValue }: SectionCardProps) {
             </PieChart>
           </ResponsiveContainer>
           {/* Inner ring for depth */}
-          <div className="absolute inset-0 m-auto w-32 h-32 rounded-full border border-white/[0.03] pointer-events-none" />
+          <div className="absolute inset-0 m-auto w-32 h-32 rounded-full border border-white/3 pointer-events-none" />
         </div>
 
         {/* Table */}
         <div className="flex-1 w-full max-w-2xl">
-          <div className={section.entries.length > 6 ? 'overflow-y-auto max-h-[312px]' : ''}>
+          <div className={section.entries.length > 6 ? 'overflow-y-auto max-h-78' : ''}>
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-[#0f1117] z-10">
               <tr className="text-slate-500 text-xs font-semibold border-b border-[#2a2e42]/40">
@@ -101,18 +105,18 @@ function SectionCard({ section, formatValue }: SectionCardProps) {
                 <th className="text-right py-4">Weight</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/[0.04]">
+            <tbody className="divide-y divide-white/4">
               {section.entries.map((e, idx) => (
                 <tr
                   key={e.label}
-                  className="hover:bg-white/[0.02] transition-colors group"
+                  className="hover:bg-white/2 transition-colors group"
                   onMouseEnter={() => setActiveIdx(idx)}
                   onMouseLeave={() => setActiveIdx(null)}
                 >
                   <td className="py-4 pr-6">
                     <div className="flex items-center gap-3">
                       <span
-                        className={`w-2.5 h-2.5 rounded-full flex-shrink-0 transition-transform duration-300 ${activeIdx === idx ? 'scale-125' : 'group-hover:scale-110'}`}
+                        className={`w-2.5 h-2.5 rounded-full shrink-0 transition-transform duration-300 ${activeIdx === idx ? 'scale-125' : 'group-hover:scale-110'}`}
                         style={{ backgroundColor: sectionColor(idx) }}
                       />
                       <span className="text-slate-200 text-sm group-hover:text-indigo-400 transition-colors truncate max-w-[320px]" title={e.label}>{e.label}</span>
@@ -180,78 +184,50 @@ export default function BreakdownPage() {
   const fmt = (v: number) => formatCurrencyValue(v, currency)
 
   return (
-    <div className="min-h-screen bg-[#0f1117] text-slate-200 flex flex-col">
-      <NavBar />
-
-      <div className="w-full flex-1 flex justify-center">
-        <main className="mx-auto py-10 px-12 max-w-6xl w-full flex flex-col items-center">
-        <div className="w-full">
-          {/* Header centered, NO italics */}
-          <div className="flex flex-col items-center mb-12 text-center">
-            <h1 className="text-3xl font-semibold text-slate-100">Portfolio Breakdown</h1>
-            <p className="text-sm text-slate-500 mt-4 leading-relaxed max-w-xl">
-              Breakdown by asset class, geography, and sector based on current holdings.
-            </p>
-
-            {/* Currency selector — centered rounded-2xl */}
-            <div className="flex items-center gap-1 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-2xl p-1.5 shadow-xl ring-1 ring-white/5 mt-6">
-              {CURRENCIES.map((c) => (
-                <button
-                  key={c}
-                  id={`breakdown-currency-${c}`}
-                  onClick={() => setCurrency(c)}
-                  className={`px-6 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-                    currency === c
-                      ? 'glass active text-indigo-300'
-                      : 'text-slate-500 hover:text-slate-200'
-                  }`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
+    <PageLayout maxWidth="max-w-6xl">
+      <div className="w-full">
+        {/* Header */}
+        <div className="flex flex-col items-center mb-12 text-center">
+          <h1 className="text-3xl font-semibold text-slate-100">Portfolio Breakdown</h1>
+          <p className="text-sm text-slate-500 mt-4 leading-relaxed max-w-xl">
+            Breakdown by asset class, geography, and sector based on current holdings.
+          </p>
+          <div className="mt-6">
+            <SegmentedControl label="Display Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
           </div>
-
-          {/* States */}
-          {loading && (
-            <div className="flex flex-col items-center justify-center py-40 gap-4 text-slate-600">
-              <div className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm">Loading breakdowns…</span>
-            </div>
-          )}
-
-          {error && !loading && (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-3xl px-10 py-6 text-red-400 text-xs font-black uppercase tracking-widest text-center shadow-2xl">
-              {error}
-            </div>
-          )}
-
-          {!loading && !error && sections.length === 0 && (
-            <div className="text-center text-slate-800 py-40 font-black uppercase tracking-[0.4em] text-[10px] opacity-40">
-               Sync required to generate breakdown matrix
-            </div>
-          )}
-
-          {!loading && !error && sections.length > 0 && (
-            <div className="flex flex-col gap-12 animate-fade-in pb-20">
-              {sections.map((s, i) => (
-                <div key={s.title} className="w-full">
-                  <SectionCard section={s} formatValue={fmt} />
-                  {i < sections.length - 1 && (
-                    <div className="mt-4 border-t border-[#2a2e42]/40 opacity-30" />
-                  )}
-                </div>
-              ))}
-              
-              <footer className="mt-12 text-[8px] font-black text-slate-800 uppercase tracking-[0.4em] text-center leading-loose max-w-2xl mx-auto opacity-30">
-                Fundamental attribution weights are derived from aggregated security metadata. 
-                Values represent your current portfolio composition.
-              </footer>
-            </div>
-          )}
         </div>
-        </main>
+
+        {loading && <Spinner label="Loading breakdowns…" className="py-40" />}
+
+        {error && !loading && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-3xl px-10 py-6 text-red-400 text-xs font-black uppercase tracking-widest text-center shadow-2xl">
+            {error}
+          </div>
+        )}
+
+        {!loading && !error && sections.length === 0 && (
+          <div className="text-center text-slate-800 py-40 font-black uppercase tracking-[0.4em] text-[10px] opacity-40">
+            Sync required to generate breakdown matrix
+          </div>
+        )}
+
+        {!loading && !error && sections.length > 0 && (
+          <div className="flex flex-col gap-12 animate-fade-in pb-20">
+            {sections.map((s, i) => (
+              <div key={s.title} className="w-full">
+                <SectionCard section={s} formatValue={fmt} />
+                {i < sections.length - 1 && (
+                  <div className="mt-4 border-t border-[#2a2e42]/40 opacity-30" />
+                )}
+              </div>
+            ))}
+            <footer className="mt-12 text-[8px] font-black text-slate-800 uppercase tracking-[0.4em] text-center leading-loose max-w-2xl mx-auto opacity-30">
+              Fundamental attribution weights are derived from aggregated security metadata.
+              Values represent your current portfolio composition.
+            </footer>
+          </div>
+        )}
       </div>
-    </div>
+    </PageLayout>
   )
 }
