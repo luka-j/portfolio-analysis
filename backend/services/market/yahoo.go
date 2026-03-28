@@ -24,6 +24,11 @@ type Provider interface {
 	GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error)
 }
 
+// CurrencyGetter can report the native trading currency of a symbol.
+type CurrencyGetter interface {
+	GetCurrency(symbol string) (string, error)
+}
+
 // YahooFinanceService fetches historical OHLCV data from Yahoo Finance
 // and caches results in the database.
 type YahooFinanceService struct {
@@ -172,6 +177,7 @@ type yahooChartResponse struct {
 			Meta struct {
 				QuoteType string `json:"quoteType"`
 				LongName  string `json:"longName"`
+				Currency  string `json:"currency"`
 			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
@@ -250,6 +256,48 @@ func yahooQuoteTypeToAssetType(qt string) string {
 	default:
 		return ""
 	}
+}
+
+// GetCurrency returns the native trading currency for a symbol (e.g. "USD", "EUR").
+// Returns an empty string when the symbol is not found on Yahoo.
+func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
+	if err := s.limiter.Wait(context.Background()); err != nil {
+		return "", fmt.Errorf("rate limiter: %w", err)
+	}
+
+	chartURL := fmt.Sprintf(
+		"https://query1.finance.yahoo.com/v8/finance/chart/%s?range=1d&interval=1d",
+		url.PathEscape(symbol),
+	)
+	req, err := http.NewRequest("GET", chartURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", yahooUserAgent)
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("yahoo currency request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("yahoo currency HTTP %d for %s", resp.StatusCode, symbol)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading yahoo currency response: %w", err)
+	}
+
+	var yResp yahooChartResponse
+	if err := json.Unmarshal(body, &yResp); err != nil {
+		return "", fmt.Errorf("parsing yahoo currency: %w", err)
+	}
+	if yResp.Chart.Error != nil || len(yResp.Chart.Result) == 0 {
+		return "", nil
+	}
+	return yResp.Chart.Result[0].Meta.Currency, nil
 }
 
 func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) ([]models.PricePoint, error) {

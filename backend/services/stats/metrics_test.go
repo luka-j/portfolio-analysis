@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -224,5 +225,39 @@ func TestCalculateBenchmarkMetrics_EdgeCases(t *testing.T) {
 		metrics := CalculateBenchmarkMetrics(p, b, 0.0)
 		assert.Equal(t, 0.0, metrics.Beta)
 		assert.Equal(t, 0.0, metrics.Correlation)
+	})
+}
+
+func TestAlphaDoesNotOverflow(t *testing.T) {
+	t.Run("Flat benchmark all-zero returns", func(t *testing.T) {
+		// EUR_BENCH scenario: FX-corrected benchmark has exactly 0% returns every day.
+		// varB should be treated as zero to avoid division by near-zero float.
+		n := 140
+		bRet := make([]float64, n)
+		pRet := make([]float64, n)
+		for i := range pRet {
+			pRet[i] = 0.0003
+		}
+		metrics := CalculateBenchmarkMetrics(pRet, bRet, 0.025)
+		assert.False(t, math.IsInf(metrics.Alpha, 0), "alpha must not be Inf for flat benchmark")
+		assert.False(t, math.IsNaN(metrics.Alpha), "alpha must not be NaN for flat benchmark")
+		assert.Equal(t, 0.0, metrics.Beta, "beta must be 0 for flat benchmark")
+	})
+
+	t.Run("Near-zero variance from floating-point rounding", func(t *testing.T) {
+		// Benchmark returns are near-zero due to fp rounding (e.g. (100/x)*x - 1 ≈ 1e-16).
+		// varB is positive but tiny; without the stddev threshold beta would explode.
+		n := 213
+		bRet := make([]float64, n)
+		pRet := make([]float64, n)
+		for i := range pRet {
+			pRet[i] = 0.0003
+			bRet[i] = 1e-16 * float64(i%3-1) // fp-scale noise: -1e-16, 0, +1e-16 cycling
+		}
+		metrics := CalculateBenchmarkMetrics(pRet, bRet, 0.025)
+		assert.False(t, math.IsInf(metrics.Alpha, 0), "alpha must not be Inf for fp-noise benchmark")
+		assert.False(t, math.IsNaN(metrics.Alpha), "alpha must not be NaN for fp-noise benchmark")
+		// Beta should be zero (stddev(bRet) << 1e-6 threshold)
+		assert.Equal(t, 0.0, metrics.Beta)
 	})
 }

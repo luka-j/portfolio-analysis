@@ -63,7 +63,7 @@ func main() {
 	breakdownService := breakdownsvc.NewService(database)
 
 	// Build Gin engine.
-	r := setupRouter(cfg, parser, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
+	r := setupRouter(cfg, parser, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -101,6 +101,7 @@ func setupRouter(
 	cfg *config.Config,
 	parser *flexquery.Parser,
 	marketSvc market.Provider,
+	currencyGetter market.CurrencyGetter,
 	fxSvc *fx.Service,
 	portfolioSvc *portfolio.Service,
 	taxSvc *tax.Service,
@@ -143,11 +144,11 @@ func setupRouter(
 	api.PUT("/portfolio/symbols/:symbol/mapping", ph.MapSymbol)
 
 	// Market endpoints.
-	mh := handlers.NewMarketHandler(marketSvc)
+	mh := handlers.NewMarketHandler(marketSvc, currencyGetter)
 	api.GET("/market/history", mh.GetHistory)
 
 	// Stats endpoints.
-	sh := handlers.NewStatsHandler(parser, portfolioSvc, marketSvc)
+	sh := handlers.NewStatsHandler(parser, portfolioSvc, marketSvc, fxSvc, currencyGetter)
 	api.GET("/portfolio/stats", sh.GetStats)
 	api.GET("/portfolio/compare", sh.Compare)
 

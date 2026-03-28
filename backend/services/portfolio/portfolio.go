@@ -628,27 +628,53 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 	return flows, nil
 }
 
-// GetDailyReturns returns daily portfolio return series for statistics.
-func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) ([]float64, []time.Time, error) {
+// GetDailyReturns returns cash-flow-adjusted daily portfolio return series for statistics.
+// Cash flows (deposits/withdrawals) are removed from each day's return so that the series
+// reflects pure market performance, comparable to a benchmark's price return series.
+func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) ([]float64, []string, []string, error) {
 	hist, err := s.GetDailyValues(data, from, to, currency, acctModel)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	var returns []float64
-	var dates []time.Time
+	var startDates []string
+	var endDates []string
+
+	cfIdx := 0
+	// Skip any cash flows that occur on or before the first daily value date.
+	if len(hist.Data) > 0 {
+		for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= hist.Data[0].Date {
+			cfIdx++
+		}
+	}
+
 	for i := 1; i < len(hist.Data); i++ {
 		prev := hist.Data[i-1].Value
 		cur := hist.Data[i].Value
-		if prev == 0 {
+		dateStr := hist.Data[i].Date
+
+		cfAmount := 0.0
+		for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= dateStr {
+			cfAmount += cashFlows[cfIdx].Amount
+			cfIdx++
+		}
+
+		// Adjust the opening value for any external cash flow that arrived in this sub-period.
+		adjustedPrev := prev - cfAmount
+		if adjustedPrev <= 0 {
 			continue
 		}
-		ret := (cur - prev) / prev
-		returns = append(returns, ret)
-		d, _ := time.Parse("2006-01-02", hist.Data[i].Date)
-		dates = append(dates, d)
+		returns = append(returns, (cur/adjustedPrev)-1)
+		startDates = append(startDates, hist.Data[i-1].Date)
+		endDates = append(endDates, dateStr)
 	}
-	return returns, dates, nil
+	return returns, startDates, endDates, nil
 }
 
 // buildDailyHoldings builds a map from date string to holdings on that date.

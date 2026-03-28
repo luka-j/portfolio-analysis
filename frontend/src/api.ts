@@ -217,10 +217,11 @@ export async function getPortfolioHistory(
 }
 
 export async function getMarketHistory(
-  symbol: string, from: string, to: string
+  symbol: string, from: string, to: string,
+  currency = 'USD', accountingModel = 'historical'
 ): Promise<MarketHistoryResponse> {
   return request<MarketHistoryResponse>(
-    `/market/history?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}`
+    `/market/history?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}`
   );
 }
 

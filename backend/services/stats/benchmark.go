@@ -43,18 +43,22 @@ func CalculateBenchmarkMetrics(portfolioReturns, benchmarkReturns []float64, ris
 		diff[i] = portfolioReturns[i] - benchmarkReturns[i]
 	}
 
-	// Beta = cov(Rp, Rb) / var(Rb)
+	// Beta = cov(Rp, Rb) / var(Rb).
+	// Guard against floating-point near-zero variance: a benchmark with daily stddev
+	// below 1e-6 (0.0001%) is effectively flat (e.g. all-zero returns with fp rounding
+	// errors). Dividing by such a tiny variance yields an astronomically large, meaningless
+	// beta, which then causes alpha to overflow to ±Inf. Treat it as zero instead.
 	covPB := covariance(portfolioReturns, benchmarkReturns)
 	varB := variance(benchmarkReturns)
 	beta := 0.0
-	if varB > 0 {
+	if math.Sqrt(varB) > 1e-6 {
 		beta = covPB / varB
 	}
 
-	// Alpha (annualised Jensen's alpha)
+	// Alpha (annualised Jensen's alpha via compounding, not linear scaling)
 	// alpha_daily = mean(Rp) - [Rf_daily + beta*(mean(Rb) - Rf_daily)]
 	alphaDailyVal := pMean - (dailyRf + beta*(bMean-dailyRf))
-	alpha := alphaDailyVal * 252
+	alpha := math.Pow(1+alphaDailyVal, 252) - 1
 
 	// Sharpe ratio (annualised)
 	pStd := stddev(portfolioReturns)

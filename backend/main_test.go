@@ -33,12 +33,18 @@ import (
 // ---------- Mock market data provider ----------
 
 type mockMarketProvider struct {
-	prices map[string][]models.PricePoint
+	prices     map[string][]models.PricePoint
+	currencies map[string]string // symbol → native currency; used to implement CurrencyGetter
+}
+
+func (m *mockMarketProvider) GetCurrency(symbol string) (string, error) {
+	return m.currencies[symbol], nil
 }
 
 func newMockMarketProvider() *mockMarketProvider {
 	m := &mockMarketProvider{
-		prices: make(map[string][]models.PricePoint),
+		prices:     make(map[string][]models.PricePoint),
+		currencies: make(map[string]string),
 	}
 
 	// AAPL: $195
@@ -133,7 +139,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns, nil)
 	breakdownService := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
+	router := setupRouter(cfg, parser, mockMarket, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
 	ts := httptest.NewServer(router)
 
 	cleanup := func() {
@@ -368,6 +374,110 @@ func TestComparePortfolio(t *testing.T) {
 	bm := result.Benchmarks[0]
 	t.Logf("Benchmark metrics: alpha=%.4f beta=%.4f sharpe=%.4f treynor=%.4f te=%.4f ir=%.4f corr=%.4f",
 		bm.Alpha, bm.Beta, bm.SharpeRatio, bm.TreynorRatio, bm.TrackingError, bm.InformationRatio, bm.Correlation)
+}
+
+func TestCompare_FXConversionChangesMetrics(t *testing.T) {
+	// Build a market mock where a EUR-denominated benchmark has the same USD value every day
+	// (EUR price = 100/EURUSD), so after FX conversion to USD it shows 0% returns.
+	// A second series (EUR_BENCH_RAW) has identical EUR prices but no declared currency,
+	// so it is treated as USD — it shows the declining EUR prices as if they were USD returns.
+	// The two benchmarks must produce different tracking errors.
+
+	m := &mockMarketProvider{
+		prices:     make(map[string][]models.PricePoint),
+		currencies: make(map[string]string),
+	}
+	// Standard portfolio holdings and FX rates (copied from newMockMarketProvider).
+	m.addPrice("AAPL", 195.0)
+	m.addPrice("MSFT", 420.0)
+	m.addPrice("VWCE.DE", 110.0)
+	m.addPrice("VUAA", 90.0)
+	m.addPrice("USDEUR=X", 0.92)
+	m.addPrice("USDCZK=X", 23.50)
+	m.addPrice("EURCZK=X", 25.50)
+	m.addPrice("USDUSD=X", 1.0)
+	m.addPrice("EUREUR=X", 1.0)
+
+	// Build a varying EURUSD rate (starts at 1.0, +0.001/day) and matching EUR benchmark prices.
+	// EUR_BENCH prices in EUR = 100/EURUSD → after FX conversion to USD: (100/EURUSD)*EURUSD = 100 (flat).
+	// EUR_BENCH_RAW has the same EUR prices but no currency declared → treated as USD (declining values).
+	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	var eurusdPts, eurBenchPts []models.PricePoint
+	eurusd := 1.0
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		eurusdPts = append(eurusdPts, models.PricePoint{Date: d, Close: eurusd, AdjClose: eurusd})
+		p := 100.0 / eurusd
+		eurBenchPts = append(eurBenchPts, models.PricePoint{Date: d, Close: p, AdjClose: p})
+		eurusd += 0.001
+	}
+	m.prices["EURUSD=X"] = eurusdPts
+	m.prices["EUR_BENCH"] = eurBenchPts     // FX conversion declared → ~0% USD returns
+	m.prices["EUR_BENCH_RAW"] = eurBenchPts // No currency declared → declining "USD" returns
+	m.currencies["EUR_BENCH"] = "EUR"
+
+	// Spin up an isolated test server using this mock as both Provider and CurrencyGetter.
+	tmpDir, err := os.MkdirTemp("", "gofolio-fxtest-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Port: "0", DataDir: tmpDir,
+		FundamentalsProviders: "Yahoo", BreakdownProviders: "Yahoo",
+	}
+	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", filepath.Base(tmpDir))
+	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
+	require.NoError(t, err)
+	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.AssetFundamental{}, &models.EtfBreakdown{})
+
+	fxSvc := fx.NewService(m, nil)
+	parser := flexquery.NewParser(db)
+	portfolioSvc := portfolio.NewService(m, fxSvc)
+	taxSvc := tax.NewService(fxSvc)
+	allF := map[string]fundamentals.FundamentalsProvider{}
+	allB := map[string]fundamentals.ETFBreakdownProvider{}
+	fundSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allF, allB, nil)
+	bkdSvc := breakdownsvc.NewService(db)
+
+	router := setupRouter(cfg, parser, m, m, fxSvc, portfolioSvc, taxSvc, fundSvc, bkdSvc)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	uploadFlexQuery(t, ts, testToken)
+
+	resp := doGet(t, ts,
+		"/api/v1/portfolio/compare?symbols=EUR_BENCH,EUR_BENCH_RAW&currency=USD&from=2024-06-01&to=2024-12-31&accounting_model=historical",
+		testToken)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result models.CompareResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.Len(t, result.Benchmarks, 2)
+
+	var eurBench, eurBenchRaw *models.BenchmarkResult
+	for i := range result.Benchmarks {
+		b := &result.Benchmarks[i]
+		switch b.Symbol {
+		case "EUR_BENCH":
+			eurBench = b
+		case "EUR_BENCH_RAW":
+			eurBenchRaw = b
+		}
+	}
+	require.NotNil(t, eurBench, "EUR_BENCH must be in response")
+	require.NotNil(t, eurBenchRaw, "EUR_BENCH_RAW must be in response")
+
+	// After FX conversion EUR_BENCH is flat in USD (0% returns), so its tracking error and
+	// alpha differ from EUR_BENCH_RAW which shows the raw declining EUR prices as USD.
+	assert.NotEqual(t, eurBench.TrackingError, eurBenchRaw.TrackingError,
+		"FX conversion must change tracking error: EUR_BENCH=%.6f EUR_BENCH_RAW=%.6f",
+		eurBench.TrackingError, eurBenchRaw.TrackingError)
+	assert.NotEqual(t, eurBench.Alpha, eurBenchRaw.Alpha,
+		"FX conversion must change alpha: EUR_BENCH=%.6f EUR_BENCH_RAW=%.6f",
+		eurBench.Alpha, eurBenchRaw.Alpha)
+	t.Logf("EUR_BENCH (FX-converted):  TE=%.6f alpha=%.6f", eurBench.TrackingError, eurBench.Alpha)
+	t.Logf("EUR_BENCH_RAW (no FX):     TE=%.6f alpha=%.6f", eurBenchRaw.TrackingError, eurBenchRaw.Alpha)
 }
 
 func TestMultipleUsers(t *testing.T) {
@@ -636,7 +746,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2, nil)
 	breakdownService2 := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2)
+	router := setupRouter(cfg, parser, mockMarket, nil, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2)
 	tsServer := httptest.NewServer(router)
 	defer tsServer.Close()
 

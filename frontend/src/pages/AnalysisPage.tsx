@@ -13,7 +13,7 @@ import { formatDate, CURRENCIES } from '../utils/format'
 const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
 
 const FX_METHOD_OPTIONS = [
-  { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the display currency, accounting for currency movements over time.' },
+  { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the currency, accounting for currency movements over time.' },
   { label: 'Spot',       value: 'spot'       as const, tooltip: "Applies today's FX rate to all prices. Shows current market value converted at the current exchange rate, regardless of when trades were made." },
 ]
 
@@ -47,6 +47,8 @@ export default function AnalysisPage() {
   const [benchmarkSymbols, setBenchmarkSymbols] = useState<string[]>([])
   const [benchmarkData, setBenchmarkData]       = useState<Record<string, { date: string; close: number }[]>>({})
   const [compareResults, setCompareResults]     = useState<BenchmarkResult[]>([])
+  const [riskFreeRate, setRiskFreeRate]       = useState(0.025)
+  const [riskFreeRateInput, setRiskFreeRateInput] = useState('2.50')
   const [loading, setLoading]           = useState(true)
   const [compareLoading, setCompareLoading] = useState(false)
   const [error, setError]               = useState('')
@@ -54,6 +56,9 @@ export default function AnalysisPage() {
 
   const from = period === -1 ? customFrom : getFromDate(period)
   const to   = period === -1 ? customTo   : formatDate(new Date())
+  // For "All", getFromDate returns a dummy sentinel. Use the actual first data point
+  // from the loaded portfolio history so benchmark calls start at portfolio inception.
+  const effectiveFrom = period === 0 ? (portfolioHistory[0]?.date ?? from) : from
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -74,6 +79,35 @@ export default function AnalysisPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  // Re-fetch benchmark data whenever the date range, currency, or model changes.
+  // benchmarkSymbols and riskFreeRate are intentionally omitted: symbol additions are
+  // handled by handleCompare, and rate changes are handled by applyRiskFreeRate.
+  useEffect(() => {
+    if (benchmarkSymbols.length === 0) return
+    const refresh = async () => {
+      setCompareLoading(true)
+      setCompareError('')
+      try {
+        const [histResults, comp] = await Promise.all([
+          Promise.all(benchmarkSymbols.map(sym => getMarketHistory(sym, effectiveFrom, to, currency, acctModel))),
+          comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate),
+        ])
+        const newData: Record<string, { date: string; close: number }[]> = {}
+        histResults.forEach((res, i) => {
+          newData[benchmarkSymbols[i]] = res.data.map(p => ({ date: p.date.slice(0, 10), close: p.close }))
+        })
+        setBenchmarkData(newData)
+        setCompareResults(comp.benchmarks)
+      } catch (err) {
+        setCompareError(err instanceof Error ? err.message : 'Comparison failed')
+      } finally {
+        setCompareLoading(false)
+      }
+    }
+    refresh()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveFrom, to, currency, acctModel])
+
   const handleCompare = async () => {
     const inputSymbols = benchmarkInput.split(',').map(s => s.trim()).filter(Boolean)
     const newSymbols = inputSymbols.filter(s => !benchmarkSymbols.includes(s))
@@ -81,14 +115,13 @@ export default function AnalysisPage() {
     setCompareLoading(true)
     setCompareError('')
     try {
-      const inceptionDate = portfolioHistory[0]?.date ?? from
-      const histResults = await Promise.all(newSymbols.map(sym => getMarketHistory(sym, inceptionDate, to)))
+      const histResults = await Promise.all(newSymbols.map(sym => getMarketHistory(sym, effectiveFrom, to, currency, acctModel)))
       const newData: Record<string, { date: string; close: number }[]> = {}
       histResults.forEach((res, i) => {
         newData[newSymbols[i]] = res.data.map(p => ({ date: p.date.slice(0, 10), close: p.close }))
       })
       setBenchmarkData(prev => ({ ...prev, ...newData }))
-      const comp = await comparePortfolio(newSymbols.join(','), currency, inceptionDate, to, acctModel)
+      const comp = await comparePortfolio(newSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate)
       setBenchmarkSymbols(prev => [...prev, ...newSymbols])
       setCompareResults(prev => [...prev, ...comp.benchmarks])
       setBenchmarkInput('')
@@ -97,6 +130,28 @@ export default function AnalysisPage() {
     } finally {
       setCompareLoading(false)
     }
+  }
+
+  const applyRiskFreeRate = async (newRate: number) => {
+    setRiskFreeRateInput((newRate * 100).toFixed(2))
+    if (newRate === riskFreeRate) return
+    setRiskFreeRate(newRate)
+    if (benchmarkSymbols.length === 0) return
+    setCompareLoading(true)
+    setCompareError('')
+    try {
+      const comp = await comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, newRate)
+      setCompareResults(comp.benchmarks)
+    } catch (err) {
+      setCompareError(err instanceof Error ? err.message : 'Comparison failed')
+    } finally {
+      setCompareLoading(false)
+    }
+  }
+
+  const handleRiskFreeRateBlur = () => {
+    const parsed = parseFloat(riskFreeRateInput)
+    applyRiskFreeRate(isNaN(parsed) ? riskFreeRate : Math.max(0, Math.min(20, parsed)) / 100)
   }
 
   const handleRemoveSymbol = (sym: string) => {
@@ -136,7 +191,7 @@ export default function AnalysisPage() {
 
           {/* Controls */}
           <div className={`flex flex-wrap justify-center gap-4 ${period === -1 ? 'mb-4' : 'mb-20'}`}>
-            <SegmentedControl label="Display Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
+            <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
             <SegmentedControl
               label="Time Period"
               options={PERIOD_OPTIONS}
@@ -212,6 +267,38 @@ export default function AnalysisPage() {
                 >
                   {compareLoading ? 'Processing…' : 'Execute'}
                 </button>
+              </div>
+              <div className="flex items-center gap-3 self-start">
+                <label className="text-xs font-semibold text-slate-500 whitespace-nowrap uppercase tracking-widest">Risk-free rate</label>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex items-center">
+                    <input
+                      type="number" value={riskFreeRateInput}
+                      onChange={e => setRiskFreeRateInput(e.target.value)}
+                      onBlur={handleRiskFreeRateBlur}
+                      onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+                      step="0.1" min="0" max="20"
+                      className="w-20 px-3 py-2 pr-6 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-xl text-sm text-slate-200 text-right focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                    <div className="absolute right-1.5 flex flex-col">
+                      <button
+                        type="button" tabIndex={-1}
+                        onClick={() => applyRiskFreeRate(Math.min(0.20, Math.round((riskFreeRate + 0.001) * 1000) / 1000))}
+                        className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                      >
+                        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 4L4 1L7 4"/></svg>
+                      </button>
+                      <button
+                        type="button" tabIndex={-1}
+                        onClick={() => applyRiskFreeRate(Math.max(0, Math.round((riskFreeRate - 0.001) * 1000) / 1000))}
+                        className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                      >
+                        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 1L4 4L7 1"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <span className="text-slate-500 text-sm select-none">%</span>
+                </div>
               </div>
               {benchmarkSymbols.length > 0 && (
                 <div className="flex flex-wrap gap-2 w-full">

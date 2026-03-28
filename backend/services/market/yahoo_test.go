@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +72,7 @@ func mockYahooResponse(symbol string, from, to time.Time) []byte {
 			Meta struct {
 				QuoteType string `json:"quoteType"`
 				LongName  string `json:"longName"`
+				Currency  string `json:"currency"`
 			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
@@ -168,7 +170,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		transport.calls = nil
 		from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC)
-		
+
 		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
@@ -181,7 +183,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		transport.calls = nil
 		from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC)
-		
+
 		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
@@ -195,7 +197,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		transport.calls = nil
 		from := time.Date(2024, 12, 25, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC)
-		
+
 		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
@@ -214,7 +216,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		transport.calls = nil
 		from := time.Date(2024, 12, 25, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 20, 0, 0, 0, 0, time.UTC)
-		
+
 		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
@@ -237,7 +239,7 @@ func TestNegativeCaching(t *testing.T) {
 			Code        string `json:"code"`
 			Description string `json:"description"`
 		}{Code: "Not Found", Description: "No data found, symbol may be delisted"}
-		
+
 		data, _ := json.Marshal(resp)
 		return &http.Response{
 			StatusCode: 200,
@@ -265,4 +267,62 @@ func TestNegativeCaching(t *testing.T) {
 	// It relies on dummy volume markers in the DB to skip hitting Yahoo again
 	assert.Empty(t, pts2)
 	assert.Len(t, transport.calls, 0, "Negative cache prevents identical failing fetches")
+}
+
+func TestGetCurrency(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewYahooFinanceService(db)
+
+	t.Run("returns currency from Yahoo meta", func(t *testing.T) {
+		body := `{"chart":{"result":[{"meta":{"quoteType":"ETF","currency":"EUR"}}],"error":null}}`
+		transport := &mockTransport{
+			resp: func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			},
+		}
+		svc.HTTPClient.Transport = transport
+
+		ccy, err := svc.GetCurrency("SXR8.DE")
+		require.NoError(t, err)
+		assert.Equal(t, "EUR", ccy)
+		require.Len(t, transport.calls, 1)
+		assert.Contains(t, transport.calls[0].URL.Path, "SXR8.DE")
+	})
+
+	t.Run("returns USD for a US-listed stock", func(t *testing.T) {
+		body := `{"chart":{"result":[{"meta":{"quoteType":"EQUITY","currency":"USD"}}],"error":null}}`
+		transport := &mockTransport{
+			resp: func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			},
+		}
+		svc.HTTPClient.Transport = transport
+
+		ccy, err := svc.GetCurrency("SPY")
+		require.NoError(t, err)
+		assert.Equal(t, "USD", ccy)
+	})
+
+	t.Run("returns empty string when symbol not found", func(t *testing.T) {
+		body := `{"chart":{"result":[],"error":{"code":"Not Found","description":"No data found"}}}`
+		transport := &mockTransport{
+			resp: func(_ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(strings.NewReader(body)),
+				}, nil
+			},
+		}
+		svc.HTTPClient.Transport = transport
+
+		ccy, err := svc.GetCurrency("UNKNOWN")
+		require.NoError(t, err)
+		assert.Equal(t, "", ccy)
+	})
 }

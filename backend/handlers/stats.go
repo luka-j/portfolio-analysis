@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"gofolio-analysis/middleware"
 	"gofolio-analysis/models"
 	"gofolio-analysis/services/flexquery"
+	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/market"
 	"gofolio-analysis/services/portfolio"
 	"gofolio-analysis/services/stats"
@@ -21,14 +23,18 @@ type StatsHandler struct {
 	Parser           *flexquery.Parser
 	PortfolioService *portfolio.Service
 	MarketProvider   market.Provider
+	FXService        *fx.Service
+	CurrencyGetter   market.CurrencyGetter
 }
 
 // NewStatsHandler creates a new StatsHandler.
-func NewStatsHandler(parser *flexquery.Parser, ps *portfolio.Service, mp market.Provider) *StatsHandler {
+func NewStatsHandler(parser *flexquery.Parser, ps *portfolio.Service, mp market.Provider, fxSvc *fx.Service, cg market.CurrencyGetter) *StatsHandler {
 	return &StatsHandler{
 		Parser:           parser,
 		PortfolioService: ps,
 		MarketProvider:   mp,
+		FXService:        fxSvc,
+		CurrencyGetter:   cg,
 	}
 }
 
@@ -203,7 +209,7 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 	acctModel := parseAccountingModel(c)
 
 	// Get portfolio daily returns.
-	portfolioReturns, pDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
 		return
@@ -211,36 +217,71 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 
 	var benchmarks []models.BenchmarkResult
 	for _, sym := range symbols {
-		prices, err := h.MarketProvider.GetHistory(sym, from, to)
+		// Fetch with a 7-day lookback to ensure we have a starting price for forward-filling
+		prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "fetching benchmark " + sym + ": " + err.Error()})
 			return
 		}
 
-		// Compute daily returns for the benchmark using AdjClose.
-		benchMap := make(map[string]float64)
-		for i := 1; i < len(prices); i++ {
-			adjPrev := prices[i-1].AdjClose
-			if adjPrev == 0 {
-				adjPrev = prices[i-1].Close
-			}
-			adjCur := prices[i].AdjClose
-			if adjCur == 0 {
-				adjCur = prices[i].Close
-			}
-			if adjPrev != 0 {
-				benchMap[prices[i].Date.Format("2006-01-02")] = (adjCur - adjPrev) / adjPrev
+		// For historical accounting, convert benchmark prices to the display currency so
+		// that the benchmark return series is in the same currency as the portfolio returns.
+		// Under spot accounting a constant multiplier cancels out in returns; under original
+		// there is no conversion at all — so FX adjustment is only needed for historical.
+		var fxRates map[string]float64 // date string → rate (nativeCcy → displayCcy)
+		if acctModel == models.AccountingModelHistorical || acctModel == "" {
+			if h.CurrencyGetter != nil {
+				nativeCcy, err := h.CurrencyGetter.GetCurrency(sym)
+				if err != nil {
+					log.Printf("Warning: could not determine currency for %s: %v", sym, err)
+				} else {
+					fxRates = buildFXRateMap(h.MarketProvider, nativeCcy, currency, from.AddDate(0, 0, -7), to)
+				}
 			}
 		}
 
-		// Align lengths.
+		// Build a daily price map that matches the portfolio's pricing method 
+		// (forward-filled over weekends/holidays).
+		benchPriceMap := make(map[string]float64)
+		var lastBenchPrice float64
+		for _, p := range prices {
+			adj := p.AdjClose
+			if adj == 0 {
+				adj = p.Close
+			}
+			ds := p.Date.Format("2006-01-02")
+			if fxRates != nil {
+				if r, ok := fxRates[ds]; ok && r != 0 {
+					adj *= r
+				}
+			}
+			benchPriceMap[ds] = adj
+		}
+
+		// Forward-fill prices
+		for d := from.AddDate(0, 0, -7); !d.After(to); d = d.AddDate(0, 0, 1) {
+			ds := d.Format("2006-01-02")
+			if p, ok := benchPriceMap[ds]; ok {
+				lastBenchPrice = p
+			} else if lastBenchPrice != 0 {
+				benchPriceMap[ds] = lastBenchPrice
+			}
+		}
+
+		// Align lengths using the exact date intervals from the portfolio
 		var pRet []float64
 		var bRet []float64
-		for i, date := range pDates {
-			dStr := date.Format("2006-01-02")
-			if br, ok := benchMap[dStr]; ok {
+		// startDates and endDates are synchronized with portfolioReturns
+		for i := 0; i < len(portfolioReturns); i++ {
+			prevDateStr := startDates[i]
+			curDateStr := endDates[i]
+
+			prevPrice, ok1 := benchPriceMap[prevDateStr]
+			curPrice, ok2 := benchPriceMap[curDateStr]
+
+			if ok1 && ok2 && prevPrice != 0 {
+				bRet = append(bRet, (curPrice - prevPrice)/prevPrice)
 				pRet = append(pRet, portfolioReturns[i])
-				bRet = append(bRet, br)
 			}
 		}
 

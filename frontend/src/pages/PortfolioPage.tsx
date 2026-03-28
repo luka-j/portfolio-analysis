@@ -7,7 +7,7 @@ import { getPortfolioValue, getPortfolioTrades, updateSymbolMapping, type Positi
 import { formatCurrency, formatNumber } from '../utils/format'
 
 const FX_METHOD_OPTIONS = [
-  { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the display currency, accounting for currency movements over time.' },
+  { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the currency, accounting for currency movements over time.' },
   { label: 'Spot',       value: 'spot'       as const, tooltip: "Applies today's FX rate to all prices. Shows current market value converted at the current exchange rate, regardless of when trades were made." },
 ]
 
@@ -100,7 +100,7 @@ export default function PortfolioPage() {
         {/* Controls — centered */}
         <div className="flex flex-wrap justify-center gap-4 mb-16">
           <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
-          <SegmentedControl label="Display Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
+          <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
         </div>
 
         {error && (
@@ -163,9 +163,14 @@ export default function PortfolioPage() {
                           <div className="font-semibold flex items-center gap-2 text-slate-100 text-sm tracking-tight">
                             {pos.symbol}
                             {pos.bond_duration != null && (
-                              <span className="text-amber-400 text-xs font-medium bg-amber-400/10 px-1.5 py-0.5 rounded-lg border border-amber-400/20">
-                                {pos.bond_duration.toFixed(1)}y
-                              </span>
+                              <div className="relative group">
+                                <span className="text-amber-400 text-xs font-medium bg-amber-400/10 px-1.5 py-0.5 rounded-lg border border-amber-400/20 cursor-default">
+                                  {pos.bond_duration.toFixed(1)}y
+                                </span>
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 w-52 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl">
+                                  Bond ETF effective duration — the weighted-average time (in years) until cash flows are received. Higher duration means greater sensitivity to interest rate changes.
+                                </div>
+                              </div>
                             )}
                             <button
                               onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}

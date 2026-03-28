@@ -193,7 +193,7 @@ export default function BreakdownPage() {
             Breakdown by asset class, geography, and sector based on current holdings.
           </p>
           <div className="mt-6">
-            <SegmentedControl label="Display Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
+            <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
           </div>
         </div>
 

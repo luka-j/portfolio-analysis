@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"gofolio-analysis/models"
+	"gofolio-analysis/services/market"
 )
 
 // parseDateRange extracts and validates from/to query parameters.
@@ -52,6 +54,38 @@ func splitCurrencies(s string) []string {
 // parseAccountingModel extracts the accounting_model query parameter.
 func parseAccountingModel(c *gin.Context) models.AccountingModel {
 	return models.ParseAccountingModel(c.DefaultQuery("accounting_model", "historical"))
+}
+
+// buildFXRateMap pre-fetches historical exchange rates for nativeCcy→displayCcy and returns
+// a date-keyed map of rates, forward-filled over weekends/holidays. Returns nil when no
+// conversion is needed (same currency) or when the fetch fails.
+func buildFXRateMap(mp market.Provider, nativeCcy, displayCcy string, from, to time.Time) map[string]float64 {
+	if nativeCcy == "" || nativeCcy == displayCcy {
+		return nil
+	}
+	fxSymbol := fmt.Sprintf("%s%s=X", nativeCcy, displayCcy)
+	points, err := mp.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to)
+	if err != nil {
+		log.Printf("Warning: pre-fetching FX %s: %v", fxSymbol, err)
+		return nil
+	}
+	pc := make(map[string]float64)
+	for _, p := range points {
+		pc[p.Date.Format("2006-01-02")] = p.Close
+	}
+	var lastRate float64
+	if len(points) > 0 {
+		lastRate = points[0].Close
+	}
+	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+		ds := d.Format("2006-01-02")
+		if r, ok := pc[ds]; ok {
+			lastRate = r
+		} else if lastRate != 0 {
+			pc[ds] = lastRate
+		}
+	}
+	return pc
 }
 
 // DateRangeFromData determines the logical start and end dates from the portfolio data.
