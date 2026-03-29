@@ -17,6 +17,10 @@ type Config struct {
 	// Provider ordering (comma-separated names, first = highest priority).
 	FundamentalsProviders string // FUNDAMENTALS_PROVIDERS, default "Yahoo"
 	BreakdownProviders    string // BREAKDOWN_PROVIDERS,    default "Yahoo"
+
+	GeminiAPIKey      string // GEMINI_API_KEY
+	GeminiSummaryModel string // GEMINI_SUMMARY_MODEL, default "gemini-3.1-flash-lite-preview"
+	GeminiChatModel    string // GEMINI_CHAT_MODEL,    default "gemini-3.1-pro-preview"
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -29,6 +33,10 @@ func Load() *Config {
 
 		FundamentalsProviders: getEnv("FUNDAMENTALS_PROVIDERS", "Yahoo"),
 		BreakdownProviders:    getEnv("BREAKDOWN_PROVIDERS", "Yahoo"),
+
+		GeminiAPIKey:       getEnv("GEMINI_API_KEY", ""),
+		GeminiSummaryModel: getEnv("GEMINI_SUMMARY_MODEL", "gemini-3.1-flash-lite-preview"),
+		GeminiChatModel:    getEnv("GEMINI_CHAT_MODEL", "gemini-3.1-pro-preview"),
 	}
 
 	if v := os.Getenv("ALLOWED_TOKEN_HASHES"); v != "" {

@@ -1,17 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
+import ReactMarkdown from 'react-markdown'
 import NavBar from '../components/NavBar'
+import { useNavigate } from 'react-router-dom'
 import {
   getPortfolioValue, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
   uploadFlexQuery, uploadEtradeBenefits, uploadEtradeSales,
+  getLLMSummary,
   type DailyValue,
 } from '../api'
 import { formatCurrencyCompact, formatDate, CURRENCIES } from '../utils/format'
+import { usePersistentState } from '../utils/usePersistentState'
 
 const PERIODS = [
   { label: '1M', months: 1 },
   { label: '3M', months: 3 },
-  { label: '6M', months: 6 },
   { label: '1Y', months: 12 },
   { label: 'All', months: 0 },
 ]
@@ -30,10 +33,10 @@ function getFromDate(months: number): string {
 }
 
 export default function LandingPage() {
-  const [currencyIdx, setCurrencyIdx] = useState(0)
+  const [currencyIdx, setCurrencyIdx] = usePersistentState('landing_currencyIdx', 0)
   const currency = CURRENCIES[currencyIdx]
-  const [period, setPeriod] = useState(0)
-  const [chartMode, setChartMode] = useState<'value' | 'twr' | 'mwr'>('value')
+  const [period, setPeriod] = usePersistentState('landing_period', 0)
+  const [chartMode, setChartMode] = usePersistentState<'value' | 'twr' | 'mwr'>('landing_chartMode', 'value')
   const [portfolioValues, setPortfolioValues] = useState<Record<string, number>>({})
   const [history, setHistory] = useState<DailyValue[]>([])
   const [twrHistory, setTwrHistory] = useState<DailyValue[]>([])
@@ -45,9 +48,29 @@ export default function LandingPage() {
   const [uploading, setUploading] = useState(false)
   const [uploadExpanded, setUploadExpanded] = useState(false)
 
+  const defaultPeriod = [0, 6].includes(new Date().getDay()) ? '1w' : '1d'
+  const [llmPeriod, setLlmPeriod] = usePersistentState('landing_llmPeriod', defaultPeriod)
+  const [llmSummary, setLlmSummary] = useState('')
+  const [llmSummaryLoading, setLlmSummaryLoading] = useState(false)
+  const [llmAvailable, setLlmAvailable] = useState<boolean | null>(null)
+
   const loadGenRef = useRef(0)
 
+  const navigate = useNavigate()
+
   const cycleCurrency = () => setCurrencyIdx(i => (i + 1) % CURRENCIES.length)
+
+  const digIntoThis = () => {
+    const periodLabel = llmPeriod === '1d' ? 'past day' : llmPeriod === '1w' ? 'past week' : 'past month'
+    navigate('/llm', {
+      state: {
+        initialMessages: [
+          { role: 'user', content: `What happened in the market this ${periodLabel}?` },
+          { role: 'assistant', content: llmSummary },
+        ],
+      },
+    })
+  }
 
   const loadData = useCallback(async () => {
     loadGenRef.current += 1
@@ -97,6 +120,34 @@ export default function LandingPage() {
     fetchChart()
     return () => { cancelled = true; controller.abort() }
   }, [currency, period])
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchSummary = async () => {
+      setLlmSummaryLoading(true)
+      try {
+        const res = await getLLMSummary(llmPeriod, currency)
+        if (!cancelled) {
+          setLlmSummary(res.summary)
+          setLlmAvailable(true)
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          if (err?.message?.includes('GEMINI_API_KEY')) {
+            setLlmAvailable(false) // Hide entirely
+            setLlmSummary("Market summary unavailable. Please configure GEMINI_API_KEY.")
+          } else {
+            setLlmAvailable(true) // Keep it shown but show error
+            setLlmSummary("Failed to generate market summary.")
+          }
+        }
+      } finally {
+        if (!cancelled) setLlmSummaryLoading(false)
+      }
+    }
+    fetchSummary()
+    return () => { cancelled = true }
+  }, [llmPeriod, currency, loadGenRef.current])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -174,7 +225,7 @@ export default function LandingPage() {
       <NavBar />
 
       {/* Hero section centered */}
-      <div className="z-10 w-full flex flex-col items-center gap-2 pointer-events-none">
+      <div className="z-10 w-full flex flex-col items-center gap-2 pointer-events-none -mb-6">
         <h1 className="text-4xl md:text-6xl font-bold text-white tabular-nums tracking-tight [text-shadow:0_0_20px_rgba(255,255,255,0.05)] flex items-baseline gap-2">
           <button
             className="pointer-events-auto text-indigo-300/70 hover:text-indigo-300 px-1.5 py-0.5 rounded-lg hover:bg-white/[0.07] hover:backdrop-blur-sm transition-all duration-200 active:scale-95"
@@ -208,8 +259,66 @@ export default function LandingPage() {
           </div>
         )}
 
+        {/* LLM Market Summary Widget */}
+        {llmAvailable === true && (
+          <div className="pointer-events-auto mt-1 w-[95%] md:w-[80%] max-w-7xl px-2 py-1 flex flex-col items-center gap-1">
+             <div className="flex items-center gap-2">
+               <span className="text-[10px] uppercase font-bold text-indigo-300">What happened past:</span>
+               <div className="flex gap-1">
+                  {['1d', '1w', '1m'].map(p => {
+                    const label = p === '1d' ? 'Day' : p === '1w' ? 'Week' : 'Month';
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setLlmPeriod(p)}
+                        className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-md transition-all ${llmPeriod === p ? 'text-indigo-400' : 'text-indigo-300/50 hover:text-indigo-300'}`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+               </div>
+             </div>
+             <div className="text-xs text-indigo-100/90 text-left leading-relaxed font-medium min-h-[30px] w-full max-w-none px-4 mx-auto flex flex-col items-center justify-center mt-1">
+               {llmSummaryLoading ? (
+                 <span className="animate-pulse text-center">Analyzing latest market movements...</span>
+               ) : (
+                 <div className="w-full flex flex-col items-center">
+                   {llmSummary ? (
+                     <div className="flex flex-col gap-1.5 w-full">
+                       <ReactMarkdown
+                         components={{
+                           p: ({ children }) => <p className="mb-1 last:mb-0 text-center mx-auto max-w-2xl text-slate-300">{children}</p>,
+                           ul: ({ children }) => <ul className="grid grid-cols-1 md:grid-cols-2 gap-3 list-none justify-center w-full items-stretch">{children}</ul>,
+                           li: ({ children }) => (
+                             <li className="flex items-start gap-2 bg-white/[0.03] hover:bg-white/[0.05] transition-colors border border-white/5 px-4 py-2 rounded-2xl text-left shadow-md leading-relaxed w-full group backdrop-blur-sm">
+                               <span className="text-indigo-500/80 group-hover:text-indigo-400 transition-colors shrink-0 mt-[1px] font-black text-lg leading-none">•</span>
+                               <span className="flex-1 text-slate-200">{children}</span>
+                             </li>
+                           ),
+                           strong: ({ children }) => <strong className="text-white font-bold tracking-wide">{children}</strong>,
+                         }}
+                       >
+                         {llmSummary}
+                       </ReactMarkdown>
+                       <div className="text-center">
+                         <button
+                           onClick={digIntoThis}
+                           className="inline text-[10px] uppercase font-black tracking-widest text-emerald-500/80 hover:text-emerald-400 transition-colors shadow-sm"
+                         >
+                           Dig into this →
+                         </button>
+                       </div>
+                     </div>
+                   ) : <span className="text-center w-full">No market summary available.</span>}
+                 </div>
+               )}
+             </div>
+          </div>
+        )}
+
         {/* Mode selector — simple pill toggles with proper padding */}
-        <div className="pointer-events-auto flex items-center gap-1 mt-2 bg-[#1a1d2e] rounded-2xl p-1 border border-white/6">
+        <div className="pointer-events-auto flex items-center gap-1 mt-4 bg-[#1a1d2e] rounded-2xl p-1 border border-white/6">
           {(['value', 'twr', 'mwr'] as const).map(mode => (
             <button
               key={mode}
@@ -227,10 +336,10 @@ export default function LandingPage() {
       </div>
 
       {/* Main chart area with spacing from screen edge */}
-      <div className="relative flex-1 mt-auto flex flex-col justify-end px-8 mb-6">
+      <div className="relative flex-1 mt-auto flex flex-col justify-end pl-8 pr-24 mb-6">
         
         {/* The chart itself — axes returned and labels added */}
-        <div className="w-full h-[65%] min-h-87.5">
+        <div className="w-full h-[75%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[85%]">
           {chartLoading || loading ? (
             <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
           ) : chartData.length === 0 ? (
@@ -293,7 +402,7 @@ export default function LandingPage() {
         </div>
 
         {/* Period vertical pills — middle-right */}
-        <div className="absolute right-8 top-4 bottom-56 flex flex-col items-center justify-center gap-2 z-10">
+        <div className="absolute right-8 bottom-44 flex flex-col items-center gap-2 z-10">
           {PERIODS.map(p => (
             <button
               key={p.label}
@@ -312,7 +421,6 @@ export default function LandingPage() {
         {/* Upload buttons — bottom right */}
         <div
           className="absolute bottom-4 right-8 flex flex-col items-end gap-2 z-20"
-          onMouseEnter={() => setUploadExpanded(true)}
           onMouseLeave={() => setUploadExpanded(false)}
         >
           {/* Expanded options */}
@@ -342,7 +450,10 @@ export default function LandingPage() {
           </div>
 
           {/* Trigger button */}
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-default transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
+          <div
+            onMouseEnter={() => setUploadExpanded(true)}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-default transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </div>
         </div>

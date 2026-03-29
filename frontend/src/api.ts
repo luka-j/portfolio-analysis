@@ -57,6 +57,7 @@ export interface PositionValue {
   value: number;
   commission: number;
   bond_duration?: number; // bond ETF: effective duration in years
+  name?: string;          // security long name
 }
 
 export interface PortfolioValueResponse {
@@ -171,7 +172,26 @@ export interface TaxReportSection {
 export interface TaxReportResponse {
   year: number;
   employment_income: TaxReportSection;
-  investment_income: TaxReportSection;
+}
+
+// ---- LLM ----
+
+export interface LLMSummaryResponse {
+  summary: string;
+}
+
+export interface LLMChatRequest {
+  prompt_type: string;
+  message: string;
+  currency: string;
+  model?: 'flash' | 'pro';
+  include_portfolio?: boolean;
+  custom_weights?: { symbol: string; weight: number }[];
+  history?: { role: 'user' | 'assistant'; content: string }[];
+}
+
+export interface LLMChatResponse {
+  response: string;
 }
 
 // ---------- API Calls ----------
@@ -307,4 +327,20 @@ export interface BreakdownResponse {
 
 export async function getPortfolioBreakdown(currency = 'USD'): Promise<BreakdownResponse> {
   return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}`);
+}
+
+export async function getLLMAvailable(): Promise<{ available: boolean }> {
+  return request<{ available: boolean }>('/llm/available');
+}
+
+export async function getLLMSummary(period = '1d', currency = 'USD'): Promise<LLMSummaryResponse> {
+  return request<LLMSummaryResponse>(`/llm/summary?period=${period}&currency=${encodeURIComponent(currency)}`);
+}
+
+export async function postLLMChat(req: LLMChatRequest): Promise<LLMChatResponse> {
+  return request<LLMChatResponse>('/llm/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
 }

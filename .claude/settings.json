@@ -5,7 +5,12 @@
       "Bash(find /d/projects/gofolio-analysis -name *.env -o -name .env -o -name docker-compose* -o -name Dockerfile*)",
       "Bash(find /d/projects/gofolio-analysis -name docker-compose* -o -name Dockerfile* -o -name *.env*)",
       "Bash(xargs grep:*)",
-      "Bash(grep -v \"//.*Original\")"
+      "Bash(grep -v \"//.*Original\")",
+      "Bash(grep -r \"react-markdown\\\\|marked\\\\|remark\\\\|MdxProvider\\\\|MDX\" /d/projects/gofolio-analysis/frontend --include=*.json --include=*.ts --include=*.tsx)",
+      "Read(//d:/projects/gofolio-analysis/backend/**)",
+      "Bash(grep -E \"\\\\.\\(go|ts\\)$\")",
+      "Bash(grep -n \"type LLMCache\" /d/projects/gofolio-analysis/backend/models/*.go)",
+      "Bash(npm run:*)"
     ]
   }
 }

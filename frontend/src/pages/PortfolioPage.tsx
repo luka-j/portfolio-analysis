@@ -5,6 +5,7 @@ import Spinner from '../components/Spinner'
 import SymbolMappingModal from '../components/SymbolMappingModal'
 import { getPortfolioValue, getPortfolioTrades, updateSymbolMapping, type PositionValue, type TradeEntry } from '../api'
 import { formatCurrency, formatNumber } from '../utils/format'
+import { usePersistentState } from '../utils/usePersistentState'
 
 const FX_METHOD_OPTIONS = [
   { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the currency, accounting for currency movements over time.' },
@@ -19,8 +20,8 @@ const CURRENCY_OPTIONS = [
 ]
 
 export default function PortfolioPage() {
-  const [currency, setCurrency] = useState('CZK')
-  const [acctModel, setAcctModel] = useState<'historical' | 'spot'>('historical')
+  const [currency, setCurrency] = usePersistentState('portfolio_currency', 'CZK')
+  const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('portfolio_acctModel', 'historical')
   const [positions, setPositions] = useState<PositionValue[]>([])
   const [totalValue, setTotalValue] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -161,7 +162,14 @@ export default function PortfolioPage() {
                         </div>
                         <div className="min-w-0">
                           <div className="font-semibold flex items-center gap-2 text-slate-100 text-sm tracking-tight">
-                            {pos.symbol}
+                            <span className={pos.name ? 'relative group/name cursor-default' : undefined}>
+                              {pos.symbol}
+                              {pos.name && (
+                                <span className="absolute bottom-full left-0 mb-2 w-max max-w-56 px-3 py-2 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/name:opacity-100 transition-opacity z-50 shadow-2xl whitespace-normal font-normal tracking-normal">
+                                  {pos.name}
+                                </span>
+                              )}
+                            </span>
                             {pos.bond_duration != null && (
                               <div className="relative group">
                                 <span className="text-amber-400 text-xs font-medium bg-amber-400/10 px-1.5 py-0.5 rounded-lg border border-amber-400/20 cursor-default">

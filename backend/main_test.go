@@ -139,7 +139,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns, nil)
 	breakdownService := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, mockMarket, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
+	router := setupRouter(cfg, parser, db, mockMarket, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, nil)
 	ts := httptest.NewServer(router)
 
 	cleanup := func() {
@@ -439,7 +439,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 	fundSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allF, allB, nil)
 	bkdSvc := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, m, m, fxSvc, portfolioSvc, taxSvc, fundSvc, bkdSvc)
+	router := setupRouter(cfg, parser, db, m, m, fxSvc, portfolioSvc, taxSvc, fundSvc, bkdSvc, nil)
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
@@ -746,7 +746,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2, nil)
 	breakdownService2 := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, mockMarket, nil, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2)
+	router := setupRouter(cfg, parser, db, mockMarket, nil, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2, nil)
 	tsServer := httptest.NewServer(router)
 	defer tsServer.Close()
 

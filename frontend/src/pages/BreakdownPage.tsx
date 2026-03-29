@@ -5,6 +5,7 @@ import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } from '../api'
 import { CURRENCIES } from '../utils/format'
+import { usePersistentState } from '../utils/usePersistentState'
 
 const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
 
@@ -161,7 +162,7 @@ function formatCurrencyValue(value: number, currency: string): string {
 }
 
 export default function BreakdownPage() {
-  const [currency, setCurrency] = useState('USD')
+  const [currency, setCurrency] = usePersistentState('breakdown_currency', 'USD')
   const [sections, setSections] = useState<BreakdownSection[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

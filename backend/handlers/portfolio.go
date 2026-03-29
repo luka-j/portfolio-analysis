@@ -45,6 +45,9 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 		return
 	}
 
+	// Invalidate LLM cache since portfolio changed
+	h.Parser.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":                 "upload successful",
 		"positions_count":         len(data.OpenPositions),
@@ -118,6 +121,9 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 		}
 	}
 
+	// Invalidate LLM cache since portfolio changed
+	h.Parser.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "upload successful",
 		"saved_count":  saved,
@@ -179,9 +185,12 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 			eff = pos.Symbol
 		}
 		var fund models.AssetFundamental
-		if err := h.Parser.DB.Select("asset_type, duration").Where("symbol = ?", eff).First(&fund).Error; err == nil {
+		if err := h.Parser.DB.Select("asset_type, duration, name").Where("symbol = ?", eff).First(&fund).Error; err == nil {
 			if fund.AssetType == "Bond ETF" && fund.Duration != nil {
 				result.Positions[i].BondDuration = fund.Duration
+			}
+			if fund.Name != "" {
+				result.Positions[i].Name = fund.Name
 			}
 		}
 	}

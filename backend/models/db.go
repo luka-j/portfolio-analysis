@@ -73,3 +73,13 @@ type EtfBreakdown struct {
 	DataSource  string                                                    // "Yahoo"
 	LastUpdated time.Time `gorm:"index"`
 }
+
+// LLMCache stores cached responses from the LLM.
+type LLMCache struct {
+	ID         uint      `gorm:"primaryKey"`
+	UserHash   string    `gorm:"uniqueIndex:idx_llmcache_user_prompt;not null"`
+	PromptType string    `gorm:"uniqueIndex:idx_llmcache_user_prompt;not null"` // e.g. "summary_1d", "canned_analysis"
+	Model      string    `gorm:"uniqueIndex:idx_llmcache_user_prompt;not null"` // "flash" | "pro"
+	Response   string    // The markdown/text response
+	CreatedAt  time.Time `gorm:"index"`
+}

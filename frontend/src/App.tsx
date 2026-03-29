@@ -6,6 +6,7 @@ import PortfolioPage from './pages/PortfolioPage'
 import AnalysisPage from './pages/AnalysisPage'
 import BreakdownPage from './pages/BreakdownPage'
 import TaxPage from './pages/TaxPage'
+import LLMPage from './pages/LLMPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!hasToken()) {
@@ -23,6 +24,7 @@ export default function App() {
       <Route path="/analysis" element={<ProtectedRoute><AnalysisPage /></ProtectedRoute>} />
       <Route path="/breakdown" element={<ProtectedRoute><BreakdownPage /></ProtectedRoute>} />
       <Route path="/tax" element={<ProtectedRoute><TaxPage /></ProtectedRoute>} />
+      <Route path="/llm" element={<ProtectedRoute><LLMPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

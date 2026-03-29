@@ -9,6 +9,7 @@ import {
   type StatsResponse, type DailyValue, type BenchmarkResult,
 } from '../api'
 import { formatDate, CURRENCIES } from '../utils/format'
+import { usePersistentState } from '../utils/usePersistentState'
 
 const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
 
@@ -36,9 +37,9 @@ function getFromDate(months: number): string {
 
 
 export default function AnalysisPage() {
-  const [currency, setCurrency]   = useState('CZK')
-  const [period, setPeriod]       = useState(0)
-  const [acctModel, setAcctModel] = useState<'historical' | 'spot'>('historical')
+  const [currency, setCurrency]   = usePersistentState('analysis_currency', 'CZK')
+  const [period, setPeriod]       = usePersistentState('analysis_period', 0)
+  const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('analysis_acctModel', 'historical')
   const [customFrom, setCustomFrom] = useState(() => getFromDate(12))
   const [customTo,   setCustomTo]   = useState(() => formatDate(new Date()))
   const [stats, setStats]           = useState<StatsResponse | null>(null)

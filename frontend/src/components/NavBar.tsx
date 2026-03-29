@@ -1,8 +1,16 @@
+import { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { clearToken } from '../api'
+import { clearToken, getLLMAvailable } from '../api'
 
 export default function NavBar() {
   const navigate = useNavigate()
+  const [llmAvailable, setLlmAvailable] = useState(false)
+
+  useEffect(() => {
+    getLLMAvailable()
+      .then(res => setLlmAvailable(res.available))
+      .catch(() => setLlmAvailable(false))
+  }, [])
 
   const handleLogout = () => {
     clearToken()
@@ -47,6 +55,22 @@ export default function NavBar() {
           <NavLink to="/tax" className={linkClass}>
             Tax
           </NavLink>
+          {llmAvailable ? (
+            <NavLink to="/llm" className={linkClass}>
+              LLM
+            </NavLink>
+          ) : (
+            <div className="relative group flex items-center">
+              <span 
+                className="text-slate-600 cursor-not-allowed text-sm font-medium transition-colors duration-200"
+              >
+                LLM
+              </span>
+              <div className="absolute top-full mt-2.5 w-60 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl left-1/2 -translate-x-1/2">
+                LLM features are currently unavailable. Please configure GEMINI_API_KEY.
+              </div>
+            </div>
+          )}
         </nav>
 
         {/* Right: Logout */}

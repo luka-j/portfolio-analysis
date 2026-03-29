@@ -152,6 +152,7 @@ type PositionValue struct {
 	Commission float64  `json:"commission"`
 
 	BondDuration *float64 `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
+	Name         string   `json:"name,omitempty"`           // security long name from asset_fundamentals
 }
 
 // PortfolioValueResponse is the response for GET /portfolio/value.

@@ -19,9 +19,11 @@ import (
 	"gofolio-analysis/services/flexquery"
 	"gofolio-analysis/services/fundamentals"
 	"gofolio-analysis/services/fx"
+	"gofolio-analysis/services/llm"
 	"gofolio-analysis/services/market"
 	"gofolio-analysis/services/portfolio"
 	"gofolio-analysis/services/tax"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -62,8 +64,10 @@ func main() {
 	)
 	breakdownService := breakdownsvc.NewService(database)
 
+	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiSummaryModel, cfg.GeminiChatModel, database, portfolioSvc)
+
 	// Build Gin engine.
-	r := setupRouter(cfg, parser, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService)
+	r := setupRouter(cfg, parser, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -100,6 +104,7 @@ func main() {
 func setupRouter(
 	cfg *config.Config,
 	parser *flexquery.Parser,
+	database *gorm.DB,
 	marketSvc market.Provider,
 	currencyGetter market.CurrencyGetter,
 	fxSvc *fx.Service,
@@ -107,6 +112,7 @@ func setupRouter(
 	taxSvc *tax.Service,
 	fundamentalsSvc *fundamentals.Service,
 	breakdownService *breakdownsvc.Service,
+	llmService *llm.Service,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -159,6 +165,12 @@ func setupRouter(
 	// Breakdown endpoint.
 	bh := handlers.NewBreakdownHandler(parser, portfolioSvc, breakdownService, fundamentalsSvc)
 	api.GET("/portfolio/breakdown", bh.GetBreakdown)
+
+	// LLM endpoints.
+	lh := handlers.NewLLMHandler(parser, database, llmService)
+	api.GET("/llm/available", lh.IsAvailable)
+	api.GET("/llm/summary", lh.GetSummary)
+	api.POST("/llm/chat", lh.Chat)
 
 	return r
 }
