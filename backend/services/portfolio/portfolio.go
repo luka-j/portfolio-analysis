@@ -11,6 +11,7 @@ import (
 	"gofolio-analysis/services/fifo"
 	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/market"
+	"gofolio-analysis/services/stats"
 )
 
 // Service reconstructs and values portfolios from FlexQuery data.
@@ -799,6 +800,87 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 		result = append(result, models.DailyValue{
 			Date:  dateStr,
 			Value: (cumProduct - 1.0) * 100, // express as percentage
+		})
+	}
+
+	return &models.PortfolioHistoryResponse{
+		Currency:        currency,
+		AccountingModel: string(acctModel),
+		Data:            result,
+	}, nil
+}
+
+// GetCumulativeMWR computes the day-by-day cumulative Money-Weighted Return series
+// over [from, to]. Each data point expresses the portfolio's MWR (as a percentage)
+// relative to the first day, considering external cash flows.
+func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) (*models.PortfolioHistoryResponse, error) {
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel)
+	if err != nil {
+		return nil, err
+	}
+	if len(hist.Data) < 2 {
+		return &models.PortfolioHistoryResponse{
+			Currency:        currency,
+			AccountingModel: string(acctModel),
+			Data:            hist.Data,
+		}, nil
+	}
+
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]models.DailyValue, 0, len(hist.Data))
+	// First point is always 0% growth.
+	result = append(result, models.DailyValue{Date: hist.Data[0].Date, Value: 0})
+
+	var baseCashFlows []models.CashFlow
+	if hist.Data[0].Value > 0 {
+		baseCashFlows = append(baseCashFlows, models.CashFlow{
+			Date:   from,
+			Amount: -hist.Data[0].Value,
+		})
+	}
+
+	actualFromStr := hist.Data[0].Date
+
+	cfIdx := 0
+	for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= actualFromStr {
+		cfIdx++
+	}
+
+	var currentCashFlows []models.CashFlow
+	currentCashFlows = append(currentCashFlows, baseCashFlows...)
+
+	for i := 1; i < len(hist.Data); i++ {
+		curValue := hist.Data[i].Value
+		dateStr := hist.Data[i].Date
+
+		for cfIdx < len(cashFlows) && cashFlows[cfIdx].Date.Format("2006-01-02") <= dateStr {
+			currentCashFlows = append(currentCashFlows, cashFlows[cfIdx])
+			cfIdx++
+		}
+
+		curDate, _ := time.Parse("2006-01-02", dateStr)
+
+		var mwrVal float64
+		// We can only compute MWR if we have cash flows (which we always do via baseCashFlows)
+		mwr, err := stats.CalculateMWR(currentCashFlows, curValue, curDate)
+		if err == nil {
+			mwrVal = mwr * 100 // express as percentage like TWR
+		} else {
+			// Fallback to previous MWR if it fails to converge
+			if i > 1 {
+				mwrVal = result[i-1].Value
+			} else {
+				mwrVal = 0
+			}
+		}
+
+		result = append(result, models.DailyValue{
+			Date:  dateStr,
+			Value: mwrVal,
 		})
 	}
 

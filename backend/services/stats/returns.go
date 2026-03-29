@@ -33,6 +33,17 @@ func CalculateMWR(cashFlows []models.CashFlow, endValue float64, endDate time.Ti
 		return 0, fmt.Errorf("no deposits or ending value for MWR calculation")
 	}
 
+	// Fast-path edge case: total loss with no withdrawals
+	totalWithdrawals := 0.0
+	for _, cf := range cashFlows {
+		if cf.Amount > 0 {
+			totalWithdrawals += cf.Amount
+		}
+	}
+	if totalWithdrawals == 0 && endValue <= 0 {
+		return -1.0, nil
+	}
+
 	// NPV(r) = sum_i CF_i / (1+r)^t_i + endValue / (1+r)^T = 0
 	// where t_i is in years from the first cash flow.
 	yearFrac := func(d time.Time) float64 {
@@ -91,8 +102,12 @@ func CalculateMWR(cashFlows []models.CashFlow, endValue float64, endDate time.Ti
 		r = rNew
 	}
 
-	if !converged && (math.IsNaN(r) || math.IsInf(r, 0)) {
-		return 0, fmt.Errorf("MWR did not converge")
+	if !converged {
+		// If it broke early due to vanishing derivative, or hit max iterations, check if we're actually close to a solution.
+		// Using 1e-5 since NPV scale depends on portfolio size.
+		if math.Abs(npv(r)) > 0.01 && (math.IsNaN(r) || math.IsInf(r, 0) || !converged) {
+			return 0, fmt.Errorf("MWR did not converge")
+		}
 	}
 	
 	// Convert annualized IRR 'r' into the unannualized period return matching TWR.

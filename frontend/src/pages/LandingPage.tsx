@@ -40,6 +40,7 @@ export default function LandingPage() {
   const [portfolioValues, setPortfolioValues] = useState<Record<string, number>>({})
   const [history, setHistory] = useState<DailyValue[]>([])
   const [twrHistory, setTwrHistory] = useState<DailyValue[]>([])
+  const [mwrHistory, setMwrHistory] = useState<DailyValue[]>([])
   const [stats, setStats] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(false)
@@ -108,9 +109,12 @@ export default function LandingPage() {
         const hist = await getPortfolioHistory(from, to, currency, 'historical', controller.signal)
         if (cancelled) return
         setHistory(hist.data)
-        const twrHist = await getPortfolioReturns(from, to, currency, 'historical', controller.signal)
+        const twrHist = await getPortfolioReturns(from, to, currency, 'historical', 'twr', controller.signal)
         if (cancelled) return
         setTwrHistory(twrHist.data)
+        const mwrHist = await getPortfolioReturns(from, to, currency, 'historical', 'mwr', controller.signal)
+        if (cancelled) return
+        setMwrHistory(mwrHist.data)
       } catch {
         // silently swallow
       } finally {
@@ -207,12 +211,10 @@ export default function LandingPage() {
     if (chartMode === 'twr') {
       return twrHistory.map(d => ({ date: d.date, value: d.value }))
     }
-    const mwr = typeof stats?.mwr === 'number' ? (stats.mwr as number) * 100 : null
-    return history.map(d => {
-      const firstValue = history[0]?.value || 1
-      const simpleGrowth = firstValue > 0 ? ((d.value / firstValue) - 1) * 100 : 0
-      return { date: d.date, value: simpleGrowth, mwr: mwr ?? 0 }
-    })
+    if (chartMode === 'mwr') {
+      return mwrHistory.map(d => ({ date: d.date, value: d.value }))
+    }
+    return []
   })()
 
   const mwr = typeof stats?.mwr === 'number' ? (stats.mwr as number) * 100 : null
@@ -339,7 +341,7 @@ export default function LandingPage() {
       <div className="relative flex-1 mt-auto flex flex-col justify-end pl-8 pr-24 mb-6">
         
         {/* The chart itself — axes returned and labels added */}
-        <div className="w-full h-[75%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[85%]">
+        <div className="w-full h-[85%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[90%]">
           {chartLoading || loading ? (
             <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
           ) : chartData.length === 0 ? (

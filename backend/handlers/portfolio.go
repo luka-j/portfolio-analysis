@@ -299,8 +299,8 @@ func (h *PortfolioHandler) GetTrades(c *gin.Context) {
 }
 
 // GetReturns handles GET /api/v1/portfolio/history/returns
-// Returns the daily cumulative TWR series (in %) so the frontend can
-// plot a true Time-Weighted Return chart, uncontaminated by cash flows.
+// Returns the daily cumulative return series (TWR or MWR in %) so the frontend can
+// plot a true return chart, uncontaminated by cash flows.
 func (h *PortfolioHandler) GetReturns(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
@@ -329,9 +329,19 @@ func (h *PortfolioHandler) GetReturns(c *gin.Context) {
 	}
 
 	acctModel := parseAccountingModel(c)
-	result, err := h.PortfolioService.GetCumulativeTWR(data, from, to, currency, acctModel)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	returnType := c.DefaultQuery("type", "twr")
+
+	var result *models.PortfolioHistoryResponse
+	var calcErr error
+
+	if returnType == "mwr" {
+		result, calcErr = h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel)
+	} else {
+		result, calcErr = h.PortfolioService.GetCumulativeTWR(data, from, to, currency, acctModel)
+	}
+
+	if calcErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": calcErr.Error()})
 		return
 	}
 

@@ -271,14 +271,14 @@ export async function getPortfolioTrades(
   );
 }
 
-// getPortfolioReturns fetches the real cumulative TWR series (in %) from the backend.
-// This is the correct data source for the TWR chart — each value is the chain-linked
-// time-weighted return up to that date, with cash flows properly neutralised.
+// getPortfolioReturns fetches the real cumulative TWR or MWR series (in %) from the backend.
+// This is the correct data source for the TWR / MWR chart — each value is the chain-linked
+// return up to that date, with cash flows properly neutralised.
 export async function getPortfolioReturns(
-  from: string, to: string, currency: string, accountingModel = 'historical', signal?: AbortSignal
+  from: string, to: string, currency: string, accountingModel = 'historical', returnType = 'twr', signal?: AbortSignal
 ): Promise<PortfolioHistoryResponse> {
   return request<PortfolioHistoryResponse>(
-    `/portfolio/history/returns?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}`,
+    `/portfolio/history/returns?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&type=${returnType}`,
     { signal }
   );
 }
