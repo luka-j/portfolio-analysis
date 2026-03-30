@@ -10,6 +10,7 @@ import (
 	"gofolio-analysis/middleware"
 	"gofolio-analysis/models"
 	"gofolio-analysis/services/flexquery"
+	"gofolio-analysis/services/fx"
 	"gofolio-analysis/services/parsers"
 	"gofolio-analysis/services/portfolio"
 )
@@ -18,11 +19,12 @@ import (
 type PortfolioHandler struct {
 	Parser           *flexquery.Parser
 	PortfolioService *portfolio.Service
+	FXService        *fx.Service
 }
 
 // NewPortfolioHandler creates a new PortfolioHandler.
-func NewPortfolioHandler(parser *flexquery.Parser, ps *portfolio.Service) *PortfolioHandler {
-	return &PortfolioHandler{Parser: parser, PortfolioService: ps}
+func NewPortfolioHandler(parser *flexquery.Parser, ps *portfolio.Service, fxSvc *fx.Service) *PortfolioHandler {
+	return &PortfolioHandler{Parser: parser, PortfolioService: ps, FXService: fxSvc}
 }
 
 // Upload handles POST /api/v1/portfolio/upload
@@ -346,6 +348,189 @@ func (h *PortfolioHandler) GetReturns(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// SymbolPriceHistory holds per-symbol price change and average price over a date range.
+type SymbolPriceHistory struct {
+	Symbol    string   `json:"symbol"`
+	Exchange  string   `json:"exchange,omitempty"`
+	ChangePct *float64 `json:"change_pct"`
+	AvgPrice  *float64 `json:"avg_price"`
+	Currency  string   `json:"currency"`
+}
+
+// GetPriceHistory handles GET /api/v1/portfolio/price-history
+// Returns change % and average price for each portfolio position over the requested date range.
+func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	data, err := h.Parser.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	from, to, err := parseDateRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	currency := c.DefaultQuery("currency", "USD")
+	acctModel := parseAccountingModel(c)
+
+	// Resolve positions to get yahoo symbols and native currencies.
+	val, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(val.Positions) == 0 {
+		c.JSON(http.StatusOK, gin.H{"items": []SymbolPriceHistory{}})
+		return
+	}
+
+	// Build a slice of unique yahoo symbols and map them back to positions.
+	type posInfo struct {
+		symbol         string
+		exchange       string
+		yahooSymbol    string
+		nativeCurrency string
+	}
+	positions := make([]posInfo, 0, len(val.Positions))
+	yahooSymbols := make([]string, 0, len(val.Positions))
+	seen := make(map[string]bool)
+	for _, pos := range val.Positions {
+		ys := pos.YahooSymbol
+		if ys == "" {
+			ys = pos.Symbol
+		}
+		positions = append(positions, posInfo{
+			symbol:         pos.Symbol,
+			exchange:       pos.ListingExchange,
+			yahooSymbol:    ys,
+			nativeCurrency: pos.NativeCurrency,
+		})
+		if !seen[ys] {
+			seen[ys] = true
+			yahooSymbols = append(yahooSymbols, ys)
+		}
+	}
+
+	// "First" price per symbol: latest close on or before `from`.
+	// Using a subquery join so a single round-trip handles all symbols and is
+	// compatible with both PostgreSQL and SQLite.
+	subFirst := h.Parser.DB.Model(&models.MarketData{}).
+		Select("symbol, MAX(date) as max_date").
+		Where("symbol IN ? AND date <= ? AND volume != -1", yahooSymbols, from).
+		Group("symbol")
+	var firstRows []models.MarketData
+	if err := h.Parser.DB.
+		Joins("JOIN (?) sub ON market_data.symbol = sub.symbol AND market_data.date = sub.max_date", subFirst).
+		Where("market_data.symbol IN ?", yahooSymbols).
+		Select("market_data.symbol, market_data.adj_close").
+		Find(&firstRows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "querying first prices: " + err.Error()})
+		return
+	}
+	firstBySymbol := make(map[string]float64, len(firstRows))
+	for _, r := range firstRows {
+		firstBySymbol[r.Symbol] = r.AdjClose
+	}
+
+	// "Last" price per symbol: live current price when `to` is today, otherwise
+	// the latest close on or before `to`.
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	toIsToday := !to.Before(today) && to.Before(today.AddDate(0, 0, 1))
+
+	lastBySymbol := make(map[string]float64, len(yahooSymbols))
+	if toIsToday && h.PortfolioService.CurrentPriceProvider != nil {
+		for _, ys := range yahooSymbols {
+			if p, err := h.PortfolioService.CurrentPriceProvider.GetCurrentPrice(ys); err == nil && p != 0 {
+				lastBySymbol[ys] = p
+			}
+		}
+	}
+	// Fall back to latest historical close ≤ to for any symbol without a live price.
+	var needHistLast []string
+	for _, ys := range yahooSymbols {
+		if lastBySymbol[ys] == 0 {
+			needHistLast = append(needHistLast, ys)
+		}
+	}
+	if len(needHistLast) > 0 {
+		subLast := h.Parser.DB.Model(&models.MarketData{}).
+			Select("symbol, MAX(date) as max_date").
+			Where("symbol IN ? AND date <= ? AND volume != -1", needHistLast, to).
+			Group("symbol")
+		var lastRows []models.MarketData
+		if err := h.Parser.DB.
+			Joins("JOIN (?) sub ON market_data.symbol = sub.symbol AND market_data.date = sub.max_date", subLast).
+			Where("market_data.symbol IN ?", needHistLast).
+			Select("market_data.symbol, market_data.adj_close").
+			Find(&lastRows).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "querying last prices: " + err.Error()})
+			return
+		}
+		for _, r := range lastRows {
+			lastBySymbol[r.Symbol] = r.AdjClose
+		}
+	}
+
+	// Range rows for avg_price (all closes in [from, to]).
+	var rows []models.MarketData
+	if err := h.Parser.DB.
+		Where("symbol IN ? AND date >= ? AND date <= ? AND volume != -1", yahooSymbols, from, to).
+		Order("symbol, date").
+		Select("symbol, date, adj_close").
+		Find(&rows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "querying market data: " + err.Error()})
+		return
+	}
+	bySymbol := make(map[string][]models.MarketData, len(yahooSymbols))
+	for _, r := range rows {
+		bySymbol[r.Symbol] = append(bySymbol[r.Symbol], r)
+	}
+
+	// For each position compute change_pct and avg_price.
+	items := make([]SymbolPriceHistory, 0, len(positions))
+	for _, pos := range positions {
+		item := SymbolPriceHistory{
+			Symbol:   pos.symbol,
+			Exchange: pos.exchange,
+			Currency: currency,
+		}
+
+		firstPrice := firstBySymbol[pos.yahooSymbol]
+		lastPrice := lastBySymbol[pos.yahooSymbol]
+		if firstPrice != 0 && lastPrice != 0 {
+			pct := (lastPrice - firstPrice) / firstPrice * 100
+			item.ChangePct = &pct
+		}
+
+		pts := bySymbol[pos.yahooSymbol]
+		if len(pts) >= 1 {
+			var sum float64
+			for _, p := range pts {
+				sum += p.AdjClose
+			}
+			avg := sum / float64(len(pts))
+			// Convert native avg price to display currency using spot rate.
+			if currency != "Original" && pos.nativeCurrency != "" && pos.nativeCurrency != currency {
+				converted, fxErr := h.FXService.ConvertSpot(avg, pos.nativeCurrency, currency)
+				if fxErr == nil {
+					avg = converted
+				}
+			}
+			item.AvgPrice = &avg
+		}
+
+		items = append(items, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 // MapSymbol handles PUT /api/v1/portfolio/symbols/:symbol/mapping

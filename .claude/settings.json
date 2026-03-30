@@ -12,7 +12,8 @@
       "Bash(grep -n \"type LLMCache\" /d/projects/gofolio-analysis/backend/models/*.go)",
       "Bash(npm run:*)",
       "Bash(grep -E \"\\\\.\\(go|mod\\)$\")",
-      "Bash(grep -n \"GetDailyReturns\" /d/projects/gofolio-analysis/backend/services/portfolio/*.go)"
+      "Bash(grep -n \"GetDailyReturns\" /d/projects/gofolio-analysis/backend/services/portfolio/*.go)",
+      "Bash(grep -l \"period\\\\|Period\\\\|DateRange\\\\|date.*range\" \"d:\\\\projects\\\\gofolio-analysis\\\\frontend\\\\src\\\\pages\"/*.tsx)"
     ]
   }
 }

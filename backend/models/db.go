@@ -75,6 +75,14 @@ type EtfBreakdown struct {
 	LastUpdated time.Time `gorm:"index"`
 }
 
+// CurrentPrice stores the most recently fetched real-time market price for a symbol.
+type CurrentPrice struct {
+	ID        uint      `gorm:"primaryKey"`
+	Symbol    string    `gorm:"uniqueIndex;not null"`
+	Price     float64
+	FetchedAt time.Time `gorm:"index"`
+}
+
 // LLMCache stores cached responses from the LLM.
 type LLMCache struct {
 	ID         uint      `gorm:"primaryKey"`

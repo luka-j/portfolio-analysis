@@ -25,6 +25,12 @@ type Provider interface {
 	GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error)
 }
 
+// CurrentPriceProvider returns a live or recently-cached market price for a symbol.
+// If the stored price is older than 5 minutes a fresh fetch is attempted.
+type CurrentPriceProvider interface {
+	GetCurrentPrice(symbol string) (float64, error)
+}
+
 // CurrencyGetter can report the native trading currency of a symbol.
 type CurrencyGetter interface {
 	GetCurrency(symbol string) (string, error)
@@ -176,9 +182,10 @@ type yahooChartResponse struct {
 	Chart struct {
 		Result []struct {
 			Meta struct {
-				QuoteType string `json:"quoteType"`
-				LongName  string `json:"longName"`
-				Currency  string `json:"currency"`
+				QuoteType            string  `json:"quoteType"`
+				LongName             string  `json:"longName"`
+				Currency             string  `json:"currency"`
+				RegularMarketPrice   float64 `json:"regularMarketPrice"`
 			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
@@ -323,6 +330,77 @@ func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
 	}
 
 	return currency, nil
+}
+
+// GetCurrentPrice returns the current market price for symbol.
+// It checks the database first; if the stored price is older than 5 minutes it fetches fresh data from Yahoo.
+// The price comes from meta.regularMarketPrice in the Yahoo /v8/finance/chart response.
+func (s *YahooFinanceService) GetCurrentPrice(symbol string) (float64, error) {
+	const maxAge = 5 * time.Minute
+
+	if s.DB != nil {
+		var cp models.CurrentPrice
+		if err := s.DB.Where("symbol = ?", symbol).First(&cp).Error; err == nil {
+			if time.Since(cp.FetchedAt) < maxAge {
+				return cp.Price, nil
+			}
+		}
+	}
+
+	if err := s.limiter.Wait(context.Background()); err != nil {
+		return 0, fmt.Errorf("rate limiter: %w", err)
+	}
+
+	chartURL := fmt.Sprintf(
+		"https://query1.finance.yahoo.com/v8/finance/chart/%s?range=1d&interval=1d",
+		url.PathEscape(symbol),
+	)
+	req, err := http.NewRequest("GET", chartURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("User-Agent", yahooUserAgent)
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("yahoo current price request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("yahoo current price HTTP %d for %s", resp.StatusCode, symbol)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("reading yahoo current price response: %w", err)
+	}
+
+	var yResp yahooChartResponse
+	if err := json.Unmarshal(body, &yResp); err != nil {
+		return 0, fmt.Errorf("parsing yahoo current price: %w", err)
+	}
+	if yResp.Chart.Error != nil || len(yResp.Chart.Result) == 0 {
+		return 0, fmt.Errorf("no data for symbol %s", symbol)
+	}
+
+	price := yResp.Chart.Result[0].Meta.RegularMarketPrice
+	if price == 0 {
+		return 0, fmt.Errorf("zero price returned for %s", symbol)
+	}
+
+	if s.DB != nil {
+		s.DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "symbol"}},
+			DoUpdates: clause.AssignmentColumns([]string{"price", "fetched_at"}),
+		}).Create(&models.CurrentPrice{
+			Symbol:    symbol,
+			Price:     price,
+			FetchedAt: time.Now().UTC(),
+		})
+	}
+
+	return price, nil
 }
 
 func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) ([]models.PricePoint, error) {

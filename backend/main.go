@@ -40,7 +40,7 @@ func main() {
 	cnbSvc := market.NewCNBProvider(database)
 	fxSvc := fx.NewService(marketSvc, cnbSvc)
 	parser := flexquery.NewParser(database)
-	portfolioSvc := portfolio.NewService(marketSvc, fxSvc)
+	portfolioSvc := portfolio.NewService(marketSvc, fxSvc, marketSvc)
 	taxSvc := tax.NewService(fxSvc)
 
 	// Build fundamentals / breakdown providers from config.
@@ -139,7 +139,7 @@ func setupRouter(
 	})
 
 	// Portfolio endpoints.
-	ph := handlers.NewPortfolioHandler(parser, portfolioSvc)
+	ph := handlers.NewPortfolioHandler(parser, portfolioSvc, fxSvc)
 	api.POST("/portfolio/upload", ph.Upload)
 	api.POST("/portfolio/upload/etrade/benefits", ph.UploadEtradeBenefits)
 	api.POST("/portfolio/upload/etrade/sales", ph.UploadEtradeSales)
@@ -147,6 +147,7 @@ func setupRouter(
 	api.GET("/portfolio/history", ph.GetHistory)
 	api.GET("/portfolio/history/returns", ph.GetReturns) // real cumulative TWR curve
 	api.GET("/portfolio/trades", ph.GetTrades)
+	api.GET("/portfolio/price-history", ph.GetPriceHistory)
 	api.PUT("/portfolio/symbols/:symbol/mapping", ph.MapSymbol)
 
 	// Market endpoints.

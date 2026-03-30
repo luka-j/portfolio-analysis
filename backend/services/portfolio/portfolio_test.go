@@ -69,7 +69,7 @@ func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {
 
 	// 2. Initialize Service with mock provider
 	// We use Original accounting model to reliably bypass FX lookups.
-	svc := NewService(mockProvider, nil)
+	svc := NewService(mockProvider, nil, nil)
 
 	returns, startDates, endDates, err := svc.GetDailyReturns(data, friday, monday, "USD", models.AccountingModelOriginal)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestGetDailyReturns_DatesOffsetSkip(t *testing.T) {
 		},
 	}
 
-	svc := NewService(mockProvider, nil)
+	svc := NewService(mockProvider, nil, nil)
 
 	returns, startDates, endDates, err := svc.GetDailyReturns(data, day1, day4, "USD", models.AccountingModelOriginal)
 	if err != nil {

@@ -4,8 +4,9 @@ import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import SymbolMappingModal from '../components/SymbolMappingModal'
-import { getPortfolioValue, getPortfolioTrades, updateSymbolMapping, type PositionValue, type TradeEntry } from '../api'
-import { formatCurrency, formatNumber } from '../utils/format'
+import DateRangePicker from '../components/DateRangePicker'
+import { getPortfolioValue, getPortfolioTrades, getPortfolioPriceHistory, updateSymbolMapping, type PositionValue, type TradeEntry, type SymbolPriceHistory } from '../api'
+import { formatCurrency, formatNumber, formatDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
 
@@ -21,16 +22,41 @@ const CURRENCY_OPTIONS = [
   { label: 'Original', value: 'Original', tooltip: 'Shows each position in its native trading currency without any conversion applied. Totals cannot be aggregated across currencies.', tooltipAlign: 'right' as const },
 ]
 
+const PERIOD_OPTIONS = [
+  { label: '1D', value: '1d' },
+  { label: '1M', value: '1m' },
+  { label: '1Y', value: '1y' },
+  { label: 'Custom', value: 'custom' },
+]
+
+function getPeriodDates(period: string, customFrom: string, customTo: string): { from: string; to: string } {
+  const today = formatDate(new Date())
+  if (period === 'custom') return { from: customFrom, to: customTo }
+  const d = new Date()
+  if (period === '1d') { d.setDate(d.getDate() - 1) }
+  else if (period === '1m') { d.setMonth(d.getMonth() - 1) }
+  else if (period === '1y') { d.setFullYear(d.getFullYear() - 1) }
+  return { from: formatDate(d), to: today }
+}
+
 export default function PortfolioPage() {
   const { privacy } = usePrivacy()
   const [currency, setCurrency] = usePersistentState('portfolio_currency', 'CZK')
   const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('portfolio_acctModel', 'historical')
+  const [period, setPeriod] = usePersistentState('portfolio_period', '1m')
+  const defaultCustomFrom = (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return formatDate(d) })()
+  const [customFrom, setCustomFrom] = usePersistentState('portfolio_customFrom', defaultCustomFrom)
+  const [customTo, setCustomTo] = usePersistentState('portfolio_customTo', formatDate(new Date()))
   const [positions, setPositions] = useState<PositionValue[]>([])
   const [totalValue, setTotalValue] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [mappingTarget, setMappingTarget] = useState<{ symbol: string; yahooSymbol?: string; exchange?: string } | null>(null)
+  const [sortCol, setSortCol] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'desc' | 'asc' | null>(null)
+  const [priceHistory, setPriceHistory] = useState<Record<string, SymbolPriceHistory>>({})
+  const [phLoading, setPhLoading] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -48,6 +74,22 @@ export default function PortfolioPage() {
   }, [currency, acctModel])
 
   useEffect(() => { loadData() }, [loadData])
+
+  useEffect(() => {
+    const { from, to } = getPeriodDates(period, customFrom, customTo)
+    setPhLoading(true)
+    getPortfolioPriceHistory(from, to, currency, acctModel)
+      .then(res => {
+        const map: Record<string, SymbolPriceHistory> = {}
+        for (const item of res.items) {
+          const key = item.exchange ? `${item.symbol}@${item.exchange}` : item.symbol
+          map[key] = item
+        }
+        setPriceHistory(map)
+      })
+      .catch(() => setPriceHistory({}))
+      .finally(() => setPhLoading(false))
+  }, [period, customFrom, customTo, currency, acctModel])
 
   const totals = positions.reduce(
     (acc, pos) => {
@@ -85,8 +127,51 @@ export default function PortfolioPage() {
     setExpanded(prev => prev === key ? null : key)
   }
 
+  const handleSort = (col: string) => {
+    if (sortCol !== col) {
+      setSortCol(col)
+      setSortDir('desc')
+    } else if (sortDir === 'desc') {
+      setSortDir('asc')
+    } else {
+      setSortCol(null)
+      setSortDir(null)
+    }
+  }
+
+  const sortedPositions = [...positions].sort((a, b) => {
+    if (!sortCol || !sortDir) return 0
+    const mul = sortDir === 'desc' ? -1 : 1
+    const posKeyA = a.listing_exchange ? `${a.symbol}@${a.listing_exchange}` : a.symbol
+    const posKeyB = b.listing_exchange ? `${b.symbol}@${b.listing_exchange}` : b.symbol
+    const getVal = (pos: PositionValue, posKey: string): number | string => {
+      switch (sortCol) {
+        case 'symbol': return pos.symbol
+        case 'qty': return pos.quantity
+        case 'price': return pos.price || 0
+        case 'value': return pos.value || 0
+        case 'pct': return pos.value || 0
+        case 'change': return priceHistory[posKey]?.change_pct ?? -Infinity
+        case 'avgprice': return priceHistory[posKey]?.avg_price ?? -Infinity
+        case 'unrealized': return pos.cost_basis ? ((pos.price || 0) - pos.cost_basis) * pos.quantity : -Infinity
+        case 'realized_comm': return pos.realized_gl || 0
+        default: return 0
+      }
+    }
+    const av = getVal(a, posKeyA), bv = getVal(b, posKeyB)
+    if (typeof av === 'string' && typeof bv === 'string') return mul * av.localeCompare(bv)
+    return mul * ((av as number) - (bv as number))
+  })
+
+  const SortIndicator = ({ col }: { col: string }) => {
+    if (sortCol !== col) return <span className="ml-1 opacity-40 text-[9px] align-middle">↕</span>
+    return <span className="ml-1 text-[9px] text-indigo-400 align-middle">{sortDir === 'desc' ? '↓' : '↑'}</span>
+  }
+
+  const { from: periodFrom, to: periodTo } = getPeriodDates(period, customFrom, customTo)
+
   return (
-    <PageLayout>
+    <PageLayout maxWidth="max-w-[1400px]">
       {mappingTarget && (
         <SymbolMappingModal
           symbol={mappingTarget.symbol}
@@ -102,10 +187,23 @@ export default function PortfolioPage() {
           </div>
 
         {/* Controls — centered */}
-        <div className="flex flex-wrap justify-center gap-4 mb-16">
+        <div className="flex flex-wrap justify-center gap-4 mb-6">
           <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
           <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
+          <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
         </div>
+
+        {period === 'custom' && (
+          <div className="flex justify-center mb-10">
+            <DateRangePicker
+              initialFrom={customFrom}
+              initialTo={customTo}
+              onApply={(f, t) => { setCustomFrom(f); setCustomTo(t) }}
+            />
+          </div>
+        )}
+
+        {period !== 'custom' && <div className="mb-10" />}
 
         {error && (
           <div className="w-full mb-10 px-8 py-4 rounded-2xl bg-red-500/10 text-red-400 text-xs font-black uppercase tracking-widest border border-red-500/20 text-center">
@@ -124,22 +222,34 @@ export default function PortfolioPage() {
               className="grid gap-4 px-8 py-5 text-xs font-semibold text-slate-500 border-b border-[#2a2e42]/40"
               style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
             >
-              <div className="col-span-2">Symbol</div>
-              <div className="col-span-1 text-right">Qty</div>
-              <div className="col-span-2 text-right">Price</div>
-              <div className="col-span-2 text-right">Value</div>
-              <div className="col-span-2 text-right">Portfolio %</div>
-              <div className="col-span-2 text-right">Unrealized</div>
-              <div className="col-span-2 text-right">Realized</div>
-              <div className="col-span-2 text-right">Comm.</div>
-              <div className="col-span-1 text-right">
-                <svg className="w-3 h-3 ml-auto opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
-              </div>
+              {(['symbol', 'qty', 'price', 'value', 'pct', 'change', 'unrealized', 'realized_comm'] as const).map((col) => {
+                const labels: Record<string, string> = { symbol: 'Symbol', qty: 'Qty', price: 'Curr. Mkt. Price', value: 'Value', pct: 'Portfolio %', change: 'Price Change %', unrealized: 'Unrealized', realized_comm: 'Realized / Comm.' }
+                const spanClass: Record<string, string> = { symbol: 'col-span-2', qty: 'col-span-1', price: 'col-span-2', value: 'col-span-2', pct: 'col-span-2', change: 'col-span-2', unrealized: 'col-span-2', realized_comm: 'col-span-2' }
+                const isRight = col !== 'symbol'
+                return (
+                  <div
+                    key={col}
+                    className={`${spanClass[col]} flex items-center ${isRight ? 'justify-end' : ''} cursor-pointer select-none hover:text-slate-300 transition-colors`}
+                    onClick={() => handleSort(col)}
+                  >
+                    {col === 'change' ? (
+                      <span className="flex items-center gap-1">
+                        {labels[col]}
+                        {phLoading && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500/60 animate-pulse inline-block" />}
+                        <SortIndicator col={col} />
+                      </span>
+                    ) : (
+                      <>{labels[col]}<SortIndicator col={col} /></>
+                    )}
+                  </div>
+                )
+              })}
+              <div className="col-span-1" />
             </div>
 
             {/* Rows */}
             <div className="divide-y divide-[#2a2e42]/40">
-              {positions.map(pos => {
+              {sortedPositions.map(pos => {
                 const value = pos.value || 0
                 const price = pos.price || 0
                 const costBasis = pos.cost_basis || 0
@@ -150,11 +260,12 @@ export default function PortfolioPage() {
                 const unrealizedPct = costBasis > 0 ? ((price - costBasis) / costBasis) * 100 : null
                 const posKey = pos.listing_exchange ? `${pos.symbol}@${pos.listing_exchange}` : pos.symbol
                 const isExpanded = expanded === posKey
+                const ph = priceHistory[posKey]
 
                 return (
                   <div key={posKey}>
                     <div
-                      className={`grid gap-4 px-8 py-6 items-center cursor-pointer transition-all duration-300 ${isExpanded ? 'bg-[#1a1d2e] ring-1 ring-white/5 shadow-2xl z-10' : 'hover:bg-white/2'}`}
+                      className={`grid gap-4 px-8 py-4 items-center cursor-pointer transition-all duration-300 ${isExpanded ? 'bg-[#1a1d2e] ring-1 ring-white/5 shadow-2xl z-10' : 'hover:bg-white/2'}`}
                       style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
                       onClick={() => toggleExpand(pos.symbol, pos.listing_exchange)}
                     >
@@ -205,18 +316,15 @@ export default function PortfolioPage() {
                       </div>
 
                       <div className="col-span-1 text-right text-sm text-slate-300 font-medium tabular-nums">{privacy ? '—' : formatNumber(pos.quantity, 0)}</div>
+
+                      {/* Price cell — always visible, cost basis labeled clearly */}
                       <div className="col-span-2 text-right">
-                        {privacy ? (
-                          <div className="text-sm font-medium text-slate-300">—</div>
-                        ) : (
-                          <>
-                            <div className="text-sm font-medium text-slate-300 tabular-nums">{formatNumber(pos.price || 0)} {currency === 'Original' ? pos.native_currency : currency}</div>
-                            {(pos.cost_basis || 0) > 0 && (
-                              <div className="text-xs text-slate-500 mt-0.5">@ {formatNumber(pos.cost_basis)}</div>
-                            )}
-                          </>
+                        <div className="text-sm font-medium text-slate-300 tabular-nums">{formatNumber(pos.price || 0)} {currency === 'Original' ? pos.native_currency : currency}</div>
+                        {!privacy && (pos.cost_basis || 0) > 0 && (
+                          <div className="text-[10px] text-slate-600 mt-0.5">avg. cost {formatNumber(pos.cost_basis)}</div>
                         )}
                       </div>
+
                       <div className="col-span-2 text-right text-sm font-semibold text-slate-100 tabular-nums">
                         {privacy ? '—' : formatCurrency(value, currency, pos.native_currency)}
                       </div>
@@ -228,7 +336,27 @@ export default function PortfolioPage() {
                           <span className="text-xs font-medium text-slate-400 tabular-nums w-10 text-right">{pct.toFixed(1)}%</span>
                         </div>
                       </div>
-                      <div className="col-span-2 text-right">
+
+                      {/* Change % cell */}
+                      <div className="col-span-2 text-right relative group">
+                        {ph?.change_pct != null ? (
+                          <>
+                            <span className={`text-sm font-medium tabular-nums ${ph.change_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {ph.change_pct >= 0 ? '+' : ''}{ph.change_pct.toFixed(2)}%
+                            </span>
+                            {ph.avg_price != null && (
+                              <HoverTooltip className="w-28" align="right">
+                                <div className="text-slate-500 mb-1">Avg. Market Price</div>
+                                <div className="text-slate-200 font-bold">
+                                  {formatNumber(ph.avg_price)} {currency === 'Original' ? pos.native_currency : currency}
+                                </div>
+                              </HoverTooltip>
+                            )}
+                          </>
+                        ) : <span className="text-slate-600 opacity-40">—</span>}
+                      </div>
+
+<div className="col-span-2 text-right">
                         {privacy ? (
                           <span className="text-slate-600 font-medium">—</span>
                         ) : unrealizedGL !== null ? (
@@ -240,20 +368,24 @@ export default function PortfolioPage() {
                               {unrealizedPct! >= 0 ? '+' : ''}{unrealizedPct!.toFixed(2)}%
                             </div>
                           </div>
-                        ) : <span className="text-slate-600 font-medium">unavailable</span>}
+                        ) : <span className="text-slate-600 font-medium opacity-40">—</span>}
                       </div>
-                      <div className="col-span-2 text-right text-sm">
+                      <div className="col-span-2 text-right">
                         {privacy ? (
                           <span className="text-slate-600 opacity-40">—</span>
-                        ) : realizedGLNative !== 0 ? (
-                          <span className={`font-medium tabular-nums ${realizedGLNative >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {realizedGLNative >= 0 ? '+' : ''}{formatNumber(realizedGLNative)}
-                          </span>
-                        ) : <span className="text-slate-600 opacity-40">—</span>}
-                      </div>
-                      <div className="col-span-2 text-right text-sm">
-                        {commission !== 0 ? (
-                          <span className="text-amber-500/80 font-medium tabular-nums">{formatNumber(commission)}</span>
+                        ) : (realizedGLNative !== 0 || commission !== 0) ? (
+                          <div className="flex flex-col items-end">
+                            {realizedGLNative !== 0 ? (
+                              <span className={`text-sm font-medium tabular-nums ${realizedGLNative >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {realizedGLNative >= 0 ? '+' : ''}{formatNumber(realizedGLNative)}
+                              </span>
+                            ) : <span className="text-sm text-slate-600 opacity-40">—</span>}
+                            {commission !== 0 && (
+                              <div className="text-xs text-amber-500/80 font-medium tabular-nums mt-0.5">
+                                {formatNumber(commission)} comm.
+                              </div>
+                            )}
+                          </div>
                         ) : <span className="text-slate-600 opacity-40">—</span>}
                       </div>
                       <div className="col-span-1 text-right">
@@ -269,7 +401,7 @@ export default function PortfolioPage() {
               })}
             </div>
 
-            {/* Total row — gradient bg, strong bold font */}
+            {/* Total row */}
             <div
               className="grid gap-4 px-8 py-8 mt-12 border-t-2 border-[#2a2e42]/60 bg-linear-to-r from-indigo-500/4 to-purple-500/4 items-center rounded-3xl ring-1 ring-white/5 shadow-2xl"
               style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
@@ -285,6 +417,8 @@ export default function PortfolioPage() {
               <div className="col-span-2 text-right">
                 <span className="text-xs font-black text-slate-600 tracking-widest tabular-nums">100.0%</span>
               </div>
+              {/* Change % and Avg. Price totals intentionally blank */}
+              <div className="col-span-2" />
               <div className="col-span-2 text-right">
                 {privacy ? (
                   <span className="text-slate-800 opacity-40">—</span>
@@ -299,20 +433,27 @@ export default function PortfolioPage() {
               <div className="col-span-2 text-right">
                 {privacy ? (
                   <span className="text-slate-800 opacity-40">—</span>
-                ) : totals.realizedGL !== 0 ? (
-                  <span className={`text-sm font-black tabular-nums ${totals.realizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {totals.realizedGL >= 0 ? '+' : ''}{formatNumber(totals.realizedGL)}
-                  </span>
-                ) : <span className="text-slate-800 opacity-40">—</span>}
-              </div>
-              <div className="col-span-2 text-right">
-                {totals.commission !== 0 ? (
-                  <span className="text-sm font-black text-amber-500/80 tabular-nums">
-                    {formatNumber(totals.commission)}
-                  </span>
+                ) : (totals.realizedGL !== 0 || totals.commission !== 0) ? (
+                  <div className="flex flex-col items-end">
+                    {totals.realizedGL !== 0 ? (
+                      <span className={`text-sm font-black tabular-nums ${totals.realizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {totals.realizedGL >= 0 ? '+' : ''}{formatNumber(totals.realizedGL)}
+                      </span>
+                    ) : <span className="text-sm text-slate-800 opacity-40">—</span>}
+                    {totals.commission !== 0 && (
+                      <div className="text-xs font-black text-amber-500/80 tabular-nums mt-0.5">
+                        {formatNumber(totals.commission)} comm.
+                      </div>
+                    )}
+                  </div>
                 ) : <span className="text-slate-800 opacity-40">—</span>}
               </div>
               <div className="col-span-1" />
+            </div>
+
+            {/* Period label */}
+            <div className="text-center mt-4 text-[10px] text-slate-700 font-medium tracking-widest uppercase">
+              Change % and Avg. Price over {periodFrom} — {periodTo}
             </div>
           </div>
         )}
@@ -353,7 +494,7 @@ function TradeDetail({ symbol, exchange, displayCurrency, privacy }: { symbol: s
           <div className="text-right">Native Price</div>
           <div className="text-right">Converted</div>
           {hasTaxCostBasis && <div className="text-right">Tax Basis</div>}
-          <div className="text-right">Charge</div>
+          <div className="text-right">Commission</div>
         </div>
 
         {loading ? (

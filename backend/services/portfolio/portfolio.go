@@ -16,13 +16,14 @@ import (
 
 // Service reconstructs and values portfolios from FlexQuery data.
 type Service struct {
-	MarketProvider market.Provider
-	FXService      *fx.Service
+	MarketProvider       market.Provider
+	CurrentPriceProvider market.CurrentPriceProvider
+	FXService            *fx.Service
 }
 
 // NewService creates a new portfolio service.
-func NewService(mp market.Provider, fxSvc *fx.Service) *Service {
-	return &Service{MarketProvider: mp, FXService: fxSvc}
+func NewService(mp market.Provider, fxSvc *fx.Service, cpp market.CurrentPriceProvider) *Service {
+	return &Service{MarketProvider: mp, CurrentPriceProvider: cpp, FXService: fxSvc}
 }
 
 // isFXTrade delegates to the centralized check in models.
@@ -120,21 +121,30 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 			querySymbol = ys
 		}
 
-		prices, err := s.MarketProvider.GetHistory(querySymbol, lookback, today)
-		if err != nil {
-			log.Printf("Warning: fetching price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
-		}
-
 		latestPrice := 0.0
-		if len(prices) > 0 {
-			latestPrice = prices[len(prices)-1].AdjClose
-			if latestPrice == 0 {
-				latestPrice = prices[len(prices)-1].Close
+		if s.CurrentPriceProvider != nil {
+			p, err := s.CurrentPriceProvider.GetCurrentPrice(querySymbol)
+			if err != nil {
+				log.Printf("Warning: fetching current price for %s (mapped to %s): %v; falling back to history", h.Symbol, querySymbol, err)
+			} else {
+				latestPrice = p
+			}
+		}
+		if latestPrice == 0 {
+			prices, err := s.MarketProvider.GetHistory(querySymbol, lookback, today)
+			if err != nil {
+				log.Printf("Warning: fetching price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
+			} else if len(prices) > 0 {
+				latestPrice = prices[len(prices)-1].AdjClose
+				if latestPrice == 0 {
+					latestPrice = prices[len(prices)-1].Close
+				}
 			}
 		}
 		nativeValue := h.Quantity * latestPrice
 
 		var convertedPrice, convertedValue float64
+		var err error
 		if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
 			convertedPrice = latestPrice
 			convertedValue = nativeValue

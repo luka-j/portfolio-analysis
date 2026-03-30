@@ -130,7 +130,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	mockMarket := newMockMarketProvider()
 	fxSvc := fx.NewService(mockMarket, nil) // CNB is nil for this test
 	parser := flexquery.NewParser(db)
-	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
+	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, nil)
 	taxSvc := tax.NewService(fxSvc)
 
 	// Build fundamentals service with no providers — no external calls in tests.
@@ -432,7 +432,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 
 	fxSvc := fx.NewService(m, nil)
 	parser := flexquery.NewParser(db)
-	portfolioSvc := portfolio.NewService(m, fxSvc)
+	portfolioSvc := portfolio.NewService(m, fxSvc, nil)
 	taxSvc := tax.NewService(fxSvc)
 	allF := map[string]fundamentals.FundamentalsProvider{}
 	allB := map[string]fundamentals.ETFBreakdownProvider{}
@@ -738,7 +738,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 
 	fxSvc := fx.NewService(mockMarket, nil)
 	parser := flexquery.NewParser(db)
-	portfolioSvc := portfolio.NewService(mockMarket, fxSvc)
+	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, nil)
 	taxSvc := tax.NewService(fxSvc)
 
 	allFundamentals2 := map[string]fundamentals.FundamentalsProvider{}

@@ -356,6 +356,24 @@ export async function getPortfolioBreakdown(currency = 'USD'): Promise<Breakdown
   return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}`);
 }
 
+// ---- Portfolio Price History ----
+
+export interface SymbolPriceHistory {
+  symbol: string;
+  exchange?: string;
+  change_pct: number | null;
+  avg_price: number | null;
+  currency: string;
+}
+
+export async function getPortfolioPriceHistory(
+  from: string, to: string, currency: string, accountingModel = 'historical'
+): Promise<{ items: SymbolPriceHistory[] }> {
+  return request<{ items: SymbolPriceHistory[] }>(
+    `/portfolio/price-history?from=${from}&to=${to}&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}`
+  );
+}
+
 export async function getLLMAvailable(): Promise<{ available: boolean }> {
   return request<{ available: boolean }>('/llm/available');
 }

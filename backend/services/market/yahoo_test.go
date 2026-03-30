@@ -70,9 +70,10 @@ func mockYahooResponse(symbol string, from, to time.Time) []byte {
 	if len(timestamps) > 0 {
 		resp.Chart.Result = append(resp.Chart.Result, struct {
 			Meta struct {
-				QuoteType string `json:"quoteType"`
-				LongName  string `json:"longName"`
-				Currency  string `json:"currency"`
+				QuoteType          string  `json:"quoteType"`
+				LongName           string  `json:"longName"`
+				Currency           string  `json:"currency"`
+				RegularMarketPrice float64 `json:"regularMarketPrice"`
 			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
