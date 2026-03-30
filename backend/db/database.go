@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -26,7 +28,17 @@ func Init(dsn string) (*gorm.DB, error) {
 		},
 	)
 
-	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	var dialector gorm.Dialector
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") ||
+		(strings.Contains(dsn, "host=") && (strings.Contains(dsn, "user=") || strings.Contains(dsn, "dbname="))) {
+		dialector = postgres.Open(dsn)
+	} else {
+		// Assume SQLite. Strip optional "sqlite:" prefix for clarity.
+		sqlitePath := strings.TrimPrefix(dsn, "sqlite:")
+		dialector = sqlite.Open(sqlitePath)
+	}
+
+	database, err := gorm.Open(dialector, &gorm.Config{
 		Logger: newLogger,
 	})
 	if err != nil {
