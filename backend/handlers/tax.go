@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -17,14 +16,22 @@ type TaxHandler struct {
 	TaxSvc  *tax.Service
 }
 
-// GetReport handles GET /api/v1/tax/report
+type taxReportRequest struct {
+	Year          int                `json:"year"`
+	ExchangeRates map[string]float64 `json:"exchange_rates,omitempty"`
+}
+
+// GetReport handles POST /api/v1/tax/report
 func (h *TaxHandler) GetReport(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	yearStr := c.Query("year")
-	year, err := strconv.Atoi(yearStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid year parameter"})
+	var req taxReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+	if req.Year == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "year is required"})
 		return
 	}
 
@@ -34,7 +41,7 @@ func (h *TaxHandler) GetReport(c *gin.Context) {
 		return
 	}
 
-	report, err := h.TaxSvc.GetReport(data, year)
+	report, err := h.TaxSvc.GetReport(data, req.Year, req.ExchangeRates)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute tax: " + err.Error()})
 		return

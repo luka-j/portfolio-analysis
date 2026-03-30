@@ -74,7 +74,7 @@ func TestEmploymentIncome(t *testing.T) {
 		},
 	}
 
-	report, err := svc.GetReport(data, 2025)
+	report, err := svc.GetReport(data, 2025, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2025, report.Year)
 
@@ -145,7 +145,7 @@ func TestInvestmentIncomeFIFO(t *testing.T) {
 		},
 	}
 
-	report, err := svc.GetReport(data, 2025)
+	report, err := svc.GetReport(data, 2025, nil)
 	require.NoError(t, err)
 
 	inv := report.InvestmentIncome
@@ -189,7 +189,7 @@ func TestCommissionFullLot(t *testing.T) {
 		},
 	}
 
-	report, err := svc.GetReport(data, 2025)
+	report, err := svc.GetReport(data, 2025, nil)
 	require.NoError(t, err)
 
 	tx := report.InvestmentIncome.Transactions[0]
@@ -214,7 +214,7 @@ func TestCommissionPartialLot(t *testing.T) {
 		},
 	}
 
-	report, err := svc.GetReport(data, 2025)
+	report, err := svc.GetReport(data, 2025, nil)
 	require.NoError(t, err)
 
 	tx := report.InvestmentIncome.Transactions[0]
@@ -241,7 +241,7 @@ func TestCommissionMultiLotSell(t *testing.T) {
 		},
 	}
 
-	report, err := svc.GetReport(data, 2025)
+	report, err := svc.GetReport(data, 2025, nil)
 	require.NoError(t, err)
 
 	inv := report.InvestmentIncome
@@ -274,7 +274,7 @@ func TestIgnoresIrrelevantTrades(t *testing.T) {
 		},
 	}
 
-	report, err := svc.GetReport(data, 2025)
+	report, err := svc.GetReport(data, 2025, nil)
 	require.NoError(t, err)
 	assert.Empty(t, report.EmploymentIncome.Transactions)
 	assert.Empty(t, report.InvestmentIncome.Transactions)

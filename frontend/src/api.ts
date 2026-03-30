@@ -329,8 +329,12 @@ export const updateSymbolMapping = (symbol: string, yahooSymbol: string, exchang
   });
 };
 
-export async function getTaxReport(year: number): Promise<TaxReportResponse> {
-  return request<TaxReportResponse>(`/tax/report?year=${year}`);
+export async function getTaxReport(year: number, exchangeRates?: Record<string, number>): Promise<TaxReportResponse> {
+  return request<TaxReportResponse>(`/tax/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ year, exchange_rates: exchangeRates }),
+  });
 }
 
 // ---- Portfolio Breakdown ----

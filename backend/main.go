@@ -162,7 +162,7 @@ func setupRouter(
 
 	// Tax endpoints.
 	th := &handlers.TaxHandler{Parser: parser, TaxSvc: taxSvc}
-	api.GET("/tax/report", th.GetReport)
+	api.POST("/tax/report", th.GetReport)
 
 	// Breakdown endpoint.
 	bh := handlers.NewBreakdownHandler(parser, portfolioSvc, breakdownService, fundamentalsSvc)

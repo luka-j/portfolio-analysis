@@ -56,7 +56,18 @@ func posKey(symbol, exchange string) string {
 }
 
 // GetReport generates the tax figures for the specified calendar year.
-func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportResponse, error) {
+// When universalRates is non-nil, its values are used for CZK conversion instead of the market data table.
+func (s *Service) GetReport(data *models.FlexQueryData, year int, universalRates map[string]float64) (*TaxReportResponse, error) {
+	getRate := func(currency string, date time.Time) (float64, error) {
+		if universalRates != nil {
+			r, ok := universalRates[currency]
+			if !ok {
+				return 0, fmt.Errorf("no universal exchange rate provided for currency %s", currency)
+			}
+			return r, nil
+		}
+		return s.FXService.GetRate(currency, "CZK", date)
+	}
 	resp := &TaxReportResponse{
 		Year: year,
 	}
@@ -77,7 +88,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 			continue
 		}
 
-		rate, err := s.FXService.GetRate(t.Currency, "CZK", t.DateTime)
+		rate, err := getRate(t.Currency, t.DateTime)
 		if err != nil {
 			return nil, fmt.Errorf("getting fx rate for %s on %s: %w", t.Symbol, t.DateTime.Format("2006-01-02"), err)
 		}
@@ -153,7 +164,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 			totalSellQty := sellQty // capture full sell qty for pro-rating sell commission
 			if inTargetYear {
 				var err error
-				sellRate, err = s.FXService.GetRate(sellCurrency, "CZK", t.DateTime)
+				sellRate, err = getRate(sellCurrency, t.DateTime)
 				if err != nil {
 					return nil, fmt.Errorf("getting sell fx for %s on %s: %w", t.Symbol, t.DateTime, err)
 				}
@@ -169,7 +180,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int) (*TaxReportRes
 				}
 
 				if inTargetYear {
-					buyRate, err := s.FXService.GetRate(lots[0].curr, "CZK", lots[0].date)
+					buyRate, err := getRate(lots[0].curr, lots[0].date)
 					if err != nil {
 						return nil, fmt.Errorf("getting buy fx for %s on %s: %w", t.Symbol, lots[0].date, err)
 					}

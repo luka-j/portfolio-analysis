@@ -1,31 +1,109 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import PageLayout from '../components/PageLayout'
 import Spinner from '../components/Spinner'
+import SegmentedControl from '../components/SegmentedControl'
 import { getTaxReport } from '../api'
 import type { TaxReportResponse, TaxTransaction } from '../api'
 import { escapeCSVField } from '../utils/format'
 
+type FxMethod = 'historical' | 'universal'
+
+const FX_OPTIONS = [
+  { label: 'Historical', value: 'historical' as FxMethod },
+  { label: 'Universal', value: 'universal' as FxMethod },
+] as const
+
 export default function TaxPage() {
   const [year, setYear] = useState<number>(new Date().getFullYear() - 1)
+  const [fxMethod, setFxMethod] = useState<FxMethod>('historical')
+  const [currencies, setCurrencies] = useState<string[]>([])
+  const [rateInputs, setRateInputs] = useState<Record<string, string>>({})
   const [report, setReport] = useState<TaxReportResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // Extract unique currencies from a report's transactions
+  const extractCurrencies = (data: TaxReportResponse): string[] => {
+    const all = [...data.employment_income.transactions, ...data.investment_income.transactions]
+    return [...new Set(all.map(t => t.currency))].sort()
+  }
+
+  // Fetch historical report to discover currencies when switching to universal mode
   useEffect(() => {
+    if (fxMethod !== 'universal') return
+    let cancelled = false
+    async function fetchCurrencies() {
+      setLoading(true)
+      setError('')
+      setReport(null)
+      try {
+        const data = await getTaxReport(year)
+        if (!cancelled) {
+          const found = extractCurrencies(data)
+          setCurrencies(found)
+          // Keep any already-entered rate inputs; reset only for new currencies
+          setRateInputs(prev => {
+            const next: Record<string, string> = {}
+            for (const c of found) next[c] = prev[c] ?? ''
+            return next
+          })
+        }
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    fetchCurrencies()
+    return () => { cancelled = true }
+  }, [year, fxMethod])
+
+  // Fetch historical report automatically
+  useEffect(() => {
+    if (fxMethod !== 'historical') return
+    let cancelled = false
     async function fetchReport() {
       setLoading(true)
       setError('')
       try {
         const data = await getTaxReport(year)
-        setReport(data)
+        if (!cancelled) setReport(data)
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
     fetchReport()
-  }, [year])
+    return () => { cancelled = true }
+  }, [year, fxMethod])
+
+  const allRatesFilled = currencies.length > 0 && currencies.every(c => {
+    const v = parseFloat(rateInputs[c] ?? '')
+    return isFinite(v) && v > 0
+  })
+
+  const fetchUniversalReport = useCallback(async () => {
+    const rates: Record<string, number> = {}
+    for (const c of currencies) rates[c] = parseFloat(rateInputs[c])
+    setLoading(true)
+    setError('')
+    try {
+      const data = await getTaxReport(year, rates)
+      setReport(data)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [year, currencies, rateInputs])
+
+  const handleFxMethodChange = (v: FxMethod) => {
+    setReport(null)
+    setError('')
+    setCurrencies([])
+    setFxMethod(v)
+  }
 
   const exportToCSV = (transactions: TaxTransaction[], filename: string, isInvestment: boolean) => {
     if (!transactions || transactions.length === 0) return
@@ -64,17 +142,76 @@ export default function TaxPage() {
             Income and capital gains for Czech tax purposes, based on FIFO reconciliation.
           </p>
 
-          <div className="flex items-center gap-3 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-2xl p-1.5 shadow-xl ring-1 ring-white/5 mt-6">
-            <label className="pl-4 text-sm text-slate-500">Year</label>
-            <select
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="bg-transparent text-slate-100 font-medium text-sm py-2 pr-5 pl-1 focus:outline-none cursor-pointer hover:text-indigo-400 transition-colors"
-            >
-              {years.map(y => <option key={y} value={y} className="bg-[#1a1d2e]">{y}</option>)}
-            </select>
+          <div className="flex items-end gap-6 mt-6 flex-wrap justify-center">
+            <div className="flex items-center gap-3 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-2xl p-1.5 shadow-xl ring-1 ring-white/5">
+              <label className="pl-4 text-sm text-slate-500">Year</label>
+              <select
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+                className="bg-transparent text-slate-100 font-medium text-sm py-2 pr-5 pl-1 focus:outline-none cursor-pointer hover:text-indigo-400 transition-colors"
+              >
+                {years.map(y => <option key={y} value={y} className="bg-[#1a1d2e]">{y}</option>)}
+              </select>
+            </div>
+
+            <SegmentedControl
+              label="FX Method"
+              options={FX_OPTIONS}
+              value={fxMethod}
+              onChange={handleFxMethodChange}
+            />
           </div>
         </div>
+
+        {/* Universal FX rate input table */}
+        {fxMethod === 'universal' && !loading && !error && currencies.length > 0 && !report && (
+          <div className="flex flex-col items-center mb-8 w-full max-w-sm mx-auto">
+            <p className="text-xs text-slate-500 mb-4 text-center">
+              Enter a single CZK exchange rate for each currency used in the {year} report.
+            </p>
+            <div className="w-full bg-[#1a1d2e]/40 border border-white/5 rounded-2xl overflow-hidden mb-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
+                    <th className="text-left py-2.5 px-4">Currency</th>
+                    <th className="text-right py-2.5 px-4">Rate (1 unit → CZK)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/4">
+                  {currencies.map(c => (
+                    <tr key={c}>
+                      <td className="py-2.5 px-4 font-bold text-slate-300 uppercase tracking-tight">{c}</td>
+                      <td className="py-2.5 px-4 text-right">
+                        <div className="inline-flex items-center bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder="e.g. 23.50"
+                            value={rateInputs[c] ?? ''}
+                            onChange={e => setRateInputs(prev => ({ ...prev, [c]: e.target.value }))}
+                            onKeyDown={e => {
+                              const allowed = ['0','1','2','3','4','5','6','7','8','9','.', ',','Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Tab']
+                              if (!allowed.includes(e.key) && !e.ctrlKey && !e.metaKey) e.preventDefault()
+                            }}
+                            className="w-28 px-3 py-1 bg-transparent text-sm text-slate-200 text-right tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button
+              disabled={!allRatesFilled}
+              onClick={fetchUniversalReport}
+              className="px-8 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed glass text-indigo-300 hover:text-indigo-200"
+            >
+              Generate Report
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <Spinner label="Processing gain/loss matrix…" className="py-40" />
@@ -84,7 +221,7 @@ export default function TaxPage() {
           </div>
         ) : report ? (
           <div className="flex flex-col gap-16 w-full max-w-6xl pb-12">
-            
+
             {/* Section 1: Employment Income */}
             <section className="flex flex-col items-center">
               <div className="flex flex-col items-center mb-6 text-center w-full">
