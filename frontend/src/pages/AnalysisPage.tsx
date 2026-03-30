@@ -5,8 +5,8 @@ import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import DateRangePicker from '../components/DateRangePicker'
 import {
-  getPortfolioStats, getPortfolioReturns, getMarketHistory, comparePortfolio,
-  type StatsResponse, type DailyValue, type BenchmarkResult,
+  getPortfolioStats, getPortfolioReturns, getMarketHistory, comparePortfolio, getStandaloneMetrics,
+  type StatsResponse, type DailyValue, type BenchmarkResult, type StandaloneResult,
 } from '../api'
 import { formatDate, CURRENCIES } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
@@ -29,6 +29,39 @@ const PERIOD_OPTIONS = [
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6']
 
+const STAT_TOOLTIPS: Record<string, string> = {
+  twr: 'Time-weighted return. Eliminates the effect of cash flows — best for evaluating portfolio manager skill.',
+  mwr: 'Money-weighted return. Reflects your actual return including the timing and size of your deposits and withdrawals.',
+}
+
+const STANDALONE_TOOLTIPS: Record<string, string> = {
+  sharpe:     'Evaluates return relative to total volatility. Higher numbers mean better risk-adjusted performance.',
+  vami:       'Value Added Monthly Index. Growth of a $1,000 investment — reflects compounded total return.',
+  volatility: 'Annualized standard deviation of daily returns. Measures how much the portfolio fluctuates.',
+  sortino:    'Like Sharpe but only penalizes downside volatility, ignoring upside swings. Higher is better.',
+  max_drawdown: 'Largest peak-to-trough decline over the period. Measures worst-case loss from a high point.',
+}
+
+const COMPARE_TOOLTIPS: Record<string, string> = {
+  Security:      'The benchmark being compared against your portfolio.',
+  Alpha:         'Annualized excess return over the benchmark after adjusting for market risk. Positive means outperformance.',
+  Beta:          'Sensitivity to benchmark moves. Beta > 1 means your portfolio is more volatile than the benchmark.',
+  Treynor:       'Return per unit of systematic (market) risk, using beta as the risk measure. Higher is better.',
+  'Tracking Err':'Annualized deviation of your returns from the benchmark. Lower means closer tracking.',
+  'Info Ratio':  'Active return divided by tracking error. Measures the consistency of outperformance.',
+  Correlation:   'How closely your returns move with the benchmark. 1 = perfect alignment, 0 = no relationship.',
+}
+
+function MetricTooltip({ text, align = 'center', direction = 'up' }: { text: string; align?: 'center' | 'right' | 'left'; direction?: 'up' | 'down' }) {
+  const posClass = align === 'right' ? 'right-0' : align === 'left' ? 'left-0' : 'left-1/2 -translate-x-1/2'
+  const dirClass = direction === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'
+  return (
+    <div className={`absolute ${dirClass} w-56 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl ${posClass}`}>
+      {text}
+    </div>
+  )
+}
+
 function getFromDate(months: number): string {
   if (months === 0) return '2000-01-01'
   const d = new Date(); d.setMonth(d.getMonth() - months)
@@ -48,12 +81,15 @@ export default function AnalysisPage() {
   const [benchmarkSymbols, setBenchmarkSymbols] = useState<string[]>([])
   const [benchmarkData, setBenchmarkData]       = useState<Record<string, { date: string; close: number }[]>>({})
   const [compareResults, setCompareResults]     = useState<BenchmarkResult[]>([])
+  const [standaloneResults, setStandaloneResults] = useState<StandaloneResult[]>([])
   const [riskFreeRate, setRiskFreeRate]       = useState(0.025)
   const [riskFreeRateInput, setRiskFreeRateInput] = useState('2.50')
   const [loading, setLoading]           = useState(true)
   const [compareLoading, setCompareLoading] = useState(false)
+  const [standaloneLoading, setStandaloneLoading] = useState(false)
   const [error, setError]               = useState('')
   const [compareError, setCompareError] = useState('')
+  const [standaloneError, setStandaloneError] = useState('')
 
   const from = period === -1 ? customFrom : getFromDate(period)
   const to   = period === -1 ? customTo   : formatDate(new Date())
@@ -80,9 +116,27 @@ export default function AnalysisPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  // Load standalone metrics for portfolio (and symbols if any are active).
+  // Fires on initial load and whenever currency/date/model/riskFreeRate change.
+  const loadStandalone = useCallback(async (symbols = '') => {
+    setStandaloneLoading(true)
+    setStandaloneError('')
+    try {
+      const res = await getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate)
+      setStandaloneResults(res.results)
+    } catch (err) {
+      setStandaloneError(err instanceof Error ? err.message : 'Standalone metrics failed')
+    } finally {
+      setStandaloneLoading(false)
+    }
+  }, [currency, effectiveFrom, to, acctModel, riskFreeRate])
+
+  useEffect(() => {
+    loadStandalone(benchmarkSymbols.join(','))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadStandalone])
+
   // Re-fetch benchmark data whenever the date range, currency, or model changes.
-  // benchmarkSymbols and riskFreeRate are intentionally omitted: symbol additions are
-  // handled by handleCompare, and rate changes are handled by applyRiskFreeRate.
   useEffect(() => {
     if (benchmarkSymbols.length === 0) return
     const refresh = async () => {
@@ -99,6 +153,7 @@ export default function AnalysisPage() {
         })
         setBenchmarkData(newData)
         setCompareResults(comp.benchmarks)
+        loadStandalone(benchmarkSymbols.join(','))
       } catch (err) {
         setCompareError(err instanceof Error ? err.message : 'Comparison failed')
       } finally {
@@ -122,10 +177,12 @@ export default function AnalysisPage() {
         newData[newSymbols[i]] = res.data.map(p => ({ date: p.date.slice(0, 10), close: p.close }))
       })
       setBenchmarkData(prev => ({ ...prev, ...newData }))
+      const allSymbols = [...benchmarkSymbols, ...newSymbols]
       const comp = await comparePortfolio(newSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate)
-      setBenchmarkSymbols(prev => [...prev, ...newSymbols])
+      setBenchmarkSymbols(allSymbols)
       setCompareResults(prev => [...prev, ...comp.benchmarks])
       setBenchmarkInput('')
+      loadStandalone(allSymbols.join(','))
     } catch (err) {
       setCompareError(err instanceof Error ? err.message : 'Comparison failed')
     } finally {
@@ -143,6 +200,7 @@ export default function AnalysisPage() {
     try {
       const comp = await comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, newRate)
       setCompareResults(comp.benchmarks)
+      loadStandalone(benchmarkSymbols.join(','))
     } catch (err) {
       setCompareError(err instanceof Error ? err.message : 'Comparison failed')
     } finally {
@@ -156,9 +214,11 @@ export default function AnalysisPage() {
   }
 
   const handleRemoveSymbol = (sym: string) => {
-    setBenchmarkSymbols(prev => prev.filter(s => s !== sym))
+    const remaining = benchmarkSymbols.filter(s => s !== sym)
+    setBenchmarkSymbols(remaining)
     setBenchmarkData(prev => { const next = { ...prev }; delete next[sym]; return next })
     setCompareResults(prev => prev.filter(r => r.symbol !== sym))
+    loadStandalone(remaining.join(','))
   }
 
   const mergedChartData = (() => {
@@ -181,6 +241,9 @@ export default function AnalysisPage() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, values]) => ({ date, ...values }))
   })()
+
+  // Portfolio standalone metrics (always the first result when available).
+  const portfolioStandalone = standaloneResults[0]?.symbol === 'Portfolio' ? standaloneResults[0] : null
 
   return (
     <PageLayout>
@@ -206,6 +269,38 @@ export default function AnalysisPage() {
               }}
             />
             <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
+            <div className="flex flex-col items-center gap-2">
+              <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Risk-free rate</span>
+              <div className="flex items-center gap-1.5 bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
+                <div className="relative flex items-center">
+                  <input
+                    type="number" value={riskFreeRateInput}
+                    onChange={e => setRiskFreeRateInput(e.target.value)}
+                    onBlur={handleRiskFreeRateBlur}
+                    onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+                    step="0.1" min="0" max="20"
+                    className="w-20 px-3 py-2 pr-6 bg-transparent text-sm text-slate-200 text-right focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <div className="absolute right-1.5 flex flex-col">
+                    <button
+                      type="button" tabIndex={-1}
+                      onClick={() => applyRiskFreeRate(Math.min(0.20, Math.round((riskFreeRate + 0.001) * 1000) / 1000))}
+                      className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                    >
+                      <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 4L4 1L7 4"/></svg>
+                    </button>
+                    <button
+                      type="button" tabIndex={-1}
+                      onClick={() => applyRiskFreeRate(Math.max(0, Math.round((riskFreeRate - 0.001) * 1000) / 1000))}
+                      className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                    >
+                      <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 1L4 4L7 1"/></svg>
+                    </button>
+                  </div>
+                </div>
+                <span className="text-slate-500 text-sm select-none pr-2">%</span>
+              </div>
+            </div>
           </div>
 
           {/* Custom date picker */}
@@ -232,11 +327,14 @@ export default function AnalysisPage() {
               <Spinner label="Compiling statistics…" className="py-10" />
             ) : stats ? (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                {/* TWR / MWR and any registry-computed stats */}
                 {Object.entries(stats.statistics).map(([key, val]) => {
                   const numVal = typeof val === 'number' ? val : null
                   if (numVal === null) return null
+                  const tooltip = STAT_TOOLTIPS[key.toLowerCase()]
                   return (
-                    <div key={key} className="bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5">
+                    <div key={key} className={`relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
+                      {tooltip && <MetricTooltip text={tooltip} />}
                       <p className="text-sm font-medium text-slate-500 mb-2 capitalize">{key.replace(/_/g, ' ')}</p>
                       <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%
@@ -244,6 +342,51 @@ export default function AnalysisPage() {
                     </div>
                   )
                 })}
+                {/* Standalone metrics for the portfolio */}
+                {standaloneLoading && !portfolioStandalone && (
+                  <div className="col-span-2 md:col-span-4 flex justify-center py-4">
+                    <Spinner label="Computing risk metrics…" />
+                  </div>
+                )}
+                {portfolioStandalone && (
+                  <>
+                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                      <MetricTooltip text={STANDALONE_TOOLTIPS.sharpe} />
+                      <p className="text-sm font-medium text-slate-500 mb-2">Sharpe Ratio</p>
+                      <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {portfolioStandalone.sharpe_ratio.toFixed(3)}
+                      </p>
+                    </div>
+                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                      <MetricTooltip text={STANDALONE_TOOLTIPS.vami} />
+                      <p className="text-sm font-medium text-slate-500 mb-2">VAMI</p>
+                      <p className="text-2xl font-semibold tabular-nums text-slate-100">
+                        {portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                      </p>
+                    </div>
+                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                      <MetricTooltip text={STANDALONE_TOOLTIPS.volatility} />
+                      <p className="text-sm font-medium text-slate-500 mb-2">Volatility</p>
+                      <p className="text-2xl font-semibold tabular-nums text-slate-400">
+                        {(portfolioStandalone.volatility * 100).toFixed(2)}%
+                      </p>
+                    </div>
+                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                      <MetricTooltip text={STANDALONE_TOOLTIPS.sortino} />
+                      <p className="text-sm font-medium text-slate-500 mb-2">Sortino Ratio</p>
+                      <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {portfolioStandalone.sortino_ratio.toFixed(3)}
+                      </p>
+                    </div>
+                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                      <MetricTooltip text={STANDALONE_TOOLTIPS.max_drawdown} />
+                      <p className="text-sm font-medium text-slate-500 mb-2">Max Drawdown</p>
+                      <p className="text-2xl font-semibold tabular-nums text-rose-400">
+                        -{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <p className="text-slate-500 text-center text-sm py-10">Historical context required to generate statistics.</p>
@@ -268,38 +411,6 @@ export default function AnalysisPage() {
                 >
                   {compareLoading ? 'Processing…' : 'Execute'}
                 </button>
-              </div>
-              <div className="flex items-center gap-3 self-start">
-                <label className="text-xs font-semibold text-slate-500 whitespace-nowrap uppercase tracking-widest">Risk-free rate</label>
-                <div className="flex items-center gap-1.5">
-                  <div className="relative flex items-center">
-                    <input
-                      type="number" value={riskFreeRateInput}
-                      onChange={e => setRiskFreeRateInput(e.target.value)}
-                      onBlur={handleRiskFreeRateBlur}
-                      onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
-                      step="0.1" min="0" max="20"
-                      className="w-20 px-3 py-2 pr-6 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-xl text-sm text-slate-200 text-right focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                    <div className="absolute right-1.5 flex flex-col">
-                      <button
-                        type="button" tabIndex={-1}
-                        onClick={() => applyRiskFreeRate(Math.min(0.20, Math.round((riskFreeRate + 0.001) * 1000) / 1000))}
-                        className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
-                      >
-                        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 4L4 1L7 4"/></svg>
-                      </button>
-                      <button
-                        type="button" tabIndex={-1}
-                        onClick={() => applyRiskFreeRate(Math.max(0, Math.round((riskFreeRate - 0.001) * 1000) / 1000))}
-                        className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
-                      >
-                        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 1L4 4L7 1"/></svg>
-                      </button>
-                    </div>
-                  </div>
-                  <span className="text-slate-500 text-sm select-none">%</span>
-                </div>
               </div>
               {benchmarkSymbols.length > 0 && (
                 <div className="flex flex-wrap gap-2 w-full">
@@ -359,14 +470,86 @@ export default function AnalysisPage() {
               </div>
             )}
 
-            {compareResults.length > 0 && (
-              <div className="overflow-x-auto w-full">
+            {/* Standalone metrics table — portfolio + benchmark symbols */}
+            {standaloneResults.length > 0 && (
+              <div className="overflow-x-auto w-full mb-12">
+                <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Standalone Metrics</p>
+                {standaloneError && (
+                  <p className="mb-3 px-4 py-3 rounded-xl bg-red-500/10 text-red-400 text-sm border border-red-500/20">{standaloneError}</p>
+                )}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-[#2a2e42]/60">
-                      {['Security','Alpha','Beta','Sharpe','Treynor','Tracking Err','Info Ratio','Correlation'].map(h => (
-                        <th key={h} className={`py-4 px-4 text-xs font-semibold text-slate-500 ${h === 'Security' ? 'text-left' : 'text-right'}`}>{h}</th>
-                      ))}
+                      {(['Security', 'Sharpe', 'VAMI', 'Volatility', 'Sortino', 'Max DD'] as const).map(h => {
+                        const tipKey = { Security: undefined, Sharpe: 'sharpe', VAMI: 'vami', Volatility: 'volatility', Sortino: 'sortino', 'Max DD': 'max_drawdown' }[h] as keyof typeof STANDALONE_TOOLTIPS | undefined
+                        const tip = tipKey ? STANDALONE_TOOLTIPS[tipKey] : undefined
+                        return (
+                          <th key={h} className={`py-4 px-4 text-xs font-semibold text-slate-500 ${h === 'Security' ? 'text-left' : 'text-right'}`}>
+                            {tip ? (
+                              <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
+                                {h}
+                                <MetricTooltip text={tip} align={h === 'Security' ? 'left' : 'right'} direction="down" />
+                              </span>
+                            ) : h}
+                          </th>
+                        )
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#2a2e42]/30">
+                    {standaloneResults.map(r => (
+                      <tr key={r.symbol} className="hover:bg-white/2 transition-colors group">
+                        <td className={`py-4 px-4 font-semibold uppercase ${r.symbol === 'Portfolio' ? 'text-indigo-400' : 'text-slate-100 group-hover:text-indigo-400 transition-colors'}`}>
+                          {r.symbol}
+                        </td>
+                        {r.error ? (
+                          <td colSpan={5} className="py-4 px-4 text-right text-red-400 text-xs">{r.error}</td>
+                        ) : (
+                          <>
+                            <td className={`py-4 px-4 text-right font-medium tabular-nums ${r.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {r.sharpe_ratio.toFixed(3)}
+                            </td>
+                            <td className="py-4 px-4 text-right text-slate-300 font-medium tabular-nums">
+                              {r.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                            </td>
+                            <td className="py-4 px-4 text-right text-slate-400 font-medium tabular-nums">
+                              {(r.volatility * 100).toFixed(2)}%
+                            </td>
+                            <td className={`py-4 px-4 text-right font-medium tabular-nums ${r.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {r.sortino_ratio.toFixed(3)}
+                            </td>
+                            <td className="py-4 px-4 text-right font-medium tabular-nums text-rose-400">
+                              -{(r.max_drawdown * 100).toFixed(2)}%
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Alpha/beta benchmark comparison table */}
+            {compareResults.length > 0 && (
+              <div className="overflow-x-auto w-full">
+                <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Benchmark Comparison</p>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#2a2e42]/60">
+                      {(['Security', 'Alpha', 'Beta', 'Treynor', 'Tracking Err', 'Info Ratio', 'Correlation'] as const).map(h => {
+                        const tip = COMPARE_TOOLTIPS[h]
+                        return (
+                          <th key={h} className={`py-4 px-4 text-xs font-semibold text-slate-500 ${h === 'Security' ? 'text-left' : 'text-right'}`}>
+                            {tip ? (
+                              <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
+                                {h}
+                                <MetricTooltip text={tip} align={h === 'Security' ? 'left' : 'right'} direction="down" />
+                              </span>
+                            ) : h}
+                          </th>
+                        )
+                      })}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#2a2e42]/30">
@@ -375,7 +558,6 @@ export default function AnalysisPage() {
                         <td className="py-4 px-4 font-semibold text-slate-100 group-hover:text-indigo-400 transition-colors uppercase">{bm.symbol}</td>
                         <td className={`py-4 px-4 text-right font-medium tabular-nums ${bm.alpha >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{(bm.alpha * 100).toFixed(2)}%</td>
                         <td className="py-4 px-4 text-right text-slate-400 font-medium tabular-nums">{bm.beta.toFixed(3)}</td>
-                        <td className={`py-4 px-4 text-right font-medium tabular-nums ${bm.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{bm.sharpe_ratio.toFixed(3)}</td>
                         <td className="py-4 px-4 text-right text-slate-400 font-medium">{bm.treynor_ratio.toFixed(4)}</td>
                         <td className="py-4 px-4 text-right text-slate-400 font-medium">{(bm.tracking_error * 100).toFixed(2)}%</td>
                         <td className="py-4 px-4 text-right text-slate-300 font-medium tabular-nums">{bm.information_ratio.toFixed(3)}</td>

@@ -57,6 +57,7 @@ type AssetFundamental struct {
 	Country     string    `gorm:"index"`
 	Sector      string    `gorm:"index"`
 	Exchange    string
+	Currency    string    // native trading currency, e.g. "USD", "EUR" (from IB transactions or Yahoo)
 	Duration    *float64  // bond ETF: effective duration in years (from Yahoo bondHoldings)
 	DataSource  string    // provider that supplied this record, e.g. "FMP"
 	LastUpdated time.Time `gorm:"index"`

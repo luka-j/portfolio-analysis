@@ -100,9 +100,9 @@ export interface StatsResponse {
 
 export interface BenchmarkResult {
   symbol: string;
+  error?: string;
   alpha: number;
   beta: number;
-  sharpe_ratio: number;
   treynor_ratio: number;
   tracking_error: number;
   information_ratio: number;
@@ -113,6 +113,22 @@ export interface CompareResponse {
   currency: string;
   accounting_model: string;
   benchmarks: BenchmarkResult[];
+}
+
+export interface StandaloneResult {
+  symbol: string;
+  error?: string;
+  sharpe_ratio: number;
+  vami: number;
+  volatility: number;
+  sortino_ratio: number;
+  max_drawdown: number;
+}
+
+export interface StandaloneResponse {
+  currency: string;
+  accounting_model: string;
+  results: StandaloneResult[];
 }
 
 export interface UploadResponse {
@@ -172,6 +188,7 @@ export interface TaxReportSection {
 export interface TaxReportResponse {
   year: number;
   employment_income: TaxReportSection;
+  investment_income: TaxReportSection;
 }
 
 // ---- LLM ----
@@ -259,6 +276,16 @@ export async function comparePortfolio(
 ): Promise<CompareResponse> {
   return request<CompareResponse>(
     `/portfolio/compare?symbols=${encodeURIComponent(symbols)}&currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}`
+  );
+}
+
+export async function getStandaloneMetrics(
+  symbols: string, currency: string, from: string, to: string,
+  accountingModel = 'historical', riskFreeRate = 0.05
+): Promise<StandaloneResponse> {
+  const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : ''
+  return request<StandaloneResponse>(
+    `/portfolio/standalone?currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${symParam}`
   );
 }
 

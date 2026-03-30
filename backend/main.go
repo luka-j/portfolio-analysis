@@ -157,6 +157,7 @@ func setupRouter(
 	sh := handlers.NewStatsHandler(parser, portfolioSvc, marketSvc, fxSvc, currencyGetter)
 	api.GET("/portfolio/stats", sh.GetStats)
 	api.GET("/portfolio/compare", sh.Compare)
+	api.GET("/portfolio/standalone", sh.GetStandalone)
 
 	// Tax endpoints.
 	th := &handlers.TaxHandler{Parser: parser, TaxSvc: taxSvc}

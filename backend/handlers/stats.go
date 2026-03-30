@@ -128,12 +128,19 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 		statistics["twr"] = twr
 	}
 
-	// MWR
+	// MWR — use the actual last priced date, not the raw query param `to`.
+	// When `to` is in the future (e.g. a weekend or a date with no market data),
+	// actualToStr is the last date for which we have a price. Using `to` instead
+	// would stretch the IRR time-window past the end of real data, distorting MWR.
 	endValue := 0.0
+	mwrEndDate := to
 	if len(hist.Data) > 0 {
 		endValue = hist.Data[len(hist.Data)-1].Value
+		if t, err2 := time.Parse("2006-01-02", actualToStr); err2 == nil {
+			mwrEndDate = t
+		}
 	}
-	mwr, err := stats.CalculateMWR(mwrCashFlows, endValue, to)
+	mwr, err := stats.CalculateMWR(mwrCashFlows, endValue, mwrEndDate)
 	if err != nil {
 		statistics["mwr"] = map[string]string{"error": err.Error()}
 	} else {
@@ -217,11 +224,17 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 
 	var benchmarks []models.BenchmarkResult
 	for _, sym := range symbols {
-		// Fetch with a 7-day lookback to ensure we have a starting price for forward-filling
+		// Fetch with a 7-day lookback to ensure we have a starting price for forward-filling.
+		// On error, record the problem in the result and continue with remaining symbols
+		// so one bad ticker does not discard metrics already computed for others.
 		prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "fetching benchmark " + sym + ": " + err.Error()})
-			return
+			log.Printf("Warning: fetching benchmark %s: %v", sym, err)
+			benchmarks = append(benchmarks, models.BenchmarkResult{
+				Symbol: sym,
+				Error:  "could not fetch price data: " + err.Error(),
+			})
+			continue
 		}
 
 		// For historical accounting, convert benchmark prices to the display currency so
@@ -240,7 +253,7 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 			}
 		}
 
-		// Build a daily price map that matches the portfolio's pricing method 
+		// Build a daily price map that matches the portfolio's pricing method
 		// (forward-filled over weekends/holidays).
 		benchPriceMap := make(map[string]float64)
 		var lastBenchPrice float64
@@ -268,10 +281,10 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 			}
 		}
 
-		// Align lengths using the exact date intervals from the portfolio
+		// Align lengths using the exact date intervals from the portfolio.
 		var pRet []float64
 		var bRet []float64
-		// startDates and endDates are synchronized with portfolioReturns
+		// startDates and endDates are synchronised with portfolioReturns.
 		for i := 0; i < len(portfolioReturns); i++ {
 			prevDateStr := startDates[i]
 			curDateStr := endDates[i]
@@ -280,9 +293,20 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 			curPrice, ok2 := benchPriceMap[curDateStr]
 
 			if ok1 && ok2 && prevPrice != 0 {
-				bRet = append(bRet, (curPrice - prevPrice)/prevPrice)
+				bRet = append(bRet, (curPrice-prevPrice)/prevPrice)
 				pRet = append(pRet, portfolioReturns[i])
 			}
+		}
+
+		// No aligned pairs means the portfolio has no holdings in this date range
+		// (or the benchmark has no price data that overlaps). Return an explicit
+		// error so callers are not silently given all-zero metrics.
+		if len(pRet) == 0 {
+			benchmarks = append(benchmarks, models.BenchmarkResult{
+				Symbol: sym,
+				Error:  "no data: portfolio has no holdings in this date range or benchmark prices do not overlap",
+			})
+			continue
 		}
 
 		metrics := stats.CalculateBenchmarkMetrics(pRet, bRet, riskFreeRate)
@@ -290,7 +314,6 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 			Symbol:           sym,
 			Alpha:            metrics.Alpha,
 			Beta:             metrics.Beta,
-			SharpeRatio:      metrics.SharpeRatio,
 			TreynorRatio:     metrics.TreynorRatio,
 			TrackingError:    metrics.TrackingError,
 			InformationRatio: metrics.InformationRatio,
@@ -305,4 +328,154 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 	})
 }
 
+// GetStandalone handles GET /api/v1/portfolio/standalone.
+// It always returns standalone metrics for the portfolio as the first result.
+// If the optional `symbols` query parameter is provided (comma-separated),
+// metrics for each symbol are appended as additional results.
+func (h *StatsHandler) GetStandalone(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
 
+	data, err := h.Parser.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	currency := c.Query("currency")
+	if currency == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency parameter is required"})
+		return
+	}
+
+	from, to, err := parseDateRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Constrain 'from' date to the portfolio's inception date.
+	earliest, _ := DateRangeFromData(data)
+	if !earliest.IsZero() && from.Before(earliest) {
+		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	riskFreeRate := 0.05
+	if rfStr := c.Query("risk_free_rate"); rfStr != "" {
+		if rf, err := strconv.ParseFloat(rfStr, 64); err == nil {
+			riskFreeRate = rf
+		}
+	}
+
+	acctModel := parseAccountingModel(c)
+
+	// Portfolio daily returns.
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
+		return
+	}
+
+	portfolioMetrics := stats.CalculateStandaloneMetrics(portfolioReturns, riskFreeRate)
+	results := []models.StandaloneResult{
+		{
+			Symbol:       "Portfolio",
+			SharpeRatio:  portfolioMetrics.SharpeRatio,
+			VAMI:         portfolioMetrics.VAMI,
+			Volatility:   portfolioMetrics.Volatility,
+			SortinoRatio: portfolioMetrics.SortinoRatio,
+			MaxDrawdown:  portfolioMetrics.MaxDrawdown,
+		},
+	}
+
+	// Optional symbol results.
+	if symbolsStr := c.Query("symbols"); symbolsStr != "" {
+		symbols := strings.Split(symbolsStr, ",")
+		for i := range symbols {
+			symbols[i] = strings.TrimSpace(symbols[i])
+		}
+
+		for _, sym := range symbols {
+			prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to)
+			if err != nil {
+				log.Printf("Warning: fetching standalone %s: %v", sym, err)
+				results = append(results, models.StandaloneResult{
+					Symbol: sym,
+					Error:  "could not fetch price data: " + err.Error(),
+				})
+				continue
+			}
+
+			var fxRates map[string]float64
+			if acctModel == models.AccountingModelHistorical || acctModel == "" {
+				if h.CurrencyGetter != nil {
+					nativeCcy, err := h.CurrencyGetter.GetCurrency(sym)
+					if err != nil {
+						log.Printf("Warning: could not determine currency for %s: %v", sym, err)
+					} else {
+						fxRates = buildFXRateMap(h.MarketProvider, nativeCcy, currency, from.AddDate(0, 0, -7), to)
+					}
+				}
+			}
+
+			benchPriceMap := make(map[string]float64)
+			var lastBenchPrice float64
+			for _, p := range prices {
+				adj := p.AdjClose
+				if adj == 0 {
+					adj = p.Close
+				}
+				ds := p.Date.Format("2006-01-02")
+				if fxRates != nil {
+					if r, ok := fxRates[ds]; ok && r != 0 {
+						adj *= r
+					}
+				}
+				benchPriceMap[ds] = adj
+			}
+
+			// Forward-fill prices over weekends/holidays.
+			for d := from.AddDate(0, 0, -7); !d.After(to); d = d.AddDate(0, 0, 1) {
+				ds := d.Format("2006-01-02")
+				if p, ok := benchPriceMap[ds]; ok {
+					lastBenchPrice = p
+				} else if lastBenchPrice != 0 {
+					benchPriceMap[ds] = lastBenchPrice
+				}
+			}
+
+			// Build symbol return series aligned to the portfolio's date intervals.
+			var symReturns []float64
+			for i := 0; i < len(portfolioReturns); i++ {
+				prevPrice, ok1 := benchPriceMap[startDates[i]]
+				curPrice, ok2 := benchPriceMap[endDates[i]]
+				if ok1 && ok2 && prevPrice != 0 {
+					symReturns = append(symReturns, (curPrice-prevPrice)/prevPrice)
+				}
+			}
+
+			if len(symReturns) == 0 {
+				results = append(results, models.StandaloneResult{
+					Symbol: sym,
+					Error:  "no data: portfolio has no holdings in this date range or benchmark prices do not overlap",
+				})
+				continue
+			}
+
+			m := stats.CalculateStandaloneMetrics(symReturns, riskFreeRate)
+			results = append(results, models.StandaloneResult{
+				Symbol:       sym,
+				SharpeRatio:  m.SharpeRatio,
+				VAMI:         m.VAMI,
+				Volatility:   m.Volatility,
+				SortinoRatio: m.SortinoRatio,
+				MaxDrawdown:  m.MaxDrawdown,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, models.StandaloneResponse{
+		Currency:        currency,
+		AccountingModel: string(acctModel),
+		Results:         results,
+	})
+}

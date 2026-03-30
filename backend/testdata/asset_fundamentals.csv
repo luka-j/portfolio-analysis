@@ -1,0 +1,17 @@
+"id","symbol","name","asset_type","country","sector","industry","exchange","data_source","last_updated","duration","currency"
+"1","XDW0.DE","Xtrackers MSCI World Energy UCITS ETF 1C","ETF","IE","Financial Services","Asset Management","","FMP","2026-03-24 22:05:18.994101+01",NULL,NULL
+"2","XDEV.DE","Xtrackers MSCI World Value UCITS ETF 1C","ETF","IE","Financial Services","Asset Management","","FMP","2026-03-24 22:05:19.128069+01",NULL,NULL
+"3","ARMY.L","HANetf ICAV - Future of European Defence Screened UCITS ETF Accumulating","ETF","Unknown","Unknown","","LSE","Yahoo","2026-03-28 13:52:51.410025+01",NULL,NULL
+"4","PSTG","Everpure, Inc","Stock","US","Technology","Computer Hardware","","IB","2026-03-24 23:33:45.20326+01",NULL,NULL
+"5","SPP1.DE","State Street SPDR MSCI All Country World EUR Hdg UCITS ETF (Acc)","ETF","IE","Financial Services","Asset Management","","FMP","2026-03-24 22:05:19.553442+01",NULL,NULL
+"6","EMGH.MI","L&G Emerging Markets Government Bond (USD) 0-5 Year Screened UCITS ETF EUR Hedged Accumulation","Bond ETF","Unknown","Unknown","","Milan","Yahoo","2026-03-29 05:05:51.126163+02","5.11",NULL
+"7","BRK-B","Berkshire Hathaway Inc.","Stock","US","Financial Services","Insurance - Diversified","","FMP","2026-03-24 22:05:19.801772+01",NULL,NULL
+"8","VUAA.L","Vanguard S&P 500 UCITS ETF (USD) Accumulating","ETF","IE","Financial Services","Asset Management","","FMP","2026-03-24 22:05:19.930667+01",NULL,NULL
+"9","H411.DE","HSBC MSCI AC FAR EAST ex JAPAN UCITS ETF","ETF","IE","Financial Services","Asset Management","","FMP","2026-03-24 22:05:20.090493+01",NULL,NULL
+"10","IE1A.DE","iShares € Corp Bond 1-5yr UCITS ETF","Bond ETF","IE","Financial Services","Asset Management - Bonds","","FMP","2026-03-29 05:05:55.023979+02","2.66",NULL
+"11","VUAA.MI","Vanguard S&P 500 UCITS ETF (USD) Accumulating","ETF","IE","Financial Services","Asset Management","","FMP","2026-03-24 22:53:18.381609+01",NULL,NULL
+"12","4GLD.DE","Xetra-Gold","Commodity","DE","Financial Services","Asset Management","","FMP","2026-03-24 22:53:18.505551+01",NULL,NULL
+"13","IMAE.AS","iShares Core MSCI Europe UCITS ETF EUR (Acc)","ETF","Unknown","Unknown","","Amsterdam","Yahoo","2026-03-28 13:52:51.565759+01",NULL,NULL
+"14","MEUD.PA","Amundi Core Stoxx Europe 600 UCITS ETF Acc","ETF","LU","Financial Services","Asset Management","","FMP","2026-03-24 22:53:18.745383+01",NULL,NULL
+"27","SPY","","","","",NULL,"","","2026-03-29 19:58:59.504326+02",NULL,"USD"
+"28","SXR8.DE","","","","",NULL,"","","2026-03-29 19:59:09.175254+02",NULL,"EUR"

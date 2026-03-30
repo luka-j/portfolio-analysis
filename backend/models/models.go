@@ -211,15 +211,35 @@ type StatsResponse struct {
 }
 
 // BenchmarkResult holds comparison metrics for one benchmark.
+// If Error is non-empty the metrics are zero and should not be used.
 type BenchmarkResult struct {
 	Symbol           string  `json:"symbol"`
+	Error            string  `json:"error,omitempty"`
 	Alpha            float64 `json:"alpha"`
 	Beta             float64 `json:"beta"`
-	SharpeRatio      float64 `json:"sharpe_ratio"`
 	TreynorRatio     float64 `json:"treynor_ratio"`
 	TrackingError    float64 `json:"tracking_error"`
 	InformationRatio float64 `json:"information_ratio"`
 	Correlation      float64 `json:"correlation"`
+}
+
+// StandaloneResult holds standalone risk metrics for one security or portfolio.
+// If Error is non-empty the metrics are zero and should not be used.
+type StandaloneResult struct {
+	Symbol       string  `json:"symbol"`
+	Error        string  `json:"error,omitempty"`
+	SharpeRatio  float64 `json:"sharpe_ratio"`
+	VAMI         float64 `json:"vami"`
+	Volatility   float64 `json:"volatility"`
+	SortinoRatio float64 `json:"sortino_ratio"`
+	MaxDrawdown  float64 `json:"max_drawdown"`
+}
+
+// StandaloneResponse is the response for GET /portfolio/standalone.
+type StandaloneResponse struct {
+	Currency        string             `json:"currency"`
+	AccountingModel string             `json:"accounting_model"`
+	Results         []StandaloneResult `json:"results"`
 }
 
 // CompareResponse is the response for GET /portfolio/compare.

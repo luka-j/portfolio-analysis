@@ -209,7 +209,7 @@ export default function TaxPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/4">
-                    {report.investment_income.transactions?.map((tx, idx) => {
+                    {report.investment_income.transactions?.map((tx: TaxTransaction, idx: number) => {
                       const buyPriceNative = tx.buy_rate ? tx.cost_czk / (tx.quantity * tx.buy_rate) : 0
                       const delta = tx.benefit_czk - tx.cost_czk
                       return (

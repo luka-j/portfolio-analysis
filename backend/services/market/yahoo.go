@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -259,8 +260,18 @@ func yahooQuoteTypeToAssetType(qt string) string {
 }
 
 // GetCurrency returns the native trading currency for a symbol (e.g. "USD", "EUR").
+// It checks asset_fundamentals first; on a miss it fetches from Yahoo and persists the result.
 // Returns an empty string when the symbol is not found on Yahoo.
 func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	// DB cache check — skip when DB is nil (e.g. in unit tests).
+	if s.DB != nil {
+		var af models.AssetFundamental
+		if err := s.DB.Select("currency").Where("symbol = ? AND currency != ''", symbol).First(&af).Error; err == nil {
+			return af.Currency, nil
+		}
+	}
+
 	if err := s.limiter.Wait(context.Background()); err != nil {
 		return "", fmt.Errorf("rate limiter: %w", err)
 	}
@@ -297,7 +308,21 @@ func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
 	if yResp.Chart.Error != nil || len(yResp.Chart.Result) == 0 {
 		return "", nil
 	}
-	return yResp.Chart.Result[0].Meta.Currency, nil
+	currency := yResp.Chart.Result[0].Meta.Currency
+
+	// Persist so subsequent calls are served from DB.
+	if s.DB != nil && currency != "" {
+		s.DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "symbol"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{"currency": currency}),
+		}).Create(&models.AssetFundamental{
+			Symbol:      symbol,
+			Currency:    currency,
+			LastUpdated: time.Now().UTC(),
+		})
+	}
+
+	return currency, nil
 }
 
 func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) ([]models.PricePoint, error) {

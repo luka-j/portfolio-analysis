@@ -332,6 +332,8 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 		// Tier 0: IB broker category — definitive for ETF, Commodity, Bond; ambiguous for STK.
 		if ibType := s.ibAssetType(sym); ibType != "" {
 			s.seedAssetType(sym, ibType, "IB", "")
+			// IB transaction currency is authoritative — seed it without a Yahoo call.
+			s.seedCurrency(sym, s.ibCurrency(sym))
 			ibCount++
 			continue
 		}
@@ -343,6 +345,7 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 				log.Printf("fundamentals: Yahoo quoteType %s error: %v", sym, err)
 			} else if qt != "" {
 				s.seedAssetType(sym, qt, "Yahoo", name)
+				// Currency for non-IB symbols will be populated on first GetCurrency call.
 				yahooCount++
 				continue
 			}
@@ -360,6 +363,31 @@ func isDefinitiveAssetType(t string) bool {
 		return true
 	}
 	return false
+}
+
+// ibCurrency returns the trading currency for symbol from the transactions table.
+// IB-provided currency is authoritative for portfolio symbols, so no Yahoo call is needed.
+func (s *Service) ibCurrency(symbol string) string {
+	var cur string
+	s.DB.Model(&models.Transaction{}).
+		Where("(symbol = ? OR yahoo_symbol = ?) AND currency != ''", symbol, symbol).
+		Limit(1).
+		Pluck("currency", &cur)
+	return cur
+}
+
+// seedCurrency writes currency into an existing asset_fundamentals row for symbol,
+// only when the row exists and has no currency set yet.
+func (s *Service) seedCurrency(symbol, currency string) {
+	if currency == "" {
+		return
+	}
+	result := s.DB.Model(&models.AssetFundamental{}).
+		Where("symbol = ? AND (currency IS NULL OR currency = '')", symbol).
+		Update("currency", currency)
+	if result.Error != nil {
+		log.Printf("fundamentals: seedCurrency %s: %v", symbol, result.Error)
+	}
 }
 
 // ibAssetType maps the IB broker AssetCategory (from transactions table) to our AssetType.

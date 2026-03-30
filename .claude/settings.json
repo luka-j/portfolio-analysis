@@ -10,7 +10,9 @@
       "Read(//d:/projects/gofolio-analysis/backend/**)",
       "Bash(grep -E \"\\\\.\\(go|ts\\)$\")",
       "Bash(grep -n \"type LLMCache\" /d/projects/gofolio-analysis/backend/models/*.go)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(grep -E \"\\\\.\\(go|mod\\)$\")",
+      "Bash(grep -n \"GetDailyReturns\" /d/projects/gofolio-analysis/backend/services/portfolio/*.go)"
     ]
   }
 }
