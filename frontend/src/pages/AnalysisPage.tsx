@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import PageLayout from '../components/PageLayout'
+import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import DateRangePicker from '../components/DateRangePicker'
@@ -35,10 +36,10 @@ const STAT_TOOLTIPS: Record<string, string> = {
 }
 
 const STANDALONE_TOOLTIPS: Record<string, string> = {
-  sharpe:     'Evaluates return relative to total volatility. Higher numbers mean better risk-adjusted performance.',
-  vami:       'Value Added Monthly Index. Growth of a $1,000 investment — reflects compounded total return.',
+  sharpe:     'Excess return above the risk-free rate, divided by total volatility. Higher numbers mean better risk-adjusted performance.',
+  vami:       'Value Added Monthly Index. Growth of a 1,000 investment — reflects compounded total return.',
   volatility: 'Annualized standard deviation of daily returns. Measures how much the portfolio fluctuates.',
-  sortino:    'Like Sharpe but only penalizes downside volatility, ignoring upside swings. Higher is better.',
+  sortino:    'Like Sharpe, but only penalizes downside volatility below the risk-free rate, ignoring upside swings. Higher is better.',
   max_drawdown: 'Largest peak-to-trough decline over the period. Measures worst-case loss from a high point.',
 }
 
@@ -52,15 +53,6 @@ const COMPARE_TOOLTIPS: Record<string, string> = {
   Correlation:   'How closely your returns move with the benchmark. 1 = perfect alignment, 0 = no relationship.',
 }
 
-function MetricTooltip({ text, align = 'center', direction = 'up' }: { text: string; align?: 'center' | 'right' | 'left'; direction?: 'up' | 'down' }) {
-  const posClass = align === 'right' ? 'right-0' : align === 'left' ? 'left-0' : 'left-1/2 -translate-x-1/2'
-  const dirClass = direction === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'
-  return (
-    <div className={`absolute ${dirClass} w-56 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl ${posClass}`}>
-      {text}
-    </div>
-  )
-}
 
 function getFromDate(months: number): string {
   if (months === 0) return '2000-01-01'
@@ -82,8 +74,8 @@ export default function AnalysisPage() {
   const [benchmarkData, setBenchmarkData]       = useState<Record<string, { date: string; close: number }[]>>({})
   const [compareResults, setCompareResults]     = useState<BenchmarkResult[]>([])
   const [standaloneResults, setStandaloneResults] = useState<StandaloneResult[]>([])
-  const [riskFreeRate, setRiskFreeRate]       = useState(0.025)
-  const [riskFreeRateInput, setRiskFreeRateInput] = useState('2.50')
+  const [riskFreeRate, setRiskFreeRate]           = usePersistentState('analysis_riskFreeRate', 0.025)
+  const [riskFreeRateInput, setRiskFreeRateInput] = usePersistentState('analysis_riskFreeRateInput', '2.50')
   const [loading, setLoading]           = useState(true)
   const [compareLoading, setCompareLoading] = useState(false)
   const [standaloneLoading, setStandaloneLoading] = useState(false)
@@ -254,7 +246,7 @@ export default function AnalysisPage() {
           </div>
 
           {/* Controls */}
-          <div className={`flex flex-wrap justify-center gap-4 ${period === -1 ? 'mb-4' : 'mb-20'}`}>
+          <div className={`flex flex-wrap justify-center items-end gap-4 ${period === -1 ? 'mb-4' : 'mb-20'}`}>
             <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
             <SegmentedControl
               label="Time Period"
@@ -270,7 +262,12 @@ export default function AnalysisPage() {
             />
             <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
             <div className="flex flex-col items-center gap-2">
-              <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Risk-free rate</span>
+              <div className="relative group/rfr cursor-default">
+                <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Risk-free rate</span>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/rfr:opacity-100 transition-opacity z-50 shadow-2xl">
+                  The annual return of a theoretically risk-free asset. Used as the baseline in Sharpe and Sortino ratio calculations — only returns above this threshold are treated as compensation for risk.
+                </div>
+              </div>
               <div className="flex items-center gap-1.5 bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
                 <div className="relative flex items-center">
                   <input
@@ -334,7 +331,7 @@ export default function AnalysisPage() {
                   const tooltip = STAT_TOOLTIPS[key.toLowerCase()]
                   return (
                     <div key={key} className={`relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
-                      {tooltip && <MetricTooltip text={tooltip} />}
+                      {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
                       <p className="text-sm font-medium text-slate-500 mb-2 capitalize">{key.replace(/_/g, ' ')}</p>
                       <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%
@@ -351,35 +348,35 @@ export default function AnalysisPage() {
                 {portfolioStandalone && (
                   <>
                     <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
-                      <MetricTooltip text={STANDALONE_TOOLTIPS.sharpe} />
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Sharpe Ratio</p>
                       <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {portfolioStandalone.sharpe_ratio.toFixed(3)}
                       </p>
                     </div>
                     <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
-                      <MetricTooltip text={STANDALONE_TOOLTIPS.vami} />
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">VAMI</p>
                       <p className="text-2xl font-semibold tabular-nums text-slate-100">
                         {portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                       </p>
                     </div>
                     <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
-                      <MetricTooltip text={STANDALONE_TOOLTIPS.volatility} />
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Volatility</p>
                       <p className="text-2xl font-semibold tabular-nums text-slate-400">
                         {(portfolioStandalone.volatility * 100).toFixed(2)}%
                       </p>
                     </div>
                     <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
-                      <MetricTooltip text={STANDALONE_TOOLTIPS.sortino} />
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Sortino Ratio</p>
                       <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {portfolioStandalone.sortino_ratio.toFixed(3)}
                       </p>
                     </div>
                     <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
-                      <MetricTooltip text={STANDALONE_TOOLTIPS.max_drawdown} />
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Max Drawdown</p>
                       <p className="text-2xl font-semibold tabular-nums text-rose-400">
                         -{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%
@@ -488,7 +485,7 @@ export default function AnalysisPage() {
                             {tip ? (
                               <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
                                 {h}
-                                <MetricTooltip text={tip} align={h === 'Security' ? 'left' : 'right'} direction="down" />
+                                <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="down" className="w-56">{tip}</HoverTooltip>
                               </span>
                             ) : h}
                           </th>
@@ -544,7 +541,7 @@ export default function AnalysisPage() {
                             {tip ? (
                               <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
                                 {h}
-                                <MetricTooltip text={tip} align={h === 'Security' ? 'left' : 'right'} direction="down" />
+                                <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="down" className="w-56">{tip}</HoverTooltip>
                               </span>
                             ) : h}
                           </th>

@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { clearToken, getLLMAvailable } from '../api'
+import { usePrivacy } from '../utils/PrivacyContext'
+import HoverTooltip from './HoverTooltip'
 
 export default function NavBar() {
   const navigate = useNavigate()
+  const { privacy, togglePrivacy } = usePrivacy()
   const [llmAvailable, setLlmAvailable] = useState(false)
 
   useEffect(() => {
@@ -52,29 +55,54 @@ export default function NavBar() {
           <NavLink to="/breakdown" className={linkClass}>
             Breakdown
           </NavLink>
-          <NavLink to="/tax" className={linkClass}>
-            Tax
-          </NavLink>
+          {privacy ? (
+            <div className="relative group flex items-center">
+              <span className="text-slate-600 cursor-not-allowed text-sm font-medium">Tax</span>
+              <HoverTooltip direction="down" className="w-42">
+                Not available in private mode.
+              </HoverTooltip>
+            </div>
+          ) : (
+            <NavLink to="/tax" className={linkClass}>
+              Tax
+            </NavLink>
+          )}
           {llmAvailable ? (
             <NavLink to="/llm" className={linkClass}>
               LLM
             </NavLink>
           ) : (
             <div className="relative group flex items-center">
-              <span 
+              <span
                 className="text-slate-600 cursor-not-allowed text-sm font-medium transition-colors duration-200"
               >
                 LLM
               </span>
-              <div className="absolute top-full mt-2.5 w-60 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl left-1/2 -translate-x-1/2">
+              <HoverTooltip direction="down" className="w-60">
                 LLM features are currently unavailable. Please configure GEMINI_API_KEY.
-              </div>
+              </HoverTooltip>
             </div>
           )}
         </nav>
 
-        {/* Right: Logout */}
-        <div className="flex-1 flex justify-end">
+        {/* Right: Privacy indicator + Logout */}
+        <div className="flex-1 flex justify-end items-center gap-1">
+          {privacy && (
+            <div className="relative group">
+              <button
+                onClick={togglePrivacy}
+                className="p-2.5 rounded-xl text-red-400/70 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              </button>
+              <HoverTooltip direction="down" align="right" className="w-36 text-center">
+                Disable private mode
+              </HoverTooltip>
+            </div>
+          )}
           <button
             onClick={handleLogout}
             className="p-2.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"

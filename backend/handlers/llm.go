@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"gofolio-analysis/middleware"
 	"gofolio-analysis/models"
@@ -77,10 +79,17 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 
 	// Call LLM
 	log.Printf("INFO: GetMarketSummary calling LLM [user=%s period=%s currency=%s]", userHash[:8], period, currency)
-	summary, err := h.LLM.GetMarketSummary(c.Request.Context(), data, currency, period)
+	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 130*time.Second)
+	defer cancel()
+	summary, err := h.LLM.GetMarketSummary(reqCtx, data, currency, period)
 	if err != nil {
 		if errors.Is(err, llm.ErrNotConfigured) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error(), "code": "NOT_CONFIGURED"})
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("WARN: GetMarketSummary timed out [user=%s period=%s]", userHash[:8], period)
+			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Model timed out. The servers may be overloaded, try again later or with a different model."})
 			return
 		}
 		log.Printf("ERROR: GetMarketSummary failed [user=%s period=%s currency=%s]: %v", userHash[:8], period, currency, err)
@@ -88,13 +97,16 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	// Save Cache — update in-place if a (stale) row exists, otherwise insert
+	// Save Cache — upsert to avoid duplicate key on concurrent requests
 	cacheEntry.UserHash = userHash
 	cacheEntry.PromptType = promptType
 	cacheEntry.Model = model
 	cacheEntry.Response = summary
 	cacheEntry.CreatedAt = time.Now()
-	if err := h.DB.Save(&cacheEntry).Error; err != nil {
+	if err := h.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
+		DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
+	}).Create(&cacheEntry).Error; err != nil {
 		log.Printf("WARN: GetSummary failed to save cache [user=%s period=%s]: %v", userHash[:8], period, err)
 	}
 
@@ -171,8 +183,10 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		history = req.History
 	}
 
+	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 130*time.Second)
+	defer cancel()
 	response, err := h.LLM.AnalyzePortfolio(
-		c.Request.Context(), data, req.Currency, cannedType, req.Message,
+		reqCtx, data, req.Currency, cannedType, req.Message,
 		req.Model, includePortfolio, customWeights, history,
 	)
 	if err != nil {
@@ -180,19 +194,27 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error(), "code": "NOT_CONFIGURED"})
 			return
 		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("WARN: AnalyzePortfolio timed out [user=%s prompt_type=%s]", userHash[:8], req.PromptType)
+			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Model timed out. The servers may be overloaded, try again later or with a different model."})
+			return
+		}
 		log.Printf("ERROR: AnalyzePortfolio failed [user=%s prompt_type=%s currency=%s]: %v", userHash[:8], req.PromptType, req.Currency, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "generating analysis: " + err.Error()})
 		return
 	}
 
-	// Save Cache for canned — update in-place if a (stale) row exists, otherwise insert
+	// Save Cache for canned — upsert to avoid duplicate key on concurrent requests
 	if cannedType != "" {
 		cacheEntry.UserHash = userHash
 		cacheEntry.PromptType = req.PromptType
 		cacheEntry.Model = model
 		cacheEntry.Response = response
 		cacheEntry.CreatedAt = time.Now()
-		if err := h.DB.Save(&cacheEntry).Error; err != nil {
+		if err := h.DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
+			DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
+		}).Create(&cacheEntry).Error; err != nil {
 			log.Printf("WARN: Chat failed to save cache [user=%s prompt_type=%s]: %v", userHash[:8], req.PromptType, err)
 		}
 	}

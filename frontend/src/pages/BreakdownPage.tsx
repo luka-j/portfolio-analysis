@@ -6,6 +6,7 @@ import Spinner from '../components/Spinner'
 import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } from '../api'
 import { CURRENCIES } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
+import { usePrivacy } from '../utils/PrivacyContext'
 
 const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
 
@@ -23,6 +24,7 @@ function sectionColor(idx: number): string {
 interface SectionCardProps {
   section: BreakdownSection
   formatValue: (v: number) => string
+  privacy: boolean
 }
 
 const CUSTOM_TOOLTIP_STYLE = {
@@ -47,7 +49,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   )
 }
 
-function SectionCard({ section, formatValue }: SectionCardProps) {
+function SectionCard({ section, formatValue, privacy }: SectionCardProps) {
   const [activeIdx, setActiveIdx] = useState<number | null>(null)
   const pieData = section.entries.map((e) => ({ ...e, name: e.label }))
 
@@ -124,7 +126,7 @@ function SectionCard({ section, formatValue }: SectionCardProps) {
                     </div>
                   </td>
                   <td className="py-4 pr-6 text-right text-slate-400 tabular-nums text-sm">
-                    {formatValue(e.value)}
+                    {privacy ? '—' : formatValue(e.value)}
                   </td>
                   <td className="py-4 text-right">
                     <div className="flex items-center justify-end gap-3">
@@ -162,6 +164,7 @@ function formatCurrencyValue(value: number, currency: string): string {
 }
 
 export default function BreakdownPage() {
+  const { privacy } = usePrivacy()
   const [currency, setCurrency] = usePersistentState('breakdown_currency', 'USD')
   const [sections, setSections] = useState<BreakdownSection[]>([])
   const [loading, setLoading] = useState(false)
@@ -216,7 +219,7 @@ export default function BreakdownPage() {
           <div className="flex flex-col gap-12 animate-fade-in pb-20">
             {sections.map((s, i) => (
               <div key={s.title} className="w-full">
-                <SectionCard section={s} formatValue={fmt} />
+                <SectionCard section={s} formatValue={fmt} privacy={privacy} />
                 {i < sections.length - 1 && (
                   <div className="mt-4 border-t border-[#2a2e42]/40 opacity-30" />
                 )}

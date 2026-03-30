@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import NavBar from '../components/NavBar'
+import HoverTooltip from '../components/HoverTooltip'
 import { useLocation } from 'react-router-dom'
 import { postLLMChat, getPortfolioValue } from '../api'
 
@@ -344,9 +345,9 @@ export default function LLMPage() {
                     <path d="M11 1l-5 5v2h2l5-5-2-2Z" />
                   </svg>
                 </button>
-                <div className="absolute right-0 bottom-full mb-2.5 w-max whitespace-nowrap px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl">
+                <HoverTooltip direction="down" align="right" className="w-max whitespace-nowrap">
                   New chat
-                </div>
+                </HoverTooltip>
               </div>
             )}
           </div>
@@ -393,10 +394,13 @@ export default function LLMPage() {
 
           {loading && (
             <div className="flex justify-start">
-              <div className="px-5 py-4 flex items-center gap-2">
+              <div className="relative group px-5 py-4 flex items-center gap-2 cursor-default">
                 <div className="w-2 h-2 rounded-full bg-indigo-500/50 animate-bounce" style={{ animationDelay: '0ms' }} />
                 <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '150ms' }} />
                 <div className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                <HoverTooltip align="none" className="left-5 w-max whitespace-nowrap">
+                  Model is thinking. This may take over a minute.
+                </HoverTooltip>
               </div>
             </div>
           )}
@@ -462,9 +466,9 @@ export default function LLMPage() {
               />
               <span className={`text-[11px] uppercase font-bold tracking-wide ${portfolioShared ? 'text-slate-600' : 'text-slate-500'}`}>Include portfolio</span>
               {portfolioShared && (
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2.5 w-60 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl">
+                <HoverTooltip className="w-60">
                   Portfolio data has already been shared in this conversation and cannot be removed from context
-                </div>
+                </HoverTooltip>
               )}
             </label>
 

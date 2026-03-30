@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import ReactMarkdown from 'react-markdown'
 import NavBar from '../components/NavBar'
+import HoverTooltip from '../components/HoverTooltip'
 import { useNavigate } from 'react-router-dom'
 import {
   getPortfolioValue, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
@@ -11,6 +12,7 @@ import {
 } from '../api'
 import { formatCurrencyCompact, formatDate, CURRENCIES } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
+import { usePrivacy } from '../utils/PrivacyContext'
 
 const PERIODS = [
   { label: '1M', months: 1 },
@@ -33,6 +35,7 @@ function getFromDate(months: number): string {
 }
 
 export default function LandingPage() {
+  const { privacy, togglePrivacy } = usePrivacy()
   const [currencyIdx, setCurrencyIdx] = usePersistentState('landing_currencyIdx', 0)
   const currency = CURRENCIES[currencyIdx]
   const [period, setPeriod] = usePersistentState('landing_period', 0)
@@ -228,16 +231,39 @@ export default function LandingPage() {
 
       {/* Hero section centered */}
       <div className="z-10 w-full flex flex-col items-center gap-2 pointer-events-none -mb-6">
-        <h1 className="text-4xl md:text-6xl font-bold text-white tabular-nums tracking-tight [text-shadow:0_0_20px_rgba(255,255,255,0.05)] flex items-baseline gap-2">
-          <button
-            className="pointer-events-auto text-indigo-300/70 hover:text-indigo-300 px-1.5 py-0.5 rounded-lg hover:bg-white/[0.07] hover:backdrop-blur-sm transition-all duration-200 active:scale-95"
-            onClick={cycleCurrency}
-            title="Switch currency"
-          >
-            {CURRENCY_SYMBOLS[currency]}
-          </button>
-          {loading ? '—' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
-        </h1>
+        <div className="pointer-events-auto flex items-center gap-3">
+          <h1 className="text-4xl md:text-6xl font-bold text-white tabular-nums tracking-tight [text-shadow:0_0_20px_rgba(255,255,255,0.05)] flex items-baseline gap-2">
+            <button
+              className="text-indigo-300/70 hover:text-indigo-300 px-1.5 py-0.5 rounded-lg hover:bg-white/[0.07] hover:backdrop-blur-sm transition-all duration-200 active:scale-95"
+              onClick={cycleCurrency}
+              title="Switch currency"
+            >
+              {CURRENCY_SYMBOLS[currency]}
+            </button>
+            {loading ? '—' : privacy ? '———' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
+          </h1>
+          <div className="relative group">
+            <button
+              className={`p-1.5 rounded-lg transition-all duration-200 active:scale-95 ${privacy ? 'text-red-400/80 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-700 hover:text-slate-400 hover:bg-white/[0.07]'}`}
+              onClick={togglePrivacy}
+            >
+              {privacy ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+            <HoverTooltip direction="down" className="w-36 text-center">
+              {privacy ? 'Disable private mode' : 'Enable private mode'}
+            </HoverTooltip>
+          </div>
+        </div>
 
         {/* TWR / MWR secondary indicators */}
         {(mwr !== null || twr !== null) && (
@@ -262,7 +288,7 @@ export default function LandingPage() {
         )}
 
         {/* LLM Market Summary Widget */}
-        {llmAvailable === true && (
+        {llmAvailable !== false && (
           <div className="pointer-events-auto mt-1 w-[95%] md:w-[80%] max-w-7xl px-2 py-1 flex flex-col items-center gap-1">
              <div className="flex items-center gap-2">
                <span className="text-[10px] uppercase font-bold text-indigo-300">What happened past:</span>
@@ -293,9 +319,8 @@ export default function LandingPage() {
                            p: ({ children }) => <p className="mb-1 last:mb-0 text-center mx-auto max-w-2xl text-slate-300">{children}</p>,
                            ul: ({ children }) => <ul className="grid grid-cols-1 md:grid-cols-2 gap-3 list-none justify-center w-full items-stretch">{children}</ul>,
                            li: ({ children }) => (
-                             <li className="flex items-start gap-2 bg-white/[0.03] hover:bg-white/[0.05] transition-colors border border-white/5 px-4 py-2 rounded-2xl text-left shadow-md leading-relaxed w-full group backdrop-blur-sm">
-                               <span className="text-indigo-500/80 group-hover:text-indigo-400 transition-colors shrink-0 mt-[1px] font-black text-lg leading-none">•</span>
-                               <span className="flex-1 text-slate-200">{children}</span>
+                             <li className="bg-white/3 hover:bg-white/5 transition-colors border border-white/5 px-4 py-2 rounded-2xl text-left shadow-md leading-relaxed w-full backdrop-blur-sm text-slate-200">
+                               {children}
                              </li>
                            ),
                            strong: ({ children }) => <strong className="text-white font-bold tracking-wide">{children}</strong>,
@@ -368,7 +393,7 @@ export default function LandingPage() {
                   tick={{fontSize: 9, fill: '#334155', fontWeight: 'bold'}} 
                   tickLine={false} 
                   axisLine={false} 
-                  tickFormatter={(val) => chartMode === 'value' ? formatCurrencyCompact(val, currency) : `${val.toFixed(1)}%`}
+                  tickFormatter={(val) => privacy && chartMode === 'value' ? '—' : chartMode === 'value' ? formatCurrencyCompact(val, currency) : `${val.toFixed(1)}%`}
                 />
                 <Tooltip
                   contentStyle={{
@@ -383,9 +408,11 @@ export default function LandingPage() {
                   itemStyle={{ fontWeight: 'black', textTransform: 'uppercase', letterSpacing: '0.1em' }}
                   labelStyle={{ color: '#6366f1', marginBottom: '6px', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: '900', opacity: 0.8 }}
                   formatter={(value) => [
-                    chartMode === 'value'
-                      ? formatCurrencyCompact(Number(value), currency)
-                      : `${Number(value).toFixed(2)}%`,
+                    privacy && chartMode === 'value'
+                      ? '———'
+                      : chartMode === 'value'
+                        ? formatCurrencyCompact(Number(value), currency)
+                        : `${Number(value).toFixed(2)}%`,
                     chartMode.toUpperCase(),
                   ]}
                 />

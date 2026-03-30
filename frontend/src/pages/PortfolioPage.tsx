@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import PageLayout from '../components/PageLayout'
+import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import SymbolMappingModal from '../components/SymbolMappingModal'
 import { getPortfolioValue, getPortfolioTrades, updateSymbolMapping, type PositionValue, type TradeEntry } from '../api'
 import { formatCurrency, formatNumber } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
+import { usePrivacy } from '../utils/PrivacyContext'
 
 const FX_METHOD_OPTIONS = [
   { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the currency, accounting for currency movements over time.' },
@@ -20,6 +22,7 @@ const CURRENCY_OPTIONS = [
 ]
 
 export default function PortfolioPage() {
+  const { privacy } = usePrivacy()
   const [currency, setCurrency] = usePersistentState('portfolio_currency', 'CZK')
   const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('portfolio_acctModel', 'historical')
   const [positions, setPositions] = useState<PositionValue[]>([])
@@ -175,9 +178,9 @@ export default function PortfolioPage() {
                                 <span className="text-amber-400 text-xs font-medium bg-amber-400/10 px-1.5 py-0.5 rounded-lg border border-amber-400/20 cursor-default">
                                   {pos.bond_duration.toFixed(1)}y
                                 </span>
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 w-52 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-2xl">
+                                <HoverTooltip className="w-52">
                                   Bond ETF effective duration — the weighted-average time (in years) until cash flows are received. Higher duration means greater sensitivity to interest rate changes.
-                                </div>
+                                </HoverTooltip>
                               </div>
                             )}
                             <button
@@ -201,15 +204,21 @@ export default function PortfolioPage() {
                         </div>
                       </div>
 
-                      <div className="col-span-1 text-right text-sm text-slate-300 font-medium tabular-nums">{formatNumber(pos.quantity, 0)}</div>
+                      <div className="col-span-1 text-right text-sm text-slate-300 font-medium tabular-nums">{privacy ? '—' : formatNumber(pos.quantity, 0)}</div>
                       <div className="col-span-2 text-right">
-                        <div className="text-sm font-medium text-slate-300 tabular-nums">{formatNumber(pos.price || 0)} {currency === 'Original' ? pos.native_currency : currency}</div>
-                        {(pos.cost_basis || 0) > 0 && (
-                          <div className="text-xs text-slate-500 mt-0.5">@ {formatNumber(pos.cost_basis)}</div>
+                        {privacy ? (
+                          <div className="text-sm font-medium text-slate-300">—</div>
+                        ) : (
+                          <>
+                            <div className="text-sm font-medium text-slate-300 tabular-nums">{formatNumber(pos.price || 0)} {currency === 'Original' ? pos.native_currency : currency}</div>
+                            {(pos.cost_basis || 0) > 0 && (
+                              <div className="text-xs text-slate-500 mt-0.5">@ {formatNumber(pos.cost_basis)}</div>
+                            )}
+                          </>
                         )}
                       </div>
                       <div className="col-span-2 text-right text-sm font-semibold text-slate-100 tabular-nums">
-                        {formatCurrency(value, currency, pos.native_currency)}
+                        {privacy ? '—' : formatCurrency(value, currency, pos.native_currency)}
                       </div>
                       <div className="col-span-2 text-right">
                         <div className="inline-flex items-center gap-3">
@@ -220,7 +229,9 @@ export default function PortfolioPage() {
                         </div>
                       </div>
                       <div className="col-span-2 text-right">
-                        {unrealizedGL !== null ? (
+                        {privacy ? (
+                          <span className="text-slate-600 font-medium">—</span>
+                        ) : unrealizedGL !== null ? (
                           <div className="flex flex-col items-end">
                             <span className={`text-sm font-medium tabular-nums ${unrealizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                               {unrealizedGL >= 0 ? '+' : ''}{formatNumber(unrealizedGL)}
@@ -232,7 +243,9 @@ export default function PortfolioPage() {
                         ) : <span className="text-slate-600 font-medium">unavailable</span>}
                       </div>
                       <div className="col-span-2 text-right text-sm">
-                        {realizedGLNative !== 0 ? (
+                        {privacy ? (
+                          <span className="text-slate-600 opacity-40">—</span>
+                        ) : realizedGLNative !== 0 ? (
                           <span className={`font-medium tabular-nums ${realizedGLNative >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                             {realizedGLNative >= 0 ? '+' : ''}{formatNumber(realizedGLNative)}
                           </span>
@@ -249,7 +262,7 @@ export default function PortfolioPage() {
                     </div>
 
                     {isExpanded && (
-                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} displayCurrency={currency} />
+                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} displayCurrency={currency} privacy={privacy} />
                     )}
                   </div>
                 )
@@ -266,14 +279,16 @@ export default function PortfolioPage() {
               </div>
               <div className="col-span-2 text-right">
                 <div className="text-xl font-black text-white tabular-nums tracking-tight">
-                  {currency === 'Original' ? 'MIXED' : formatCurrency(totalValue, currency)}
+                  {privacy ? '———' : currency === 'Original' ? 'MIXED' : formatCurrency(totalValue, currency)}
                 </div>
               </div>
               <div className="col-span-2 text-right">
                 <span className="text-xs font-black text-slate-600 tracking-widest tabular-nums">100.0%</span>
               </div>
               <div className="col-span-2 text-right">
-                {currency === 'Original' ? (
+                {privacy ? (
+                  <span className="text-slate-800 opacity-40">—</span>
+                ) : currency === 'Original' ? (
                   <span className="text-[10px] text-slate-700 uppercase font-black tracking-widest">N/A</span>
                 ) : totals.hasUnrealized ? (
                   <span className={`text-sm font-black tabular-nums ${totals.unrealizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -282,7 +297,9 @@ export default function PortfolioPage() {
                 ) : <span className="text-slate-800 opacity-40">—</span>}
               </div>
               <div className="col-span-2 text-right">
-                {totals.realizedGL !== 0 ? (
+                {privacy ? (
+                  <span className="text-slate-800 opacity-40">—</span>
+                ) : totals.realizedGL !== 0 ? (
                   <span className={`text-sm font-black tabular-nums ${totals.realizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {totals.realizedGL >= 0 ? '+' : ''}{formatNumber(totals.realizedGL)}
                   </span>
@@ -303,7 +320,7 @@ export default function PortfolioPage() {
   )
 }
 
-function TradeDetail({ symbol, exchange, displayCurrency }: { symbol: string; exchange?: string; displayCurrency: string }) {
+function TradeDetail({ symbol, exchange, displayCurrency, privacy }: { symbol: string; exchange?: string; displayCurrency: string; privacy: boolean }) {
   const [trades, setTrades] = useState<TradeEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -361,15 +378,15 @@ function TradeDetail({ symbol, exchange, displayCurrency }: { symbol: string; ex
                     {trade.side}
                   </span>
                 </div>
-                <div className="text-right text-slate-200 font-black tabular-nums">{formatNumber(trade.quantity, 0)}</div>
-                <div className="text-right text-slate-500 font-bold tabular-nums text-[11px]">{formatNumber(trade.price)}</div>
-                <div className="text-right text-slate-200 font-black tabular-nums">{formatNumber(trade.converted_price)}</div>
+                <div className="text-right text-slate-200 font-black tabular-nums">{privacy ? '—' : formatNumber(trade.quantity, 0)}</div>
+                <div className="text-right text-slate-500 font-bold tabular-nums text-[11px]">{privacy ? '—' : formatNumber(trade.price)}</div>
+                <div className="text-right text-slate-200 font-black tabular-nums">{privacy ? '—' : formatNumber(trade.converted_price)}</div>
                 {hasTaxCostBasis && (
                   <div className="text-right text-slate-600 font-bold text-[11px] tabular-nums">
-                    {trade.tax_cost_basis !== undefined && trade.tax_cost_basis !== null ? formatNumber(trade.tax_cost_basis) : '—'}
+                    {privacy ? '—' : trade.tax_cost_basis !== undefined && trade.tax_cost_basis !== null ? formatNumber(trade.tax_cost_basis) : '—'}
                   </div>
                 )}
-                <div className="text-right text-slate-600 font-bold tabular-nums text-[11px]">{formatNumber(Math.abs(trade.commission))}</div>
+                <div className="text-right text-slate-600 font-bold tabular-nums text-[11px]">{privacy ? '—' : formatNumber(Math.abs(trade.commission))}</div>
               </div>
             ))}
           </div>

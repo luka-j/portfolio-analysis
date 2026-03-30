@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { formatDate } from '../utils/format'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
-const DAY_ABBRS = ['Su','Mo','Tu','We','Th','Fr','Sa']
+const DAY_ABBRS = ['Mo','Tu','We','Th','Fr','Sa','Su']
 
 function buildCells(year: number, month: number): (string | null)[] {
-  const firstDay = new Date(year, month, 1).getDay()
+  const firstDaySun = new Date(year, month, 1).getDay()
+  const firstDay = (firstDaySun + 6) % 7  // shift so Monday = 0
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const cells: (string | null)[] = Array(firstDay).fill(null)
   for (let d = 1; d <= daysInMonth; d++) {
