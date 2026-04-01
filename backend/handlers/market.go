@@ -35,7 +35,7 @@ func (h *MarketHandler) GetHistory(c *gin.Context) {
 		return
 	}
 
-	points, err := h.MarketProvider.GetHistory(symbol, from, to)
+	points, err := h.MarketProvider.GetHistory(symbol, from, to, false)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

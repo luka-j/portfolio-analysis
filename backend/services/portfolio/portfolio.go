@@ -100,15 +100,15 @@ func (s *Service) getYahooSymbolMap(data *models.FlexQueryData) map[string]strin
 }
 
 // GetCurrentValue returns the portfolio value in the requested display currency.
-func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) (*models.PortfolioValueResponse, error) {
+func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioValueResponse, error) {
 	holdings := s.GetCurrentHoldings(data)
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	lookback := today.AddDate(0, 0, -5)
 
-	costBasisMap := s.computeCostBasis(data, currency, acctModel)
-	realizedGLMap := s.computeRealizedGL(data, currency, acctModel)
-	commissionsMap := s.computeCommissions(data, currency, acctModel)
+	costBasisMap := s.computeCostBasis(data, currency, acctModel, cachedOnly)
+	realizedGLMap := s.computeRealizedGL(data, currency, acctModel, cachedOnly)
+	commissionsMap := s.computeCommissions(data, currency, acctModel, cachedOnly)
 
 	yMap := s.getYahooSymbolMap(data)
 
@@ -123,7 +123,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 
 		latestPrice := 0.0
 		if s.CurrentPriceProvider != nil {
-			p, err := s.CurrentPriceProvider.GetCurrentPrice(querySymbol)
+			p, err := s.CurrentPriceProvider.GetCurrentPrice(querySymbol, cachedOnly)
 			if err != nil {
 				log.Printf("Warning: fetching current price for %s (mapped to %s): %v; falling back to history", h.Symbol, querySymbol, err)
 			} else {
@@ -131,7 +131,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 			}
 		}
 		if latestPrice == 0 {
-			prices, err := s.MarketProvider.GetHistory(querySymbol, lookback, today)
+			prices, err := s.MarketProvider.GetHistory(querySymbol, lookback, today, cachedOnly)
 			if err != nil {
 				log.Printf("Warning: fetching price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
 			} else if len(prices) > 0 {
@@ -149,11 +149,11 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 			convertedPrice = latestPrice
 			convertedValue = nativeValue
 		} else {
-			convertedPrice, err = s.FXService.ConvertSpot(latestPrice, h.Currency, currency)
+			convertedPrice, err = s.FXService.ConvertSpot(latestPrice, h.Currency, currency, cachedOnly)
 			if err != nil {
 				return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, currency, err)
 			}
-			convertedValue, err = s.FXService.ConvertSpot(nativeValue, h.Currency, currency)
+			convertedValue, err = s.FXService.ConvertSpot(nativeValue, h.Currency, currency, cachedOnly)
 			if err != nil {
 				return nil, fmt.Errorf("converting value %s to %s: %w", h.Currency, currency, err)
 			}
@@ -186,7 +186,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 
 // computeCostBasis returns a map of posKey -> average cost basis per share in the given currency.
 // Only open FIFO lots contribute, giving the weighted average for the current position.
-func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) map[string]float64 {
+func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) map[string]float64 {
 	result := make(map[string]float64)
 
 	tradesByKey := make(map[string][]models.Trade)
@@ -220,9 +220,9 @@ func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, 
 			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
 				priceInCur = l.Price
 			} else if acctModel == models.AccountingModelSpot {
-				priceInCur, _ = s.FXService.ConvertSpot(l.Price, l.Curr, currency)
+				priceInCur, _ = s.FXService.ConvertSpot(l.Price, l.Curr, currency, cachedOnly)
 			} else {
-				priceInCur, _ = s.FXService.Convert(l.Price, l.Curr, currency, l.Date)
+				priceInCur, _ = s.FXService.Convert(l.Price, l.Curr, currency, l.Date, cachedOnly)
 			}
 			totalCost += l.Qty * priceInCur
 			totalQty += l.Qty
@@ -230,7 +230,7 @@ func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, 
 		if totalQty > 0 {
 			result[key] = totalCost / totalQty
 		} else {
-			converted, _ := s.FXService.ConvertSpot(0, nativeCurrency, currency)
+			converted, _ := s.FXService.ConvertSpot(0, nativeCurrency, currency, cachedOnly)
 			result[key] = converted
 		}
 	}
@@ -243,7 +243,7 @@ func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, 
 		if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
 			result[op.Symbol] = op.CostBasisPerShare
 		} else if acctModel == models.AccountingModelSpot {
-			converted, _ := s.FXService.ConvertSpot(op.CostBasisPerShare, op.Currency, currency)
+			converted, _ := s.FXService.ConvertSpot(op.CostBasisPerShare, op.Currency, currency, cachedOnly)
 			result[op.Symbol] = converted
 		}
 	}
@@ -252,7 +252,7 @@ func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, 
 }
 
 // computeRealizedGL computes total realized gain/loss per position in the given currency.
-func (s *Service) computeRealizedGL(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) map[string]float64 {
+func (s *Service) computeRealizedGL(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) map[string]float64 {
 	result := make(map[string]float64)
 	tradesByKey := make(map[string][]models.Trade)
 	for _, t := range data.Trades {
@@ -273,12 +273,12 @@ func (s *Service) computeRealizedGL(data *models.FlexQueryData, currency string,
 			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
 				profit = m.Qty * (m.SellPrice - m.CostPrice)
 			} else if acctModel == models.AccountingModelSpot {
-				sellPriceSpot, _ := s.FXService.ConvertSpot(m.SellPrice, m.Curr, currency)
-				costPriceSpot, _ := s.FXService.ConvertSpot(m.CostPrice, m.Curr, currency)
+				sellPriceSpot, _ := s.FXService.ConvertSpot(m.SellPrice, m.Curr, currency, cachedOnly)
+				costPriceSpot, _ := s.FXService.ConvertSpot(m.CostPrice, m.Curr, currency, cachedOnly)
 				profit = m.Qty * (sellPriceSpot - costPriceSpot)
 			} else {
-				sellPriceHist, _ := s.FXService.Convert(m.SellPrice, m.Curr, currency, m.SellDate)
-				costPriceHist, _ := s.FXService.Convert(m.CostPrice, m.Curr, currency, m.CostDate)
+				sellPriceHist, _ := s.FXService.Convert(m.SellPrice, m.Curr, currency, m.SellDate, cachedOnly)
+				costPriceHist, _ := s.FXService.Convert(m.CostPrice, m.Curr, currency, m.CostDate, cachedOnly)
 				profit = m.Qty * (sellPriceHist - costPriceHist)
 			}
 			realizedGL += profit
@@ -287,10 +287,10 @@ func (s *Service) computeRealizedGL(data *models.FlexQueryData, currency string,
 				if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
 					realizedGL += m.Comm
 				} else if acctModel == models.AccountingModelSpot {
-					commSpot, _ := s.FXService.ConvertSpot(m.Comm, m.Curr, currency)
+					commSpot, _ := s.FXService.ConvertSpot(m.Comm, m.Curr, currency, cachedOnly)
 					realizedGL += commSpot
 				} else {
-					commHist, _ := s.FXService.Convert(m.Comm, m.Curr, currency, m.SellDate)
+					commHist, _ := s.FXService.Convert(m.Comm, m.Curr, currency, m.SellDate, cachedOnly)
 					realizedGL += commHist
 				}
 			}
@@ -302,7 +302,7 @@ func (s *Service) computeRealizedGL(data *models.FlexQueryData, currency string,
 }
 
 // computeCommissions sums all trade commissions per position in the given currency.
-func (s *Service) computeCommissions(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) map[string]float64 {
+func (s *Service) computeCommissions(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) map[string]float64 {
 	result := make(map[string]float64)
 
 	tradesByKey := make(map[string][]models.Trade)
@@ -324,9 +324,9 @@ func (s *Service) computeCommissions(data *models.FlexQueryData, currency string
 			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
 				comm = t.Commission
 			} else if acctModel == models.AccountingModelSpot {
-				comm, _ = s.FXService.ConvertSpot(t.Commission, t.Currency, currency)
+				comm, _ = s.FXService.ConvertSpot(t.Commission, t.Currency, currency, cachedOnly)
 			} else {
-				comm, _ = s.FXService.Convert(t.Commission, t.Currency, currency, t.DateTime)
+				comm, _ = s.FXService.Convert(t.Commission, t.Currency, currency, t.DateTime, cachedOnly)
 			}
 			total += comm
 		}
@@ -356,7 +356,7 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 
 		convertedPrice := t.Price
 		if displayCurrency != "Original" && displayCurrency != "original" && t.Currency != displayCurrency {
-			cp, err := s.FXService.Convert(t.Price, t.Currency, displayCurrency, t.DateTime)
+			cp, err := s.FXService.Convert(t.Price, t.Currency, displayCurrency, t.DateTime, false) // trades usually don't need cachedOnly logic
 			if err != nil {
 				// Fall back to native price on FX error
 				cp = t.Price
@@ -403,7 +403,7 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 }
 
 // GetDailyValues returns the portfolio value for each day in [from, to].
-func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) (*models.PortfolioHistoryResponse, error) {
+func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioHistoryResponse, error) {
 	// Build daily holdings via trade replay.
 	dailyHoldings := s.buildDailyHoldings(data, from, to)
 
@@ -429,7 +429,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 			querySymbol = baseSymbol
 		}
 
-		prices, err := s.MarketProvider.GetHistory(querySymbol, from, to)
+		prices, err := s.MarketProvider.GetHistory(querySymbol, from, to, cachedOnly)
 		if err != nil {
 			log.Printf("Warning: fetching %s historical data (mapped to %s): %v\n", pk, querySymbol, err)
 			prices = []models.PricePoint{}
@@ -497,7 +497,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		for fromCur := range nativeCurrencies {
 			pairKey := fromCur + currency
 			fxSymbol := fmt.Sprintf("%s%s=X", fromCur, currency)
-			points, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to)
+			points, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
 			if err != nil {
 				// If FX pair fails, we'll fall back to spot; leave cache empty for this pair.
 				log.Printf("Warning: pre-fetching FX %s: %v\n", fxSymbol, err)
@@ -553,7 +553,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 			case models.AccountingModelOriginal:
 				totalValue += nativeValue
 			case models.AccountingModelSpot:
-				converted, err := s.FXService.ConvertSpot(nativeValue, h.Currency, currency)
+				converted, err := s.FXService.ConvertSpot(nativeValue, h.Currency, currency, cachedOnly)
 				if err != nil {
 					return nil, err
 				}
@@ -571,7 +571,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 					}
 				}
 				// fxCache miss — fall back to live DB query (should be rare).
-				converted, err := s.FXService.Convert(nativeValue, h.Currency, currency, d)
+				converted, err := s.FXService.Convert(nativeValue, h.Currency, currency, d, cachedOnly)
 				if err != nil {
 					return nil, err
 				}
@@ -590,7 +590,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 }
 
 // GetCashFlows returns external cash flows for IRR calculation, converted to the target currency.
-func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) ([]models.CashFlow, error) {
+func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) ([]models.CashFlow, error) {
 	var flows []models.CashFlow
 
 	for _, t := range data.Trades {
@@ -603,9 +603,9 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 		var err error
 		if t.Currency != currency && acctModel != models.AccountingModelOriginal {
 			if acctModel == models.AccountingModelSpot {
-				amount, err = s.FXService.ConvertSpot(amount, t.Currency, currency)
+				amount, err = s.FXService.ConvertSpot(amount, t.Currency, currency, cachedOnly)
 			} else {
-				amount, err = s.FXService.Convert(amount, t.Currency, currency, t.DateTime)
+				amount, err = s.FXService.Convert(amount, t.Currency, currency, t.DateTime, cachedOnly)
 			}
 			if err != nil {
 				return nil, err
@@ -625,9 +625,9 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 		var err error
 		if ct.Currency != currency && acctModel != models.AccountingModelOriginal {
 			if acctModel == models.AccountingModelSpot {
-				amount, err = s.FXService.ConvertSpot(amount, ct.Currency, currency)
+				amount, err = s.FXService.ConvertSpot(amount, ct.Currency, currency, cachedOnly)
 			} else {
-				amount, err = s.FXService.Convert(amount, ct.Currency, currency, ct.DateTime)
+				amount, err = s.FXService.Convert(amount, ct.Currency, currency, ct.DateTime, cachedOnly)
 			}
 			if err != nil {
 				return nil, err
@@ -643,12 +643,12 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 // Cash flows (deposits/withdrawals) are removed from each day's return so that the series
 // reflects pure market performance, comparable to a benchmark's price return series.
 func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) ([]float64, []string, []string, error) {
-	hist, err := s.GetDailyValues(data, from, to, currency, acctModel)
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, false) // statistics usually want fresh data
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, false)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -754,8 +754,8 @@ func (s *Service) buildDailyHoldings(data *models.FlexQueryData, from, to time.T
 // over [from, to].  Each data point expresses the portfolio's growth factor (as a
 // percentage) relative to the first day, properly adjusted for external cash flows
 // (deposits / withdrawals) so that capital movements do not distort the metric.
-func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) (*models.PortfolioHistoryResponse, error) {
-	hist, err := s.GetDailyValues(data, from, to, currency, acctModel)
+func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioHistoryResponse, error) {
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -767,7 +767,7 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 		}, nil
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -820,11 +820,8 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 	}, nil
 }
 
-// GetCumulativeMWR computes the day-by-day cumulative Money-Weighted Return series
-// over [from, to]. Each data point expresses the portfolio's MWR (as a percentage)
-// relative to the first day, considering external cash flows.
-func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) (*models.PortfolioHistoryResponse, error) {
-	hist, err := s.GetDailyValues(data, from, to, currency, acctModel)
+func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioHistoryResponse, error) {
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -836,7 +833,7 @@ func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Tim
 		}, nil
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly)
 	if err != nil {
 		return nil, err
 	}

@@ -34,6 +34,7 @@ function getFromDate(months: number): string {
   return formatDate(d)
 }
 
+
 export default function LandingPage() {
   const { privacy, togglePrivacy } = usePrivacy()
   const [currencyIdx, setCurrencyIdx] = usePersistentState('landing_currencyIdx', 0)
@@ -47,16 +48,23 @@ export default function LandingPage() {
   const [stats, setStats] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(false)
+  // valueRefreshing: cached value shown, fresh fetch still in flight
+  const [valueRefreshing, setValueRefreshing] = useState(false)
+  // chartRefreshing: cached chart data shown, fresh fetch still in flight
+  const [chartRefreshing, setChartRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [uploadMsg, setUploadMsg] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadExpanded, setUploadExpanded] = useState(false)
+  // uploadCount increments after every successful upload so the LLM summary re-fetches.
+  const [uploadCount, setUploadCount] = useState(0)
 
   const defaultPeriod = [0, 6].includes(new Date().getDay()) ? '1w' : '1d'
   const [llmPeriod, setLlmPeriod] = usePersistentState('landing_llmPeriod', defaultPeriod)
   const [llmSummary, setLlmSummary] = useState('')
   const [llmSummaryLoading, setLlmSummaryLoading] = useState(false)
   const [llmAvailable, setLlmAvailable] = useState<boolean | null>(null)
+  const [llmForceRefresh, setLlmForceRefresh] = useState(false)
 
   const loadGenRef = useRef(0)
 
@@ -81,21 +89,55 @@ export default function LandingPage() {
     const gen = loadGenRef.current
     setLoading(true)
     setError('')
+
+    // For the active currency: do a staged fetch (show cached value immediately,
+    // then replace with fresh). For the other two currencies, a single fresh call
+    // is enough — they're secondary and not worth doubling the request count.
+    const loadActiveCurrency = async (curr: string) => {
+      let freshArrived = false
+
+      // 1. Fire cached call — show value immediately and mark as refreshing
+      getPortfolioValue(curr, 'historical', true).then(res => {
+        if (gen === loadGenRef.current && !freshArrived && res.value > 0) {
+          setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
+          setLoading(false)       // unblock the hero display
+          setValueRefreshing(true) // show stale indicator
+        }
+      }).catch(() => {})
+
+      // 2. Await fresh call — always takes priority
+      const res = await getPortfolioValue(curr, 'historical', false)
+      if (gen === loadGenRef.current) {
+        freshArrived = true
+        setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
+        setValueRefreshing(false) // fresh arrived, clear stale indicator
+      }
+    }
+
+    const loadOtherCurrency = async (curr: string) => {
+      const res = await getPortfolioValue(curr, 'historical', false)
+      if (gen === loadGenRef.current) {
+        setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
+      }
+    }
+
     try {
-      const [czk, usd, eur, st] = await Promise.all([
-        getPortfolioValue('CZK'),
-        getPortfolioValue('USD'),
-        getPortfolioValue('EUR'),
-        getPortfolioStats(getFromDate(period), formatDate(new Date()), currency),
+      const others = CURRENCIES.filter(c => c !== currency)
+      await Promise.all([
+        loadActiveCurrency(currency),
+        ...others.map(loadOtherCurrency),
+        getPortfolioStats(getFromDate(period), formatDate(new Date()), currency).then(st => {
+          if (gen === loadGenRef.current) setStats(st.statistics)
+        }),
       ])
-      if (gen !== loadGenRef.current) return
-      setPortfolioValues({ CZK: czk.value, USD: usd.value, EUR: eur.value })
-      setStats(st.statistics)
     } catch (err) {
       if (gen !== loadGenRef.current) return
       setError(err instanceof Error ? err.message : 'Failed to load data')
     } finally {
-      if (gen === loadGenRef.current) setLoading(false)
+      if (gen === loadGenRef.current) {
+        setLoading(false)
+        setValueRefreshing(false)
+      }
     }
   }, [currency, period])
 
@@ -104,43 +146,59 @@ export default function LandingPage() {
   useEffect(() => {
     const controller = new AbortController()
     let cancelled = false
+    let freshArrived = false
+
     const from = getFromDate(period)
     const to = formatDate(new Date())
     setChartLoading(true)
-    const fetchChart = async () => {
-      try {
-        const hist = await getPortfolioHistory(from, to, currency, 'historical', controller.signal)
-        if (cancelled) return
-        setHistory(hist.data)
-        const twrHist = await getPortfolioReturns(from, to, currency, 'historical', 'twr', controller.signal)
-        if (cancelled) return
-        setTwrHistory(twrHist.data)
-        const mwrHist = await getPortfolioReturns(from, to, currency, 'historical', 'mwr', controller.signal)
-        if (cancelled) return
-        setMwrHistory(mwrHist.data)
-      } catch {
-        // silently swallow
-      } finally {
-        if (!cancelled) setChartLoading(false)
+    setChartRefreshing(false)
+
+    // Only fetch the series for the currently-displayed mode.
+    // Previously-loaded data for other modes is retained in state.
+    const fetchFn = chartMode === 'value'
+      ? (cO: boolean, s?: AbortSignal) => getPortfolioHistory(from, to, currency, 'historical', cO, s)
+      : (cO: boolean, s?: AbortSignal) => getPortfolioReturns(from, to, currency, 'historical', chartMode, cO, s)
+    const setter = chartMode === 'value' ? setHistory : chartMode === 'twr' ? setTwrHistory : setMwrHistory
+
+    // 1. Cached call — show immediately if non-empty, mark as stale
+    fetchFn(true, controller.signal).then(res => {
+      if (!cancelled && !freshArrived && res.data.length > 0) {
+        setter(res.data)
+        setChartLoading(false)
+        setChartRefreshing(true)
       }
-    }
-    fetchChart()
+    }).catch(() => {})
+
+    // 2. Fresh call — always overwrites cached, clears stale indicator
+    fetchFn(false, controller.signal).then(res => {
+      if (!cancelled) {
+        freshArrived = true
+        setter(res.data)
+      }
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) {
+        setChartLoading(false)
+        setChartRefreshing(false)
+      }
+    })
+
     return () => { cancelled = true; controller.abort() }
-  }, [currency, period])
+  }, [currency, period, chartMode])
 
   useEffect(() => {
     let cancelled = false;
-    const fetchSummary = async () => {
+    const fetchSummary = async (forceRefresh: boolean) => {
       setLlmSummaryLoading(true)
       try {
-        const res = await getLLMSummary(llmPeriod, currency)
+        const res = await getLLMSummary(llmPeriod, currency, forceRefresh)
         if (!cancelled) {
           setLlmSummary(res.summary)
           setLlmAvailable(true)
         }
-      } catch (err: any) {
+      } catch (err) {
+        const error = err as Error
         if (!cancelled) {
-          if (err?.message?.includes('GEMINI_API_KEY')) {
+          if (error?.message?.includes('GEMINI_API_KEY')) {
             setLlmAvailable(false) // Hide entirely
             setLlmSummary("Market summary unavailable. Please configure GEMINI_API_KEY.")
           } else {
@@ -149,12 +207,15 @@ export default function LandingPage() {
           }
         }
       } finally {
-        if (!cancelled) setLlmSummaryLoading(false)
+        if (!cancelled) {
+          setLlmSummaryLoading(false)
+          setLlmForceRefresh(false)
+        }
       }
     }
-    fetchSummary()
+    fetchSummary(llmForceRefresh)
     return () => { cancelled = true }
-  }, [llmPeriod, currency, loadGenRef.current])
+  }, [llmPeriod, currency, uploadCount, llmForceRefresh])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -164,6 +225,7 @@ export default function LandingPage() {
     try {
       const res = await uploadFlexQuery(file)
       setUploadMsg(`Uploaded: ${res.positions_count} positions, ${res.trades_count} trades`)
+      setUploadCount(c => c + 1)
       await loadData()
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
@@ -181,6 +243,7 @@ export default function LandingPage() {
     try {
       const res = await uploadEtradeBenefits(file)
       setUploadMsg(`Benefits Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
+      setUploadCount(c => c + 1)
       await loadData()
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
@@ -198,6 +261,7 @@ export default function LandingPage() {
     try {
       const res = await uploadEtradeSales(file)
       setUploadMsg(`Sales Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
+      setUploadCount(c => c + 1)
       await loadData()
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
@@ -240,8 +304,11 @@ export default function LandingPage() {
             >
               {CURRENCY_SYMBOLS[currency]}
             </button>
-            {loading ? '—' : privacy ? '———' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
+          {loading ? '—' : privacy ? '———' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
           </h1>
+          {valueRefreshing && (
+            <span className="w-5 h-5 rounded-full border-2 border-indigo-400/25 border-t-indigo-300 animate-spin" />
+          )}
           <div className="relative group">
             <button
               className={`p-1.5 rounded-lg transition-all duration-200 active:scale-95 ${privacy ? 'text-red-400/80 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-700 hover:text-slate-400 hover:bg-white/[0.07]'}`}
@@ -306,6 +373,25 @@ export default function LandingPage() {
                     )
                   })}
                </div>
+               <div className="relative group">
+                 <button
+                   id="llm-refresh-btn"
+                   onClick={() => { if (!llmSummaryLoading) setLlmForceRefresh(true) }}
+                   disabled={llmSummaryLoading}
+                   className="w-5 h-5 flex items-center justify-center rounded-md text-indigo-300/40 hover:text-indigo-300 hover:bg-white/[0.07] transition-all duration-200 active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
+                   aria-label="Force refresh market summary"
+                 >
+                   <svg
+                     xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                     className={llmSummaryLoading ? 'animate-spin' : ''}
+                   >
+                     <polyline points="23 4 23 10 17 10"/>
+                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                   </svg>
+                 </button>
+                 <HoverTooltip direction="down" className="w-32 text-center">Regenerate summary</HoverTooltip>
+               </div>
              </div>
              <div className="text-xs text-indigo-100/90 text-left leading-relaxed font-medium min-h-[30px] w-full max-w-none px-4 mx-auto flex flex-col items-center justify-center mt-1">
                {llmSummaryLoading ? (
@@ -366,8 +452,11 @@ export default function LandingPage() {
       <div className="relative flex-1 mt-auto flex flex-col justify-end pl-8 pr-24 mb-6">
         
         {/* The chart itself — axes returned and labels added */}
-        <div className="w-full h-[85%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[90%]">
-          {chartLoading || loading ? (
+        <div className="relative w-full h-[85%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[90%]">
+          {chartRefreshing && (
+            <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
+          )}
+          {chartLoading ? (
             <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
           ) : chartData.length === 0 ? (
             <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px]">Matrix data unavailable</div>

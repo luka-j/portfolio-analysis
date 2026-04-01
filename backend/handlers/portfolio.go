@@ -148,8 +148,9 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 	currencies := splitCurrencies(currenciesStr)
 	primaryCurrency := currencies[0]
 	acctModel := parseAccountingModel(c)
+	cachedOnly := parseCachedOnly(c)
 
-	result, err := h.PortfolioService.GetCurrentValue(data, primaryCurrency, acctModel)
+	result, err := h.PortfolioService.GetCurrentValue(data, primaryCurrency, acctModel, cachedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -157,7 +158,7 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 
 	// For additional currencies, compute and merge into the per-currency maps.
 	for _, cur := range currencies[1:] {
-		extra, err := h.PortfolioService.GetCurrentValue(data, cur, acctModel)
+		extra, err := h.PortfolioService.GetCurrentValue(data, cur, acctModel, cachedOnly)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -229,7 +230,8 @@ func (h *PortfolioHandler) GetHistory(c *gin.Context) {
 	}
 
 	acctModel := parseAccountingModel(c)
-	result, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel)
+	cachedOnly := parseCachedOnly(c)
+	result, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -331,15 +333,16 @@ func (h *PortfolioHandler) GetReturns(c *gin.Context) {
 	}
 
 	acctModel := parseAccountingModel(c)
+	cachedOnly := parseCachedOnly(c)
 	returnType := c.DefaultQuery("type", "twr")
 
 	var result *models.PortfolioHistoryResponse
 	var calcErr error
 
 	if returnType == "mwr" {
-		result, calcErr = h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel)
+		result, calcErr = h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel, cachedOnly)
 	} else {
-		result, calcErr = h.PortfolioService.GetCumulativeTWR(data, from, to, currency, acctModel)
+		result, calcErr = h.PortfolioService.GetCumulativeTWR(data, from, to, currency, acctModel, cachedOnly)
 	}
 
 	if calcErr != nil {
@@ -380,7 +383,7 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 	acctModel := parseAccountingModel(c)
 
 	// Resolve positions to get yahoo symbols and native currencies.
-	val, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel)
+	val, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel, false) // price history usually wants fresh data
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -448,7 +451,7 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 	lastBySymbol := make(map[string]float64, len(yahooSymbols))
 	if toIsToday && h.PortfolioService.CurrentPriceProvider != nil {
 		for _, ys := range yahooSymbols {
-			if p, err := h.PortfolioService.CurrentPriceProvider.GetCurrentPrice(ys); err == nil && p != 0 {
+			if p, err := h.PortfolioService.CurrentPriceProvider.GetCurrentPrice(ys, false); err == nil && p != 0 {
 				lastBySymbol[ys] = p
 			}
 		}
@@ -519,7 +522,7 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 			avg := sum / float64(len(pts))
 			// Convert native avg price to display currency using spot rate.
 			if currency != "Original" && pos.nativeCurrency != "" && pos.nativeCurrency != currency {
-				converted, fxErr := h.FXService.ConvertSpot(avg, pos.nativeCurrency, currency)
+				converted, fxErr := h.FXService.ConvertSpot(avg, pos.nativeCurrency, currency, false)
 				if fxErr == nil {
 					avg = converted
 				}

@@ -50,6 +50,7 @@ export default function PortfolioPage() {
   const [positions, setPositions] = useState<PositionValue[]>([])
   const [totalValue, setTotalValue] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [valueRefreshing, setValueRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [mappingTarget, setMappingTarget] = useState<{ symbol: string; yahooSymbol?: string; exchange?: string } | null>(null)
@@ -60,9 +61,26 @@ export default function PortfolioPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true)
+    setValueRefreshing(false)
     setError('')
+
+    let freshArrived = false
+
+    // 1. Cached call — show positions immediately if there's data
+    getPortfolioValue(currency, acctModel, true).then(val => {
+      if (!freshArrived && val.positions.length > 0) {
+        const sorted = [...val.positions].sort((a, b) => (b.value || 0) - (a.value || 0))
+        setPositions(sorted)
+        setTotalValue(val.value || 0)
+        setLoading(false)
+        setValueRefreshing(true)
+      }
+    }).catch(() => {})
+
+    // 2. Fresh call — always takes priority
     try {
-      const val = await getPortfolioValue(currency, acctModel)
+      const val = await getPortfolioValue(currency, acctModel, false)
+      freshArrived = true
       const sorted = [...val.positions].sort((a, b) => (b.value || 0) - (a.value || 0))
       setPositions(sorted)
       setTotalValue(val.value || 0)
@@ -70,6 +88,7 @@ export default function PortfolioPage() {
       setError(err instanceof Error ? err.message : 'Failed to load')
     } finally {
       setLoading(false)
+      setValueRefreshing(false)
     }
   }, [currency, acctModel])
 
@@ -105,6 +124,24 @@ export default function PortfolioPage() {
     },
     { unrealizedGL: 0, realizedGL: 0, commission: 0, hasUnrealized: false }
   )
+
+  // Weighted-average price change % based on each position's share of total value.
+  // Only positions that have priceHistory data contribute; the weight denominator is
+  // re-normalized to the combined value of those positions (not the full portfolio).
+  const weightedChangePct = (() => {
+    if (totalValue <= 0) return null
+    let weightedSum = 0
+    let hasCoverage = false
+    for (const pos of positions) {
+      const posKey = pos.listing_exchange ? `${pos.symbol}@${pos.listing_exchange}` : pos.symbol
+      const changePct = priceHistory[posKey]?.change_pct
+      if (changePct == null) continue
+      hasCoverage = true
+      weightedSum += changePct * (pos.value || 0)
+    }
+    if (!hasCoverage) return null
+    return weightedSum / totalValue
+  })()
 
   const handleMapSymbol = (e: React.MouseEvent, symbol: string, currentYahooSymbol?: string, exchange?: string) => {
     e.stopPropagation()
@@ -182,7 +219,12 @@ export default function PortfolioPage() {
       )}
           {/* Header centered */}
           <div className="w-full flex flex-col items-center mb-16 text-center">
-            <h1 className="text-3xl font-semibold text-slate-100">Portfolio Holdings</h1>
+            <div className="flex items-center justify-center gap-3">
+              <h1 className="text-3xl font-semibold text-slate-100">Portfolio Holdings</h1>
+              {valueRefreshing && (
+                <span className="w-5 h-5 rounded-full border-2 border-indigo-400/25 border-t-indigo-300 animate-spin" />
+              )}
+            </div>
             <p className="text-slate-500 text-sm mt-4">Active positions and unrealized performance</p>
           </div>
 
@@ -417,8 +459,18 @@ export default function PortfolioPage() {
               <div className="col-span-2 text-right">
                 <span className="text-xs font-black text-slate-600 tracking-widest tabular-nums">100.0%</span>
               </div>
-              {/* Change % and Avg. Price totals intentionally blank */}
-              <div className="col-span-2" />
+              {/* Weighted change % */}
+              <div className="col-span-2 text-right">
+                {privacy ? (
+                  <span className="text-slate-800 opacity-40">—</span>
+                ) : weightedChangePct != null ? (
+                  <span className={`text-sm font-black tabular-nums ${weightedChangePct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {weightedChangePct >= 0 ? '+' : ''}{weightedChangePct.toFixed(2)}%
+                  </span>
+                ) : (
+                  <span className="text-slate-800 opacity-40">—</span>
+                )}
+              </div>
               <div className="col-span-2 text-right">
                 {privacy ? (
                   <span className="text-slate-800 opacity-40">—</span>
@@ -468,14 +520,21 @@ function TradeDetail({ symbol, exchange, displayCurrency, privacy }: { symbol: s
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError('')
-    getPortfolioTrades(symbol, displayCurrency, exchange || '')
-      .then(res => { if (!cancelled) setTrades(res.trades || []) })
-      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load trades') })
-      .finally(() => { if (!cancelled) setLoading(false) })
+    const fetchTrades = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const res = await getPortfolioTrades(symbol, displayCurrency, exchange || '');
+        if (!cancelled) setTrades(res.trades || [])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load trades')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    };
+    fetchTrades();
     return () => { cancelled = true }
-  }, [symbol, displayCurrency])
+  }, [symbol, displayCurrency, exchange])
 
   const hasTaxCostBasis = trades.some(t => t.tax_cost_basis !== undefined && t.tax_cost_basis !== null)
   const colsClass = hasTaxCostBasis ? 'grid-cols-7' : 'grid-cols-6'

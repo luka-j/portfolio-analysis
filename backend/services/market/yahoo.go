@@ -22,13 +22,13 @@ import (
 // Provider is the interface for fetching historical market data.
 // This allows swapping in a mock for testing.
 type Provider interface {
-	GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error)
+	GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error)
 }
 
 // CurrentPriceProvider returns a live or recently-cached market price for a symbol.
 // If the stored price is older than 5 minutes a fresh fetch is attempted.
 type CurrentPriceProvider interface {
-	GetCurrentPrice(symbol string) (float64, error)
+	GetCurrentPrice(symbol string, cachedOnly bool) (float64, error)
 }
 
 // CurrencyGetter can report the native trading currency of a symbol.
@@ -71,7 +71,7 @@ func NewYahooFinanceServiceWithTransport(transport http.RoundTripper) *YahooFina
 }
 
 // GetHistory returns daily price data for the symbol in [from, to].
-func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
+func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
 	// Truncate dates to midnight for consistency.
 	fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
 	toDate := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
@@ -80,6 +80,26 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time) ([]m
 	dbData, err := s.loadRawCache(symbol, fromDate, toDate)
 	if err != nil {
 		return nil, err
+	}
+
+	if cachedOnly {
+		// Just return what we have in DB, no external fetch.
+		var cachedData []models.PricePoint
+		for _, m := range dbData {
+			if m.Volume == -1 {
+				continue // skip negative cache markers
+			}
+			cachedData = append(cachedData, models.PricePoint{
+				Date:     m.Date,
+				Open:     m.Open,
+				High:     m.High,
+				Low:      m.Low,
+				Close:    m.Close,
+				AdjClose: m.AdjClose,
+				Volume:   m.Volume,
+			})
+		}
+		return cachedData, nil
 	}
 
 	var missingRanges [][2]time.Time
@@ -333,18 +353,27 @@ func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
 }
 
 // GetCurrentPrice returns the current market price for symbol.
-// It checks the database first; if the stored price is older than 5 minutes it fetches fresh data from Yahoo.
-// The price comes from meta.regularMarketPrice in the Yahoo /v8/finance/chart response.
-func (s *YahooFinanceService) GetCurrentPrice(symbol string) (float64, error) {
+// It checks the database first; if cachedOnly is false and stored price is older than 5 minutes
+// it fetches fresh data from Yahoo.
+func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
 	const maxAge = 5 * time.Minute
 
 	if s.DB != nil {
 		var cp models.CurrentPrice
 		if err := s.DB.Where("symbol = ?", symbol).First(&cp).Error; err == nil {
-			if time.Since(cp.FetchedAt) < maxAge {
+			if cachedOnly || time.Since(cp.FetchedAt) < maxAge {
 				return cp.Price, nil
 			}
 		}
+	}
+
+	if cachedOnly {
+		// FALLBACK: if no current price entry, try to get the latest close from history.
+		var md models.MarketData
+		if err := s.DB.Where("symbol = ?", symbol).Order("date DESC").First(&md).Error; err == nil {
+			return md.AdjClose, nil
+		}
+		return 0, fmt.Errorf("no cached price for %s", symbol)
 	}
 
 	if err := s.limiter.Wait(context.Background()); err != nil {

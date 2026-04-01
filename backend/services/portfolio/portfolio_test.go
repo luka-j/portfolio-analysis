@@ -10,14 +10,20 @@ import (
 
 // mockMarketProvider implements market.Provider
 type mockMarketProvider struct {
-	prices map[string][]models.PricePoint
+	prices  map[string][]models.PricePoint
+	history []models.PricePoint
+	current float64
 }
 
-func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
+func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
 	if p, ok := m.prices[symbol]; ok {
 		return p, nil
 	}
-	return []models.PricePoint{}, nil
+	return m.history, nil
+}
+
+func (m *mockMarketProvider) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
+	return m.current, nil
 }
 
 func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {

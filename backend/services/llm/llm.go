@@ -113,7 +113,7 @@ func (s *Service) lookupNames(symbols []string) map[string]string {
 
 // getPortfolioJSON creates a compact JSON string of the latest portfolio weights with security names.
 func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string) string {
-	result, err := s.PortfolioService.GetCurrentValue(data, currency, models.AccountingModelSpot)
+	result, err := s.PortfolioService.GetCurrentValue(data, currency, models.AccountingModelSpot, false)
 	if err != nil {
 		log.Printf("WARN: getPortfolioJSON failed to get current value: %v", err)
 		return ""

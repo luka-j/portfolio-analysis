@@ -590,12 +590,16 @@ func (s *Service) fetchOneBreakdown(fundSymbol string) {
 
 		// If Yahoo identified this as a bond ETF, update asset type and duration.
 		if data.IsBondETF {
-			log.Printf("fundamentals: %s is a bond ETF (duration=%.2fy), updating asset type", fundSymbol, func() float64 {
-				if data.Duration != nil {
-					return *data.Duration
-				}
-				return 0
-			}())
+			var existing models.AssetFundamental
+			alreadyBondETF := s.DB.Where("symbol = ? AND asset_type = 'Bond ETF'", fundSymbol).First(&existing).Error == nil
+			if !alreadyBondETF {
+				log.Printf("fundamentals: %s is a bond ETF (duration=%.2fy), promoting asset type", fundSymbol, func() float64 {
+					if data.Duration != nil {
+						return *data.Duration
+					}
+					return 0
+				}())
+			}
 			s.updateBondETFMeta(fundSymbol, data.Duration)
 		}
 		return

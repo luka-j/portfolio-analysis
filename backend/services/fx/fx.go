@@ -22,7 +22,7 @@ func NewService(mp market.Provider, cnb *market.CNBProvider) *Service {
 // GetRate returns the exchange rate from one currency to another on a given date.
 // It uses CNB for CZK pairs and Yahoo Finance FX pairs (e.g. EURUSD=X) for all others.
 // If from == to, returns 1.0.
-func (s *Service) GetRate(from, to string, date time.Time) (float64, error) {
+func (s *Service) GetRate(from, to string, date time.Time, cachedOnly bool) (float64, error) {
 	if from == to {
 		return 1.0, nil
 	}
@@ -46,7 +46,7 @@ func (s *Service) GetRate(from, to string, date time.Time) (float64, error) {
 	// Yahoo Finance FX symbol convention: FROMTO=X
 	symbol := fmt.Sprintf("%s%s=X", from, to)
 	start := date.AddDate(0, 0, -5) // look back a few days for weekends
-	points, err := s.MarketProvider.GetHistory(symbol, start, date)
+	points, err := s.MarketProvider.GetHistory(symbol, start, date, cachedOnly)
 	if err != nil {
 		return 0, fmt.Errorf("fetching FX rate %s→%s: %w", from, to, err)
 	}
@@ -78,15 +78,15 @@ func (s *Service) GetRate(from, to string, date time.Time) (float64, error) {
 }
 
 // GetSpotRate returns the latest available exchange rate for today.
-func (s *Service) GetSpotRate(from, to string) (float64, error) {
+func (s *Service) GetSpotRate(from, to string, cachedOnly bool) (float64, error) {
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	return s.GetRate(from, to, today)
+	return s.GetRate(from, to, today, cachedOnly)
 }
 
 // Convert converts an amount from one currency to another on a given date.
-func (s *Service) Convert(amount float64, from, to string, date time.Time) (float64, error) {
-	rate, err := s.GetRate(from, to, date)
+func (s *Service) Convert(amount float64, from, to string, date time.Time, cachedOnly bool) (float64, error) {
+	rate, err := s.GetRate(from, to, date, cachedOnly)
 	if err != nil {
 		return 0, err
 	}
@@ -94,8 +94,8 @@ func (s *Service) Convert(amount float64, from, to string, date time.Time) (floa
 }
 
 // ConvertSpot converts an amount using the latest available rate.
-func (s *Service) ConvertSpot(amount float64, from, to string) (float64, error) {
-	rate, err := s.GetSpotRate(from, to)
+func (s *Service) ConvertSpot(amount float64, from, to string, cachedOnly bool) (float64, error) {
+	rate, err := s.GetSpotRate(from, to, cachedOnly)
 	if err != nil {
 		return 0, err
 	}

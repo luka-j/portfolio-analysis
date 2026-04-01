@@ -529,7 +529,7 @@ export default function AnalysisPage() {
 
             {/* Alpha/beta benchmark comparison table */}
             {compareResults.length > 0 && (
-              <div className="overflow-x-auto w-full">
+              <div className="overflow-x-auto overflow-y-hidden w-full">
                 <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Benchmark Comparison</p>
                 <table className="w-full text-sm">
                   <thead>

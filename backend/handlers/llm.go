@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"gofolio-analysis/middleware"
 	"gofolio-analysis/models"
@@ -66,13 +65,14 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 	}
 
 	currency := c.DefaultQuery("currency", "USD")
+	forceRefresh := c.Query("force_refresh") == "true"
 	promptType := "summary_" + period
 	model := "pro" // summary always uses the flash model internally; "pro" is just the cache key default
 
-	// Check Cache (valid for 24h)
+	// Check Cache (valid for 8h, skipped when force_refresh=true)
 	var cacheEntry models.LLMCache
 	cacheFound := h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, promptType, model).First(&cacheEntry).Error == nil
-	if cacheFound && time.Since(cacheEntry.CreatedAt) < 24*time.Hour {
+	if !forceRefresh && cacheFound && time.Since(cacheEntry.CreatedAt) < 8*time.Hour {
 		c.JSON(http.StatusOK, gin.H{"summary": cacheEntry.Response})
 		return
 	}
@@ -97,16 +97,13 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	// Save Cache — upsert to avoid duplicate key on concurrent requests
+	// Save Cache — Save performs UPDATE when ID is set (cache hit), INSERT otherwise.
 	cacheEntry.UserHash = userHash
 	cacheEntry.PromptType = promptType
 	cacheEntry.Model = model
 	cacheEntry.Response = summary
 	cacheEntry.CreatedAt = time.Now()
-	if err := h.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
-		DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
-	}).Create(&cacheEntry).Error; err != nil {
+	if err := h.DB.Save(&cacheEntry).Error; err != nil {
 		log.Printf("WARN: GetSummary failed to save cache [user=%s period=%s]: %v", userHash[:8], period, err)
 	}
 
@@ -204,17 +201,14 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// Save Cache for canned — upsert to avoid duplicate key on concurrent requests
+	// Save Cache for canned — Save performs UPDATE when ID is set (cache hit), INSERT otherwise.
 	if cannedType != "" {
 		cacheEntry.UserHash = userHash
 		cacheEntry.PromptType = req.PromptType
 		cacheEntry.Model = model
 		cacheEntry.Response = response
 		cacheEntry.CreatedAt = time.Now()
-		if err := h.DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
-			DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
-		}).Create(&cacheEntry).Error; err != nil {
+		if err := h.DB.Save(&cacheEntry).Error; err != nil {
 			log.Printf("WARN: Chat failed to save cache [user=%s prompt_type=%s]: %v", userHash[:8], req.PromptType, err)
 		}
 	}

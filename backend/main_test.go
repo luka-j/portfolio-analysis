@@ -87,7 +87,7 @@ func (m *mockMarketProvider) addPrice(symbol string, price float64) {
 	m.prices[symbol] = points
 }
 
-func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
+func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
 	points, ok := m.prices[symbol]
 	if !ok {
 		return nil, fmt.Errorf("no mock data for symbol %s", symbol)
@@ -100,6 +100,14 @@ func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time) ([]mo
 		}
 	}
 	return result, nil
+}
+
+func (m *mockMarketProvider) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
+	points, ok := m.prices[symbol]
+	if !ok || len(points) == 0 {
+		return 0, fmt.Errorf("no mock data for symbol %s", symbol)
+	}
+	return points[len(points)-1].Close, nil
 }
 
 // ---------- Test helpers ----------
@@ -124,7 +132,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	require.NoError(t, err)
 	db.AutoMigrate(
 		&models.User{}, &models.Transaction{}, &models.MarketData{},
-		&models.AssetFundamental{}, &models.EtfBreakdown{},
+		&models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{},
 	)
 
 	mockMarket := newMockMarketProvider()
@@ -373,7 +381,8 @@ func TestComparePortfolio(t *testing.T) {
 	// But correlation is undefined (stdev=0), so we just check the fields exist.
 	bm := result.Benchmarks[0]
 	t.Logf("Benchmark metrics: alpha=%.4f beta=%.4f sharpe=%.4f treynor=%.4f te=%.4f ir=%.4f corr=%.4f",
-		bm.Alpha, bm.Beta, bm.SharpeRatio, bm.TreynorRatio, bm.TrackingError, bm.InformationRatio, bm.Correlation)
+		// SharpeRatio is not in BenchmarkResult
+		bm.Alpha, bm.Beta, 0.0, bm.TreynorRatio, bm.TrackingError, bm.InformationRatio, bm.Correlation)
 }
 
 func TestCompare_FXConversionChangesMetrics(t *testing.T) {
@@ -428,7 +437,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", filepath.Base(tmpDir))
 	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
 	require.NoError(t, err)
-	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.AssetFundamental{}, &models.EtfBreakdown{})
+	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{})
 
 	fxSvc := fx.NewService(m, nil)
 	parser := flexquery.NewParser(db)
@@ -729,7 +738,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	require.NoError(t, err)
 	db.AutoMigrate(
 		&models.User{}, &models.Transaction{}, &models.MarketData{},
-		&models.AssetFundamental{}, &models.EtfBreakdown{},
+		&models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{},
 	)
 
 	mockMarket := newMockMarketProvider()
@@ -884,13 +893,20 @@ func TestGetTaxReport(t *testing.T) {
 
 	uploadFlexQuery(t, ts, testToken)
 
-	resp := doGet(t, ts, "/api/v1/tax/report?year=2024", testToken)
+	// Test with a JSON body
+	reqBody := `{"year": 2024}`
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/tax/report", strings.NewReader(reqBody))
+	require.NoError(t, err)
+	req.Header.Set("X-Auth-Token", testToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var result map[string]interface{}
-	err := json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
 	assert.Equal(t, float64(2024), result["year"])

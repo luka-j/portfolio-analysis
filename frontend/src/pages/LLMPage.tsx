@@ -155,16 +155,16 @@ function WeightsModal({
 }
 
 const markdownComponents = {
-  h1: ({ children }: any) => <p className="font-bold text-white mt-3 mb-1">{children}</p>,
-  h2: ({ children }: any) => <p className="font-bold text-white mt-3 mb-1">{children}</p>,
-  h3: ({ children }: any) => <p className="font-semibold text-white/90 mt-2 mb-1">{children}</p>,
-  p: ({ children }: any) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }: any) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
-  ol: ({ children }: any) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
-  li: ({ children }: any) => <li className="ml-2">{children}</li>,
-  strong: ({ children }: any) => <strong className="text-white font-semibold">{children}</strong>,
-  em: ({ children }: any) => <em className="text-indigo-200">{children}</em>,
-  code: ({ children }: any) => <code className="bg-white/10 rounded px-1 text-xs font-mono">{children}</code>,
+  h1: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-3 mb-1">{children}</p>,
+  h2: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-3 mb-1">{children}</p>,
+  h3: ({ children }: { children?: React.ReactNode }) => <p className="font-semibold text-white/90 mt-2 mb-1">{children}</p>,
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="ml-2">{children}</li>,
+  strong: ({ children }: { children?: React.ReactNode }) => <strong className="text-white font-semibold">{children}</strong>,
+  em: ({ children }: { children?: React.ReactNode }) => <em className="text-indigo-200">{children}</em>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="bg-white/10 rounded px-1 text-xs font-mono">{children}</code>,
 }
 
 function AssistantMessage({ content }: { content: string }) {
@@ -297,10 +297,11 @@ export default function LLMPage() {
 
       const res = await postLLMChat(req)
       setMessages(prev => [...prev, { role: 'assistant', content: res.response }])
-    } catch (err: any) {
-      const errMsg = err?.message?.includes('GEMINI_API_KEY')
+    } catch (err) {
+      const error = err as Error
+      const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
-        : err?.message || 'Failed to generate response.'
+        : error?.message || 'Failed to generate response.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
     } finally {
       setLoading(false)

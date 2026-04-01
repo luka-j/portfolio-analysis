@@ -240,15 +240,17 @@ export async function uploadEtradeSales(file: File): Promise<EtradeUploadRespons
   });
 }
 
-export async function getPortfolioValue(currency = 'USD', accountingModel = 'historical'): Promise<PortfolioValueResponse> {
-  return request<PortfolioValueResponse>(`/portfolio/value?currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}`);
+export async function getPortfolioValue(currency = 'USD', accountingModel = 'historical', cachedOnly = false): Promise<PortfolioValueResponse> {
+  const query = `currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
+  return request<PortfolioValueResponse>(`/portfolio/value?${query}`);
 }
 
 export async function getPortfolioHistory(
-  from: string, to: string, currency: string, accountingModel = 'historical', signal?: AbortSignal
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal
 ): Promise<PortfolioHistoryResponse> {
+  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
   return request<PortfolioHistoryResponse>(
-    `/portfolio/history?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}`,
+    `/portfolio/history?${query}`,
     { signal }
   );
 }
@@ -302,10 +304,11 @@ export async function getPortfolioTrades(
 // This is the correct data source for the TWR / MWR chart — each value is the chain-linked
 // return up to that date, with cash flows properly neutralised.
 export async function getPortfolioReturns(
-  from: string, to: string, currency: string, accountingModel = 'historical', returnType = 'twr', signal?: AbortSignal
+  from: string, to: string, currency: string, accountingModel = 'historical', returnType = 'twr', cachedOnly = false, signal?: AbortSignal
 ): Promise<PortfolioHistoryResponse> {
+  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&type=${returnType}${cachedOnly ? '&cachedOnly=true' : ''}`;
   return request<PortfolioHistoryResponse>(
-    `/portfolio/history/returns?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&type=${returnType}`,
+    `/portfolio/history/returns?${query}`,
     { signal }
   );
 }
@@ -382,8 +385,9 @@ export async function getLLMAvailable(): Promise<{ available: boolean }> {
   return request<{ available: boolean }>('/llm/available');
 }
 
-export async function getLLMSummary(period = '1d', currency = 'USD'): Promise<LLMSummaryResponse> {
-  return request<LLMSummaryResponse>(`/llm/summary?period=${period}&currency=${encodeURIComponent(currency)}`);
+export async function getLLMSummary(period = '1d', currency = 'USD', forceRefresh = false): Promise<LLMSummaryResponse> {
+  const extra = forceRefresh ? '&force_refresh=true' : '';
+  return request<LLMSummaryResponse>(`/llm/summary?period=${period}&currency=${encodeURIComponent(currency)}${extra}`);
 }
 
 export async function postLLMChat(req: LLMChatRequest): Promise<LLMChatResponse> {

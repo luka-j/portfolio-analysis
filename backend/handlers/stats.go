@@ -74,13 +74,13 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 	}
 
 	// Get daily values and cash flows for the calculations.
-	hist, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel)
+	hist, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel, false)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel)
+	cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel, false)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -227,7 +227,7 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 		// Fetch with a 7-day lookback to ensure we have a starting price for forward-filling.
 		// On error, record the problem in the result and continue with remaining symbols
 		// so one bad ticker does not discard metrics already computed for others.
-		prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to)
+		prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to, false)
 		if err != nil {
 			log.Printf("Warning: fetching benchmark %s: %v", sym, err)
 			benchmarks = append(benchmarks, models.BenchmarkResult{
@@ -395,7 +395,7 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 		}
 
 		for _, sym := range symbols {
-			prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to)
+			prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to, false)
 			if err != nil {
 				log.Printf("Warning: fetching standalone %s: %v", sym, err)
 				results = append(results, models.StandaloneResult{

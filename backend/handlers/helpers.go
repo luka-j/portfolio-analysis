@@ -56,6 +56,11 @@ func parseAccountingModel(c *gin.Context) models.AccountingModel {
 	return models.ParseAccountingModel(c.DefaultQuery("accounting_model", "historical"))
 }
 
+// parseCachedOnly extracts the cachedOnly query parameter.
+func parseCachedOnly(c *gin.Context) bool {
+	return c.Query("cachedOnly") == "true"
+}
+
 // buildFXRateMap pre-fetches historical exchange rates for nativeCcy→displayCcy and returns
 // a date-keyed map of rates, forward-filled over weekends/holidays. Returns nil when no
 // conversion is needed (same currency) or when the fetch fails.
@@ -64,7 +69,7 @@ func buildFXRateMap(mp market.Provider, nativeCcy, displayCcy string, from, to t
 		return nil
 	}
 	fxSymbol := fmt.Sprintf("%s%s=X", nativeCcy, displayCcy)
-	points, err := mp.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to)
+	points, err := mp.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, false)
 	if err != nil {
 		log.Printf("Warning: pre-fetching FX %s: %v", fxSymbol, err)
 		return nil
