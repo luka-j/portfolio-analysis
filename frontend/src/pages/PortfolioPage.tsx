@@ -68,8 +68,8 @@ export default function PortfolioPage() {
 
     // 1. Cached call — show positions immediately if there's data
     getPortfolioValue(currency, acctModel, true).then(val => {
-      if (!freshArrived && val.positions.length > 0) {
-        const sorted = [...val.positions].sort((a, b) => (b.value || 0) - (a.value || 0))
+      if (!freshArrived && (val.positions ?? []).length > 0) {
+        const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
         setPositions(sorted)
         setTotalValue(val.value || 0)
         setLoading(false)
@@ -81,7 +81,7 @@ export default function PortfolioPage() {
     try {
       const val = await getPortfolioValue(currency, acctModel, false)
       freshArrived = true
-      const sorted = [...val.positions].sort((a, b) => (b.value || 0) - (a.value || 0))
+      const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
       setPositions(sorted)
       setTotalValue(val.value || 0)
     } catch (err) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -114,7 +115,12 @@ func setupRouter(
 	breakdownService *breakdownsvc.Service,
 	llmService *llm.Service,
 ) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.RecoveryWithWriter(gin.DefaultErrorWriter, func(c *gin.Context, err any) {
+		log.Printf("panic recovered: %v", err)
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("internal server error: %v", err)})
+	}))
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {

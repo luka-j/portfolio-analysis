@@ -2,6 +2,7 @@ package flexquery
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -236,8 +237,11 @@ func (p *Parser) ParseAndSave(r io.Reader, userHash string) (*models.FlexQueryDa
 func (p *Parser) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 	var user models.User
 	if err := p.DB.Where(models.User{TokenHash: userHash}).First(&user).Error; err != nil {
-		// User has never uploaded data — return an empty portfolio instead of an error.
-		return &models.FlexQueryData{}, nil
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// User has never uploaded data — return an empty portfolio instead of an error.
+			return &models.FlexQueryData{}, nil
+		}
+		return nil, fmt.Errorf("fetching user: %w", err)
 	}
 
 	var dbTxns []models.Transaction

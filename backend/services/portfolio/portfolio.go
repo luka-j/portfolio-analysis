@@ -113,7 +113,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 	yMap := s.getYahooSymbolMap(data)
 
 	var totalValue float64
-	var positions []models.PositionValue
+	positions := make([]models.PositionValue, 0, len(holdings))
 	for _, h := range holdings {
 		k := posKey(h.Symbol, h.ListingExchange)
 		querySymbol := h.Symbol
@@ -524,7 +524,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		}
 	}
 
-	var result []models.DailyValue
+	result := make([]models.DailyValue, 0)
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
 		ds := d.Format("2006-01-02")
 

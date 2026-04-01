@@ -98,7 +98,7 @@ export default function AnalysisPage() {
         getPortfolioReturns(from, to, currency, acctModel),
       ])
       setStats(st)
-      setPortfolioHistory(hist.data)
+      setPortfolioHistory(hist.data ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load')
     } finally {
