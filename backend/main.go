@@ -24,6 +24,7 @@ import (
 	"gofolio-analysis/services/market"
 	"gofolio-analysis/services/portfolio"
 	"gofolio-analysis/services/tax"
+
 	"gorm.io/gorm"
 )
 
@@ -40,7 +41,7 @@ func main() {
 	marketSvc := market.NewYahooFinanceService(database)
 	cnbSvc := market.NewCNBProvider(database)
 	fxSvc := fx.NewService(marketSvc, cnbSvc)
-	parser := flexquery.NewParser(database)
+	repo := flexquery.NewRepository(database)
 	portfolioSvc := portfolio.NewService(marketSvc, fxSvc, marketSvc)
 	taxSvc := tax.NewService(fxSvc)
 
@@ -68,7 +69,7 @@ func main() {
 	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiSummaryModel, cfg.GeminiChatModel, database, portfolioSvc)
 
 	// Build Gin engine.
-	r := setupRouter(cfg, parser, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
+	r := setupRouter(cfg, repo, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -104,7 +105,7 @@ func main() {
 // setupRouter creates the Gin engine with all routes wired. Exported for testing.
 func setupRouter(
 	cfg *config.Config,
-	parser *flexquery.Parser,
+	repo *flexquery.Repository,
 	database *gorm.DB,
 	marketSvc market.Provider,
 	currencyGetter market.CurrencyGetter,
@@ -145,7 +146,7 @@ func setupRouter(
 	})
 
 	// Portfolio endpoints.
-	ph := handlers.NewPortfolioHandler(parser, portfolioSvc, fxSvc)
+	ph := handlers.NewPortfolioHandler(repo, portfolioSvc, fxSvc)
 	api.POST("/portfolio/upload", ph.Upload)
 	api.POST("/portfolio/upload/etrade/benefits", ph.UploadEtradeBenefits)
 	api.POST("/portfolio/upload/etrade/sales", ph.UploadEtradeSales)
@@ -161,21 +162,21 @@ func setupRouter(
 	api.GET("/market/history", mh.GetHistory)
 
 	// Stats endpoints.
-	sh := handlers.NewStatsHandler(parser, portfolioSvc, marketSvc, fxSvc, currencyGetter)
+	sh := handlers.NewStatsHandler(repo, portfolioSvc, marketSvc, fxSvc, currencyGetter)
 	api.GET("/portfolio/stats", sh.GetStats)
 	api.GET("/portfolio/compare", sh.Compare)
 	api.GET("/portfolio/standalone", sh.GetStandalone)
 
 	// Tax endpoints.
-	th := &handlers.TaxHandler{Parser: parser, TaxSvc: taxSvc}
+	th := &handlers.TaxHandler{Repo: repo, TaxSvc: taxSvc}
 	api.POST("/tax/report", th.GetReport)
 
 	// Breakdown endpoint.
-	bh := handlers.NewBreakdownHandler(parser, portfolioSvc, breakdownService, fundamentalsSvc)
+	bh := handlers.NewBreakdownHandler(repo, portfolioSvc, breakdownService, fundamentalsSvc)
 	api.GET("/portfolio/breakdown", bh.GetBreakdown)
 
 	// LLM endpoints.
-	lh := handlers.NewLLMHandler(parser, database, llmService)
+	lh := handlers.NewLLMHandler(repo, database, llmService)
 	api.GET("/llm/available", lh.IsAvailable)
 	api.GET("/llm/summary", lh.GetSummary)
 	api.POST("/llm/chat", lh.Chat)

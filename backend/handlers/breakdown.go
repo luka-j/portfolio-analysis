@@ -16,16 +16,16 @@ import (
 
 // BreakdownHandler handles portfolio breakdown endpoints.
 type BreakdownHandler struct {
-	Parser          *flexquery.Parser
+	Repo            *flexquery.Repository
 	PortfolioSvc    *portfolio.Service
 	BreakdownSvc    *breakdownsvc.Service
 	FundamentalsSvc *fundamentals.Service
 }
 
 // NewBreakdownHandler creates a new BreakdownHandler.
-func NewBreakdownHandler(parser *flexquery.Parser, ps *portfolio.Service, bs *breakdownsvc.Service, fs *fundamentals.Service) *BreakdownHandler {
+func NewBreakdownHandler(repo *flexquery.Repository, ps *portfolio.Service, bs *breakdownsvc.Service, fs *fundamentals.Service) *BreakdownHandler {
 	return &BreakdownHandler{
-		Parser:          parser,
+		Repo:            repo,
 		PortfolioSvc:    ps,
 		BreakdownSvc:    bs,
 		FundamentalsSvc: fs,
@@ -41,7 +41,7 @@ func (h *BreakdownHandler) GetBreakdown(c *gin.Context) {
 
 	currency := strings.ToUpper(c.DefaultQuery("currency", "USD"))
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

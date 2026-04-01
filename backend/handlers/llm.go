@@ -18,17 +18,17 @@ import (
 
 // LLMHandler manages LLM text generation and AI analysis endpoints.
 type LLMHandler struct {
-	Parser *flexquery.Parser
-	DB     *gorm.DB
-	LLM    *llm.Service
+	Repo *flexquery.Repository
+	DB   *gorm.DB
+	LLM  *llm.Service
 }
 
 // NewLLMHandler creates a new handler.
-func NewLLMHandler(parser *flexquery.Parser, db *gorm.DB, llmSvc *llm.Service) *LLMHandler {
+func NewLLMHandler(repo *flexquery.Repository, db *gorm.DB, llmSvc *llm.Service) *LLMHandler {
 	return &LLMHandler{
-		Parser: parser,
-		DB:     db,
-		LLM:    llmSvc,
+		Repo: repo,
+		DB:   db,
+		LLM:  llmSvc,
 	}
 }
 
@@ -57,7 +57,7 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		log.Printf("ERROR: GetSummary LoadSaved failed [user=%s]: %v", userHash[:8], err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "user data not found"})
@@ -155,7 +155,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		customWeights = req.CustomWeights
 	}
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		log.Printf("ERROR: Chat LoadSaved failed [user=%s]: %v", userHash[:8], err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "user data not found"})

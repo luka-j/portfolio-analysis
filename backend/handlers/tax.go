@@ -12,8 +12,8 @@ import (
 
 // TaxHandler processes tax report requests.
 type TaxHandler struct {
-	Parser  *flexquery.Parser
-	TaxSvc  *tax.Service
+	Repo   *flexquery.Repository
+	TaxSvc *tax.Service
 }
 
 type taxReportRequest struct {
@@ -35,7 +35,7 @@ func (h *TaxHandler) GetReport(c *gin.Context) {
 		return
 	}
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "failed to load data: " + err.Error()})
 		return

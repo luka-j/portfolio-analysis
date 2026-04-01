@@ -17,14 +17,14 @@ import (
 
 // PortfolioHandler handles portfolio-related endpoints.
 type PortfolioHandler struct {
-	Parser           *flexquery.Parser
+	Repo             *flexquery.Repository
 	PortfolioService *portfolio.Service
 	FXService        *fx.Service
 }
 
 // NewPortfolioHandler creates a new PortfolioHandler.
-func NewPortfolioHandler(parser *flexquery.Parser, ps *portfolio.Service, fxSvc *fx.Service) *PortfolioHandler {
-	return &PortfolioHandler{Parser: parser, PortfolioService: ps, FXService: fxSvc}
+func NewPortfolioHandler(repo *flexquery.Repository, ps *portfolio.Service, fxSvc *fx.Service) *PortfolioHandler {
+	return &PortfolioHandler{Repo: repo, PortfolioService: ps, FXService: fxSvc}
 }
 
 // Upload handles POST /api/v1/portfolio/upload
@@ -41,14 +41,14 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	data, err := h.Parser.ParseAndSave(file, userHash)
+	data, err := h.Repo.ParseAndSave(file, userHash)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "parse error: " + err.Error()})
 		return
 	}
 
 	// Invalidate LLM cache since portfolio changed
-	h.Parser.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":                 "upload successful",
@@ -98,7 +98,7 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 	userHash := c.GetString(middleware.UserHashKey)
 
 	var user models.User
-	if err := h.Parser.DB.Where(&models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
+	if err := h.Repo.DB.Where(&models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "getting user: " + err.Error()})
 		return
 	}
@@ -106,25 +106,25 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 	saved := 0
 	for _, txn := range txns {
 		var existing models.Transaction
-		err := h.Parser.DB.Where(
+		err := h.Repo.DB.Where(
 			"user_id = ? AND type = ? AND symbol = ? AND date_time = ? AND quantity >= ? AND quantity <= ?",
 			user.ID, txn.Type, txn.Symbol, txn.DateTime, txn.Quantity-1e-8, txn.Quantity+1e-8,
 		).First(&existing).Error
 
 		if err == nil {
-			if err := h.Parser.DB.Save(&existing).Error; err == nil {
+			if err := h.Repo.DB.Save(&existing).Error; err == nil {
 				saved++
 			}
 		} else {
 			txn.UserID = user.ID
-			if err := h.Parser.DB.Create(&txn).Error; err == nil {
+			if err := h.Repo.DB.Create(&txn).Error; err == nil {
 				saved++
 			}
 		}
 	}
 
 	// Invalidate LLM cache since portfolio changed
-	h.Parser.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "upload successful",
@@ -137,7 +137,7 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 func (h *PortfolioHandler) GetValue(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -188,7 +188,7 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 			eff = pos.Symbol
 		}
 		var fund models.AssetFundamental
-		if err := h.Parser.DB.Select("asset_type, duration, name").Where("symbol = ?", eff).First(&fund).Error; err == nil {
+		if err := h.Repo.DB.Select("asset_type, duration, name").Where("symbol = ?", eff).First(&fund).Error; err == nil {
 			if fund.AssetType == "Bond ETF" && fund.Duration != nil {
 				result.Positions[i].BondDuration = fund.Duration
 			}
@@ -205,7 +205,7 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 func (h *PortfolioHandler) GetHistory(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -245,7 +245,7 @@ func (h *PortfolioHandler) GetHistory(c *gin.Context) {
 func (h *PortfolioHandler) GetTrades(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -308,7 +308,7 @@ func (h *PortfolioHandler) GetTrades(c *gin.Context) {
 func (h *PortfolioHandler) GetReturns(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -367,7 +367,7 @@ type SymbolPriceHistory struct {
 func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -424,12 +424,12 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 	// "First" price per symbol: latest close on or before `from`.
 	// Using a subquery join so a single round-trip handles all symbols and is
 	// compatible with both PostgreSQL and SQLite.
-	subFirst := h.Parser.DB.Model(&models.MarketData{}).
+	subFirst := h.Repo.DB.Model(&models.MarketData{}).
 		Select("symbol, MAX(date) as max_date").
 		Where("symbol IN ? AND date <= ? AND volume != -1", yahooSymbols, from).
 		Group("symbol")
 	var firstRows []models.MarketData
-	if err := h.Parser.DB.
+	if err := h.Repo.DB.
 		Joins("JOIN (?) sub ON market_data.symbol = sub.symbol AND market_data.date = sub.max_date", subFirst).
 		Where("market_data.symbol IN ?", yahooSymbols).
 		Select("market_data.symbol, market_data.adj_close").
@@ -464,12 +464,12 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 		}
 	}
 	if len(needHistLast) > 0 {
-		subLast := h.Parser.DB.Model(&models.MarketData{}).
+		subLast := h.Repo.DB.Model(&models.MarketData{}).
 			Select("symbol, MAX(date) as max_date").
 			Where("symbol IN ? AND date <= ? AND volume != -1", needHistLast, to).
 			Group("symbol")
 		var lastRows []models.MarketData
-		if err := h.Parser.DB.
+		if err := h.Repo.DB.
 			Joins("JOIN (?) sub ON market_data.symbol = sub.symbol AND market_data.date = sub.max_date", subLast).
 			Where("market_data.symbol IN ?", needHistLast).
 			Select("market_data.symbol, market_data.adj_close").
@@ -484,7 +484,7 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 
 	// Range rows for avg_price (all closes in [from, to]).
 	var rows []models.MarketData
-	if err := h.Parser.DB.
+	if err := h.Repo.DB.
 		Where("symbol IN ? AND date >= ? AND date <= ? AND volume != -1", yahooSymbols, from, to).
 		Order("symbol, date").
 		Select("symbol, date, adj_close").
@@ -550,7 +550,7 @@ func (h *PortfolioHandler) MapSymbol(c *gin.Context) {
 		return
 	}
 
-	if err := h.Parser.UpdateSymbolMapping(userHash, symbol, exchange, req.YahooSymbol); err != nil {
+	if err := h.Repo.UpdateSymbolMapping(userHash, symbol, exchange, req.YahooSymbol); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

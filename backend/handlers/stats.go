@@ -20,7 +20,7 @@ import (
 
 // StatsHandler handles portfolio statistics and comparison endpoints.
 type StatsHandler struct {
-	Parser           *flexquery.Parser
+	Repo             *flexquery.Repository
 	PortfolioService *portfolio.Service
 	MarketProvider   market.Provider
 	FXService        *fx.Service
@@ -28,9 +28,9 @@ type StatsHandler struct {
 }
 
 // NewStatsHandler creates a new StatsHandler.
-func NewStatsHandler(parser *flexquery.Parser, ps *portfolio.Service, mp market.Provider, fxSvc *fx.Service, cg market.CurrencyGetter) *StatsHandler {
+func NewStatsHandler(repo *flexquery.Repository, ps *portfolio.Service, mp market.Provider, fxSvc *fx.Service, cg market.CurrencyGetter) *StatsHandler {
 	return &StatsHandler{
-		Parser:           parser,
+		Repo:             repo,
 		PortfolioService: ps,
 		MarketProvider:   mp,
 		FXService:        fxSvc,
@@ -42,7 +42,7 @@ func NewStatsHandler(parser *flexquery.Parser, ps *portfolio.Service, mp market.
 func (h *StatsHandler) GetStats(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -172,7 +172,7 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 func (h *StatsHandler) Compare(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -335,7 +335,7 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 func (h *StatsHandler) GetStandalone(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Parser.LoadSaved(userHash)
+	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
