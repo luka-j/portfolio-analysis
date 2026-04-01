@@ -542,7 +542,15 @@ export default function LandingPage() {
           onMouseLeave={() => setUploadExpanded(false)}
         >
           {/* Expanded options */}
-          <div className="flex flex-col items-end gap-2">
+          <div
+            className="flex flex-col items-end gap-2 px-3 py-2 rounded-2xl transition-all duration-200"
+            style={{
+              background: uploadExpanded ? 'rgba(15,17,23,0.7)' : 'transparent',
+              backdropFilter: uploadExpanded ? 'blur(20px)' : 'none',
+              boxShadow: uploadExpanded ? '0 8px 32px rgba(0,0,0,0.4)' : 'none',
+              border: uploadExpanded ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent',
+            }}
+          >
             {([
               { label: 'IBKR FlexQuery',   accept: '.xml',  onChange: handleUpload,               labelCls: 'text-indigo-400',  btnCls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-600',  delay: '150ms' },
               { label: 'E*Trade Benefits', accept: '.xlsx', onChange: handleEtradeBenefitsUpload, labelCls: 'text-emerald-400', btnCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-600', delay: '75ms'  },
