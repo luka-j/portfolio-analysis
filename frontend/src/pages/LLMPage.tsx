@@ -206,13 +206,15 @@ function AssistantMessage({ content }: { content: string }) {
 
 export default function LLMPage() {
   const location = useLocation()
-  const initialMessages = (location.state as { initialMessages?: ChatMessage[] } | null)?.initialMessages ?? []
+  const locationState = location.state as { initialMessages?: ChatMessage[]; initialPrompt?: { message: string; displayMessage: string } } | null
+  const initialMessages = locationState?.initialMessages ?? []
+  const initialPrompt = locationState?.initialPrompt
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
 
   // Settings
-  const [model, setModel] = useState<ModelChoice>('pro')
+  const [model, setModel] = useState<ModelChoice>('flash')
   const [includePortfolio, setIncludePortfolio] = useState(true)
   const [weights, setWeights] = useState<WeightRow[]>([])
   const [liveWeights, setLiveWeights] = useState<WeightRow[]>([])
@@ -247,6 +249,15 @@ export default function LLMPage() {
       })
       .catch(() => {})
       .finally(() => setWeightsLoading(false))
+  }, [])
+
+  const autoSentRef = useRef(false)
+  useEffect(() => {
+    if (initialPrompt && !autoSentRef.current) {
+      autoSentRef.current = true
+      handleSend(initialPrompt.message, 'freeform', initialPrompt.displayMessage)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const resetWeights = () => setWeights(liveWeights.map(r => ({ ...r })))

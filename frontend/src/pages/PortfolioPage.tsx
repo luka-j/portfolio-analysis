@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
@@ -40,6 +41,7 @@ function getPeriodDates(period: string, customFrom: string, customTo: string): {
 }
 
 export default function PortfolioPage() {
+  const navigate = useNavigate()
   const { privacy } = usePrivacy()
   const [currency, setCurrency] = usePersistentState('portfolio_currency', 'CZK')
   const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('portfolio_acctModel', 'historical')
@@ -142,6 +144,19 @@ export default function PortfolioPage() {
     if (!hasCoverage) return null
     return weightedSum / totalValue
   })()
+
+  const handleSparkle = (e: React.MouseEvent, pos: PositionValue) => {
+    e.stopPropagation()
+    const label = pos.name ? `${pos.symbol} (${pos.name})` : pos.symbol
+    navigate('/llm', {
+      state: {
+        initialPrompt: {
+          displayMessage: `Analyze recent market activity for ${label}`,
+          message: `Summarize the recent market activity for ${label}. Analyze the current price action through three lenses: 1. Catalysts: (Earnings, regulatory filings, or macro shifts like the H-200 export updates) 2. Sentiment: (Shift in institutional vs. retail buzz on X and Bloomberg). 3. Technical Levels: (Current RSI and key support/resistance zones). Provide a "Bottom Line" summary followed by a bulleted breakdown of risks and opportunities.`,
+        },
+      },
+    })
+  }
 
   const handleMapSymbol = (e: React.MouseEvent, symbol: string, currentYahooSymbol?: string, exchange?: string) => {
     e.stopPropagation()
@@ -342,6 +357,17 @@ export default function PortfolioPage() {
                             >
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={(e) => handleSparkle(e, pos)}
+                              className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
+                              title="AI market analysis"
+                            >
+                              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
+                                <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
+                                <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
                               </svg>
                             </button>
                           </div>
