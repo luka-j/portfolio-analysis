@@ -40,6 +40,7 @@ func (h *BreakdownHandler) GetBreakdown(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
 	currency := strings.ToUpper(c.DefaultQuery("currency", "USD"))
+	cachedOnly := parseCachedOnly(c)
 
 	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
@@ -48,7 +49,7 @@ func (h *BreakdownHandler) GetBreakdown(c *gin.Context) {
 	}
 
 	// GetCurrentValue uses spot accounting model for breakdown (we only need current weights).
-	result, err := h.PortfolioSvc.GetCurrentValue(data, currency, models.AccountingModelSpot, false)
+	result, err := h.PortfolioSvc.GetCurrentValue(data, currency, models.AccountingModelSpot, cachedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "fetching portfolio: " + err.Error()})
 		return

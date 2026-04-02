@@ -168,18 +168,34 @@ export default function BreakdownPage() {
   const [currency, setCurrency] = usePersistentState('breakdown_currency', 'USD')
   const [sections, setSections] = useState<BreakdownSection[]>([])
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setRefreshing(false)
     setError(null)
+    let freshArrived = false
+
+    // 1. Cached call — show immediately if non-empty, mark as stale
+    getPortfolioBreakdown(currency, true).then(data => {
+      if (!freshArrived && (data.sections ?? []).length > 0) {
+        setSections(data.sections ?? [])
+        setLoading(false)
+        setRefreshing(true)
+      }
+    }).catch(() => {})
+
+    // 2. Fresh call — always overwrites cached, clears stale indicator
     try {
-      const data = await getPortfolioBreakdown(currency)
+      const data = await getPortfolioBreakdown(currency, false)
+      freshArrived = true
       setSections(data.sections ?? [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load breakdown')
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [currency])
 
@@ -192,7 +208,10 @@ export default function BreakdownPage() {
       <div className="w-full">
         {/* Header */}
         <div className="flex flex-col items-center mb-12 text-center">
-          <h1 className="text-3xl font-semibold text-slate-100">Portfolio Breakdown</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-semibold text-slate-100">Portfolio Breakdown</h1>
+            {refreshing && <span className="w-4 h-4 rounded-full border-2 border-indigo-400/25 border-t-indigo-300 animate-spin" />}
+          </div>
           <p className="text-sm text-slate-500 mt-4 leading-relaxed max-w-xl">
             Breakdown by asset class, geography, and sector based on current holdings.
           </p>

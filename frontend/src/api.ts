@@ -359,8 +359,8 @@ export interface BreakdownResponse {
   sections: BreakdownSection[];
 }
 
-export async function getPortfolioBreakdown(currency = 'USD'): Promise<BreakdownResponse> {
-  return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}`);
+export async function getPortfolioBreakdown(currency = 'USD', cachedOnly = false): Promise<BreakdownResponse> {
+  return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}${cachedOnly ? '&cachedOnly=true' : ''}`);
 }
 
 // ---- Portfolio Price History ----
