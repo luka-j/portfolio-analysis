@@ -19,6 +19,7 @@ import (
 
 	"gofolio-analysis/config"
 	"gofolio-analysis/models"
+	"gofolio-analysis/router"
 	breakdownsvc "gofolio-analysis/services/breakdown"
 	"gofolio-analysis/services/flexquery"
 	"gofolio-analysis/services/fundamentals"
@@ -137,7 +138,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 
 	mockMarket := newMockMarketProvider()
 	fxSvc := fx.NewService(mockMarket, nil) // CNB is nil for this test
-	parser := flexquery.NewParser(db)
+	repo := flexquery.NewRepository(db)
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, nil)
 	taxSvc := tax.NewService(fxSvc)
 
@@ -147,7 +148,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns, nil)
 	breakdownService := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, db, mockMarket, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, nil)
+	router := router.SetupRouter(cfg, repo, db, mockMarket, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, nil)
 	ts := httptest.NewServer(router)
 
 	cleanup := func() {
@@ -440,7 +441,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{})
 
 	fxSvc := fx.NewService(m, nil)
-	parser := flexquery.NewParser(db)
+	repo := flexquery.NewRepository(db)
 	portfolioSvc := portfolio.NewService(m, fxSvc, nil)
 	taxSvc := tax.NewService(fxSvc)
 	allF := map[string]fundamentals.FundamentalsProvider{}
@@ -448,7 +449,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 	fundSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allF, allB, nil)
 	bkdSvc := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, db, m, m, fxSvc, portfolioSvc, taxSvc, fundSvc, bkdSvc, nil)
+	router := router.SetupRouter(cfg, repo, db, m, m, fxSvc, portfolioSvc, taxSvc, fundSvc, bkdSvc, nil)
 	ts := httptest.NewServer(router)
 	defer ts.Close()
 
@@ -746,7 +747,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	mockMarket.addPrice("TSLA", 300.0)
 
 	fxSvc := fx.NewService(mockMarket, nil)
-	parser := flexquery.NewParser(db)
+	repo := flexquery.NewRepository(db)
 	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, nil)
 	taxSvc := tax.NewService(fxSvc)
 
@@ -755,7 +756,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2, nil)
 	breakdownService2 := breakdownsvc.NewService(db)
 
-	router := setupRouter(cfg, parser, db, mockMarket, nil, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2, nil)
+	router := router.SetupRouter(cfg, repo, db, mockMarket, nil, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2, nil)
 	tsServer := httptest.NewServer(router)
 	defer tsServer.Close()
 

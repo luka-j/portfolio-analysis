@@ -4,6 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+### Unified Server (root)
+```bash
+go run server.go                # run unified server (serves frontend + backend)
+go work sync                    # sync workspace dependencies
+```
+
 ### Backend (run from `backend/`)
 ```bash
 go run .                        # run the server
@@ -33,8 +39,11 @@ Optional:
 
 ## Architecture
 
+### Unified Server
+The root `server.go` unifies the backend and frontend. It initializes all backend services and serves the React frontend from `frontend/dist`. API requests are handled by the backend logic, while all other routes fall back to `index.html` (SPA support).
+
 ### Backend
-`main.go` wires everything together: it initialises the DB, builds all services, registers routes, and starts the background fundamentals fetcher. There are no DI frameworks — dependencies are passed explicitly.
+`backend/main.go` remains as a standalone API server entry point. Both `main.go` and `server.go` use the `router.SetupRouter` package to wire the Gin engine consistently.
 
 **Request path:** `handlers/` → `services/` → DB or external API. Handlers are thin; business logic lives in services.
 

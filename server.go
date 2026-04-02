@@ -6,8 +6,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"gofolio-analysis/config"
 	"gofolio-analysis/db"
@@ -24,6 +28,11 @@ import (
 
 func main() {
 	cfg := config.Load()
+
+	frontendDir := os.Getenv("FRONTEND_DIR")
+	if frontendDir == "" {
+		frontendDir = "./frontend/dist"
+	}
 
 	// Connect to Database via GORM
 	database, err := db.Init(cfg.DatabaseURL)
@@ -62,8 +71,34 @@ func main() {
 
 	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiSummaryModel, cfg.GeminiChatModel, database, portfolioSvc)
 
-	// Build Gin engine.
+	// Build Gin engine using the backend router setup.
 	r := router.SetupRouter(cfg, repo, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
+
+	// Serve static files from the frontend build directory.
+	// We use NoRoute to implement SPA fallback (serving index.html for unknown routes).
+	r.StaticFS("/assets", http.Dir(filepath.Join(frontendDir, "assets")))
+	
+	// Serve other static files in the root of FrontendDir (like favicon, etc.)
+	// We do this manually to avoid shadowing the API routes.
+	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		
+		// If it's an API route that reached here, it's a 404 API.
+		if strings.HasPrefix(path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "API route not found"})
+			return
+		}
+
+		// Try to serve static file from FrontendDir.
+		fullPath := filepath.Join(frontendDir, filepath.FromSlash(path))
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			c.File(fullPath)
+			return
+		}
+
+		// Otherwise, serve index.html for SPA routing.
+		c.File(filepath.Join(frontendDir, "index.html"))
+	})
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -75,7 +110,8 @@ func main() {
 	fundamentalsSvc.StartBackgroundFetcher(ctx)
 
 	go func() {
-		log.Printf("Starting gofolio-analysis on :%s", cfg.Port)
+		log.Printf("Starting unified gofolio-analysis on :%s", cfg.Port)
+		log.Printf("Serving frontend from: %s", frontendDir)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
