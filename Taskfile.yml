@@ -1,0 +1,113 @@
+version: '3'
+
+vars:
+  BINARY_NAME: portfolio-analysis
+  FRONTEND_DIR: ./frontend
+  DIST_DIR: ./dist
+
+tasks:
+  frontend:
+    desc: Build the frontend (production)
+    dir: '{{.FRONTEND_DIR}}'
+    cmds:
+      - npm run build
+    sources:
+      - src/**/*
+      - index.html
+      - package.json
+      - vite.config.ts
+      - tsconfig*.json
+    generates:
+      - dist/**/*
+
+  go-build:
+    desc: |
+      Compile the Go binary only — frontend/dist must already exist.
+      Usage: task go-build OS=linux ARCH=amd64
+      OS: linux | windows | darwin
+      ARCH: amd64 | arm64
+    internal: false
+    vars:
+      OS: '{{.OS | default "linux"}}'
+      ARCH: '{{.ARCH | default "amd64"}}'
+      OUT: '{{.DIST_DIR}}/{{.BINARY_NAME}}-{{.OS}}-{{.ARCH}}{{if eq .OS "windows"}}.exe{{end}}'
+    env:
+      GOOS: '{{.OS}}'
+      GOARCH: '{{.ARCH}}'
+      CGO_ENABLED: '0'
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -ldflags="-s -w" -o {{.OUT}} ./server.go
+      - echo "Built {{.OUT}}"
+
+  build:
+    desc: |
+      Build the unified binary for the target OS/arch (builds frontend first).
+      Usage: task build OS=linux ARCH=amd64
+      OS: linux | windows | darwin
+      ARCH: amd64 | arm64
+    deps: [frontend]
+    cmds:
+      - task: go-build
+        vars: {OS: '{{.OS}}', ARCH: '{{.ARCH}}'}
+
+  # Convenience targets for each platform/arch combination
+
+  build-linux-amd64:
+    desc: Build for Linux x64
+    cmds:
+      - task: build
+        vars: {OS: linux, ARCH: amd64}
+
+  build-linux-arm64:
+    desc: Build for Linux arm64
+    cmds:
+      - task: build
+        vars: {OS: linux, ARCH: arm64}
+
+  build-windows-amd64:
+    desc: Build for Windows x64
+    cmds:
+      - task: build
+        vars: {OS: windows, ARCH: amd64}
+
+  build-windows-arm64:
+    desc: Build for Windows arm64
+    cmds:
+      - task: build
+        vars: {OS: windows, ARCH: arm64}
+
+  build-darwin-amd64:
+    desc: Build for macOS x64
+    cmds:
+      - task: build
+        vars: {OS: darwin, ARCH: amd64}
+
+  build-darwin-arm64:
+    desc: Build for macOS arm64 (Apple Silicon)
+    cmds:
+      - task: build
+        vars: {OS: darwin, ARCH: arm64}
+
+  build-all:
+    desc: Build for all supported platforms and architectures
+    deps: [frontend]
+    cmds:
+      - task: go-build
+        vars: {OS: linux, ARCH: amd64}
+      - task: go-build
+        vars: {OS: linux, ARCH: arm64}
+      - task: go-build
+        vars: {OS: windows, ARCH: amd64}
+      - task: go-build
+        vars: {OS: windows, ARCH: arm64}
+      - task: go-build
+        vars: {OS: darwin, ARCH: amd64}
+      - task: go-build
+        vars: {OS: darwin, ARCH: arm64}
+
+  clean:
+    desc: Remove build artifacts (dist/ binaries and frontend/dist)
+    cmds:
+      - rm -rf {{.DIST_DIR}}
+      - rm -rf {{.FRONTEND_DIR}}/dist

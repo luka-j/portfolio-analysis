@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

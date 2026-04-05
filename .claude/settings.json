@@ -15,7 +15,9 @@
       "Bash(grep -n \"GetDailyReturns\" /d/projects/gofolio-analysis/backend/services/portfolio/*.go)",
       "Bash(grep -l \"period\\\\|Period\\\\|DateRange\\\\|date.*range\" \"d:\\\\projects\\\\gofolio-analysis\\\\frontend\\\\src\\\\pages\"/*.tsx)",
       "Bash(grep -r \"setError\\\\|error\\\\|Error\" /d/projects/gofolio-analysis/frontend/src/pages/*.tsx)",
-      "Bash(grep -B2 -A2 \"{error &&\" /d/projects/gofolio-analysis/frontend/src/pages/*.tsx)"
+      "Bash(grep -B2 -A2 \"{error &&\" /d/projects/gofolio-analysis/frontend/src/pages/*.tsx)",
+      "Bash(find backend:*)",
+      "Bash(find . -maxdepth 1 -name \"*.go\" -exec sed -i 's|\"gofolio-analysis/|\"portfolio-analysis/|g' {} +)"
     ]
   }
 }

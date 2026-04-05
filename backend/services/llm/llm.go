@@ -12,8 +12,8 @@ import (
 	"google.golang.org/genai"
 	"gorm.io/gorm"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/portfolio"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/portfolio"
 )
 
 // ErrNotConfigured is returned when the Gemini API key is not set.

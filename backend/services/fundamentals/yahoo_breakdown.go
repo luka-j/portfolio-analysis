@@ -3,8 +3,8 @@ package fundamentals
 import (
 	"time"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/market"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/market"
 )
 
 // YahooBreakdownProvider adapts market.YahooFinanceService to the ETFBreakdownProvider interface.

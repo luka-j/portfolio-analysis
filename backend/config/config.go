@@ -28,7 +28,7 @@ func Load() *Config {
 	cfg := &Config{
 		Port:        getEnv("PORT", "8080"),
 		DataDir:     getEnv("DATA_DIR", "./data"),
-		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=gofolio port=5432 sslmode=disable"),
+		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=portfolio port=5432 sslmode=disable"),
 		CORSOrigin:  getEnv("CORS_ORIGIN", "http://localhost:5173"),
 
 		FundamentalsProviders: getEnv("FUNDAMENTALS_PROVIDERS", "Yahoo"),

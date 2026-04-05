@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // helper builds a Trade with sensible defaults.

@@ -1,0 +1,19 @@
+# Build outputs
+dist/
+frontend/dist/
+frontend/node_modules/
+
+# Dev / editor
+.git/
+*.md
+todo.md
+old_codereview.md
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets / env
+*.env
+.env*
+backend/run.ps1

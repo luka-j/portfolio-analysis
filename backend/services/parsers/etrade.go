@@ -10,7 +10,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // ParseBenefitHistory parses E*Trade BenefitHistory.xlsx for ESPP and RSU vests.

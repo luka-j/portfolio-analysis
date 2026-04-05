@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // TestExchangeAwarePositions verifies that the same symbol traded on two different

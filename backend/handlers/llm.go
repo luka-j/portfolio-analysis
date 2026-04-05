@@ -10,10 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"gofolio-analysis/middleware"
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/llm"
+	"portfolio-analysis/middleware"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/llm"
 )
 
 // LLMHandler manages LLM text generation and AI analysis endpoints.

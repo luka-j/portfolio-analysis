@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // Init connects to the database via GORM and auto-migrates all tables.

@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gofolio-analysis/middleware"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/tax"
+	"portfolio-analysis/middleware"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/tax"
 )
 
 // TaxHandler processes tax report requests.

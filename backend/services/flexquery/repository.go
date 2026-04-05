@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // Repository handles persisting and loading FlexQuery data in the database.

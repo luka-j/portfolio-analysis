@@ -42,6 +42,7 @@ export default function LandingPage() {
   const [period, setPeriod] = usePersistentState('landing_period', 0)
   const [chartMode, setChartMode] = usePersistentState<'value' | 'twr' | 'mwr'>('landing_chartMode', 'value')
   const [portfolioValues, setPortfolioValues] = useState<Record<string, number>>({})
+  const [hasTransactions, setHasTransactions] = useState<boolean | null>(null)
   const [history, setHistory] = useState<DailyValue[]>([])
   const [twrHistory, setTwrHistory] = useState<DailyValue[]>([])
   const [mwrHistory, setMwrHistory] = useState<DailyValue[]>([])
@@ -100,6 +101,7 @@ export default function LandingPage() {
       getPortfolioValue(curr, 'historical', true).then(res => {
         if (gen === loadGenRef.current && !freshArrived && res.value > 0) {
           setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
+          setHasTransactions(res.has_transactions)
           setLoading(false)       // unblock the hero display
           setValueRefreshing(true) // show stale indicator
         }
@@ -110,6 +112,7 @@ export default function LandingPage() {
       if (gen === loadGenRef.current) {
         freshArrived = true
         setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
+        setHasTransactions(res.has_transactions)
         setValueRefreshing(false) // fresh arrived, clear stale indicator
       }
     }
@@ -185,7 +188,12 @@ export default function LandingPage() {
     return () => { cancelled = true; controller.abort() }
   }, [currency, period, chartMode])
 
+  const currValue = portfolioValues[currency] ?? 0
+  // Only show LLM when we know there are trades AND the portfolio has a non-zero value.
+  const shouldShowLlm = hasTransactions === true && currValue > 0
+
   useEffect(() => {
+    if (!shouldShowLlm) return
     let cancelled = false;
     const fetchSummary = async (forceRefresh: boolean) => {
       setLlmSummaryLoading(true)
@@ -215,18 +223,23 @@ export default function LandingPage() {
     }
     fetchSummary(llmForceRefresh)
     return () => { cancelled = true }
-  }, [llmPeriod, currency, uploadCount, llmForceRefresh])
+  }, [llmPeriod, currency, uploadCount, llmForceRefresh, shouldShowLlm])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    const isFirstUpload = hasTransactions === false
     setUploading(true)
     setUploadMsg('')
     try {
       const res = await uploadFlexQuery(file)
       setUploadMsg(`Uploaded: ${res.positions_count} positions, ${res.trades_count} trades`)
       setUploadCount(c => c + 1)
-      await loadData()
+      if (isFirstUpload) {
+        navigate('/portfolio', { state: { firstUpload: true } })
+      } else {
+        await loadData()
+      }
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -238,13 +251,18 @@ export default function LandingPage() {
   const handleEtradeBenefitsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    const isFirstUpload = hasTransactions === false
     setUploading(true)
     setUploadMsg('')
     try {
       const res = await uploadEtradeBenefits(file)
       setUploadMsg(`Benefits Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
       setUploadCount(c => c + 1)
-      await loadData()
+      if (isFirstUpload) {
+        navigate('/portfolio', { state: { firstUpload: true } })
+      } else {
+        await loadData()
+      }
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -256,13 +274,18 @@ export default function LandingPage() {
   const handleEtradeSalesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    const isFirstUpload = hasTransactions === false
     setUploading(true)
     setUploadMsg('')
     try {
       const res = await uploadEtradeSales(file)
       setUploadMsg(`Sales Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
       setUploadCount(c => c + 1)
-      await loadData()
+      if (isFirstUpload) {
+        navigate('/portfolio', { state: { firstUpload: true } })
+      } else {
+        await loadData()
+      }
     } catch (err) {
       setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -286,8 +309,6 @@ export default function LandingPage() {
 
   const mwr = typeof stats?.mwr === 'number' ? (stats.mwr as number) * 100 : null
   const twr = typeof stats?.twr === 'number' ? (stats.twr as number) * 100 : null
-
-  const currValue = portfolioValues[currency] ?? 0
 
   return (
     <div className="h-screen bg-[#0f1117] flex flex-col overflow-hidden">
@@ -355,7 +376,7 @@ export default function LandingPage() {
         )}
 
         {/* LLM Market Summary Widget */}
-        {llmAvailable !== false && (
+        {llmAvailable !== false && shouldShowLlm && (
           <div className="pointer-events-auto mt-1 w-[95%] md:w-[80%] max-w-7xl px-2 py-1 flex flex-col items-center gap-1">
              <div className="flex items-center gap-2">
                <span className="text-[10px] uppercase font-bold text-indigo-300">What happened past:</span>
@@ -430,180 +451,230 @@ export default function LandingPage() {
           </div>
         )}
 
-        {/* Mode selector — simple pill toggles with proper padding */}
-        <div className="pointer-events-auto flex items-center gap-1 mt-4 bg-[#1a1d2e] rounded-2xl p-1 border border-white/6">
-          {(['value', 'twr', 'mwr'] as const).map(mode => (
-            <button
-              key={mode}
-              onClick={() => setChartMode(mode)}
-              className={`px-5 py-1.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                chartMode === mode 
-                  ? 'glass active text-indigo-300 shadow-lg' 
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              {mode === 'value' ? 'Value' : mode.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        {/* Mode selector — hidden when no trades */}
+        {hasTransactions !== false && (
+          <div className="pointer-events-auto flex items-center gap-1 mt-4 bg-[#1a1d2e] rounded-2xl p-1 border border-white/6">
+            {(['value', 'twr', 'mwr'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setChartMode(mode)}
+                className={`px-5 py-1.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  chartMode === mode
+                    ? 'glass active text-indigo-300 shadow-lg'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {mode === 'value' ? 'Value' : mode.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Main chart area with spacing from screen edge */}
-      <div className="relative flex-1 mt-auto flex flex-col justify-end pl-8 pr-24 mb-6">
-        
-        {/* The chart itself — axes returned and labels added */}
-        <div className="relative w-full h-[85%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[90%]">
-          {chartRefreshing && (
-            <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
-          )}
-          {chartLoading ? (
-            <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
-          ) : chartData.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px]">Matrix data unavailable</div>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.15} />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis 
-                  dataKey="date" 
-                  tick={{fontSize: 9, fill: '#334155', fontWeight: 'bold'}} 
-                  tickLine={false} 
-                  axisLine={false} 
-                  interval={Math.floor(chartData.length / 6)}
-                  dy={10}
-                />
-                <YAxis 
-                  domain={['auto', 'auto']} 
-                  tick={{fontSize: 9, fill: '#334155', fontWeight: 'bold'}} 
-                  tickLine={false} 
-                  axisLine={false} 
-                  tickFormatter={(val) => privacy && chartMode === 'value' ? '—' : chartMode === 'value' ? formatCurrencyCompact(val, currency) : `${val.toFixed(1)}%`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'rgba(26,29,46,0.98)',
-                    border: '1px solid rgba(99,102,241,0.3)',
-                    borderRadius: '24px',
-                    fontSize: '11px',
-                    color: '#e2e8f0',
-                    backdropFilter: 'blur(32px)',
-                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-                  }}
-                  itemStyle={{ fontWeight: 'black', textTransform: 'uppercase', letterSpacing: '0.1em' }}
-                  labelStyle={{ color: '#6366f1', marginBottom: '6px', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: '900', opacity: 0.8 }}
-                  formatter={(value) => [
-                    privacy && chartMode === 'value'
-                      ? '———'
-                      : chartMode === 'value'
-                        ? formatCurrencyCompact(Number(value), currency)
-                        : `${Number(value).toFixed(2)}%`,
-                    chartMode.toUpperCase(),
-                  ]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#6366f1"
-                  strokeWidth={1.5}
-                  fill="url(#chartGrad)"
-                  dot={false}
-                  animationDuration={1500}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        {/* Period vertical pills — middle-right */}
-        <div className="absolute right-8 bottom-44 flex flex-col items-center gap-2 z-10">
-          {PERIODS.map(p => (
-            <button
-              key={p.label}
-              onClick={() => setPeriod(p.months)}
-              className={`w-10 h-10 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 flex items-center justify-center shadow-lg ${
-                period === p.months
-                  ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-indigo-600/20'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Upload buttons — bottom right */}
-        <div
-          className="absolute bottom-4 right-8 flex flex-col items-end gap-2 z-20"
-          onMouseLeave={() => setUploadExpanded(false)}
-        >
-          {/* Expanded options */}
-          <div
-            className="flex flex-col items-end gap-2 px-3 py-2 rounded-2xl transition-all duration-200"
-            style={{
-              background: uploadExpanded ? 'rgba(15,17,23,0.7)' : 'transparent',
-              backdropFilter: uploadExpanded ? 'blur(20px)' : 'none',
-              boxShadow: uploadExpanded ? '0 8px 32px rgba(0,0,0,0.4)' : 'none',
-              border: uploadExpanded ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent',
-            }}
-          >
+      {hasTransactions === false ? (
+        /* ── Empty state: no trades uploaded yet ── */
+        <div className="relative flex-1 flex flex-col items-center justify-center gap-8 px-8 mb-6">
+          <p className="text-slate-700 text-[10px] font-black uppercase tracking-[0.3em]">Upload your portfolio data to get started</p>
+          <div className="flex flex-col sm:flex-row gap-4 w-full max-w-2xl">
             {([
-              { label: 'IBKR FlexQuery',   accept: '.xml',  onChange: handleUpload,               labelCls: 'text-indigo-400',  btnCls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-600',  delay: '150ms' },
-              { label: 'E*Trade Benefits', accept: '.xlsx', onChange: handleEtradeBenefitsUpload, labelCls: 'text-emerald-400', btnCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-600', delay: '75ms'  },
-              { label: 'E*Trade Sales',    accept: '.xlsx', onChange: handleEtradeSalesUpload,    labelCls: 'text-amber-400',   btnCls: 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-600',         delay: '0ms'   },
-            ] as const).map(({ label, accept, onChange, labelCls, btnCls, delay }) => (
+              { label: 'IBKR FlexQuery',   desc: 'Interactive Brokers XML report', accept: '.xml',  onChange: handleUpload,               cardCls: 'border-indigo-500/20 bg-indigo-500/5 hover:bg-indigo-500/10',  iconCls: 'bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500/20',  titleCls: 'text-indigo-400'  },
+              { label: 'E*Trade Benefits', desc: 'RSU & ESPP benefit history',      accept: '.xlsx', onChange: handleEtradeBenefitsUpload, cardCls: 'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10', iconCls: 'bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20', titleCls: 'text-emerald-400' },
+              { label: 'E*Trade Sales',    desc: 'Gains & losses report',           accept: '.xlsx', onChange: handleEtradeSalesUpload,    cardCls: 'border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10',     iconCls: 'bg-amber-500/10 text-amber-400 group-hover:bg-amber-500/20',     titleCls: 'text-amber-400'   },
+            ] as const).map(({ label, desc, accept, onChange, cardCls, iconCls, titleCls }) => (
               <label
                 key={label}
-                className="flex items-center gap-3 cursor-pointer"
-                style={{
-                  opacity: uploadExpanded ? 1 : 0,
-                  transform: uploadExpanded ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.97)',
-                  transition: `opacity 200ms ease ${uploadExpanded ? delay : '0ms'}, transform 200ms ease ${uploadExpanded ? delay : '0ms'}`,
-                  pointerEvents: uploadExpanded ? 'auto' : 'none',
-                }}
+                className={`flex-1 flex flex-col items-center gap-4 p-6 rounded-2xl border cursor-pointer transition-all duration-200 group active:scale-[0.98] ${cardCls}`}
               >
-                <span className={`text-[9px] font-black uppercase tracking-[0.2em] whitespace-nowrap ${labelCls}`}>{label}</span>
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border hover:text-white transition-all shadow-lg active:scale-95 ${btnCls}`}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${iconCls}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                </div>
+                <div className="flex flex-col items-center gap-1 text-center">
+                  <span className={`text-xs font-black uppercase tracking-[0.15em] ${titleCls}`}>{label}</span>
+                  <span className="text-[10px] text-slate-600 font-medium">{desc}</span>
                 </div>
                 <input type="file" accept={accept} onChange={onChange} className="hidden" disabled={uploading} />
               </label>
             ))}
           </div>
 
-          {/* Trigger button */}
-          <div
-            onMouseEnter={() => setUploadExpanded(true)}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-default transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          {/* Status messages */}
+          <div className="absolute bottom-4 left-8">
+            {uploading && (
+              <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
+                <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                Processing DataMatrix…
+              </div>
+            )}
+            {uploadMsg && (
+              <div className="px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-emerald-500/10 backdrop-blur-3xl">
+                {uploadMsg}
+              </div>
+            )}
+            {error && (
+              <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-red-500/10 backdrop-blur-3xl">
+                {error}
+              </div>
+            )}
           </div>
         </div>
+      ) : (
+        /* ── Normal chart area ── */
+        <div className="relative flex-1 mt-auto flex flex-col justify-end pl-8 pr-24 mb-6">
 
-        {/* Status messages — bottom left */}
-        <div className="absolute bottom-4 left-8">
-          {uploading && (
-            <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
-              <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              Processing DataMatrix…
+          {/* The chart itself — axes returned and labels added */}
+          <div className="relative w-full h-[85%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[90%]">
+            {chartRefreshing && (
+              <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
+            )}
+            {chartLoading ? (
+              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
+            ) : chartData.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px]">Matrix data unavailable</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.15} />
+                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis
+                    dataKey="date"
+                    tick={{fontSize: 9, fill: '#334155', fontWeight: 'bold'}}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={Math.floor(chartData.length / 6)}
+                    dy={10}
+                  />
+                  <YAxis
+                    domain={['auto', 'auto']}
+                    tick={{fontSize: 9, fill: '#334155', fontWeight: 'bold'}}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(val) => privacy && chartMode === 'value' ? '—' : chartMode === 'value' ? formatCurrencyCompact(val, currency) : `${val.toFixed(1)}%`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'rgba(26,29,46,0.98)',
+                      border: '1px solid rgba(99,102,241,0.3)',
+                      borderRadius: '24px',
+                      fontSize: '11px',
+                      color: '#e2e8f0',
+                      backdropFilter: 'blur(32px)',
+                      boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                    }}
+                    itemStyle={{ fontWeight: 'black', textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                    labelStyle={{ color: '#6366f1', marginBottom: '6px', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: '900', opacity: 0.8 }}
+                    formatter={(value) => [
+                      privacy && chartMode === 'value'
+                        ? '———'
+                        : chartMode === 'value'
+                          ? formatCurrencyCompact(Number(value), currency)
+                          : `${Number(value).toFixed(2)}%`,
+                      chartMode.toUpperCase(),
+                    ]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="#6366f1"
+                    strokeWidth={1.5}
+                    fill="url(#chartGrad)"
+                    dot={false}
+                    animationDuration={1500}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Period vertical pills — middle-right */}
+          <div className="absolute right-8 bottom-44 flex flex-col items-center gap-2 z-10">
+            {PERIODS.map(p => (
+              <button
+                key={p.label}
+                onClick={() => setPeriod(p.months)}
+                className={`w-10 h-10 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 flex items-center justify-center shadow-lg ${
+                  period === p.months
+                    ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-indigo-600/20'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Upload buttons — bottom right */}
+          <div
+            className="absolute bottom-4 right-8 flex flex-col items-end gap-2 z-20"
+            onMouseLeave={() => setUploadExpanded(false)}
+          >
+            {/* Expanded options */}
+            <div
+              className="flex flex-col items-end gap-2 px-3 py-2 rounded-2xl transition-all duration-200"
+              style={{
+                background: uploadExpanded ? 'rgba(15,17,23,0.7)' : 'transparent',
+                backdropFilter: uploadExpanded ? 'blur(20px)' : 'none',
+                boxShadow: uploadExpanded ? '0 8px 32px rgba(0,0,0,0.4)' : 'none',
+                border: uploadExpanded ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent',
+              }}
+            >
+              {([
+                { label: 'IBKR FlexQuery',   accept: '.xml',  onChange: handleUpload,               labelCls: 'text-indigo-400',  btnCls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-600',  delay: '150ms' },
+                { label: 'E*Trade Benefits', accept: '.xlsx', onChange: handleEtradeBenefitsUpload, labelCls: 'text-emerald-400', btnCls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-600', delay: '75ms'  },
+                { label: 'E*Trade Sales',    accept: '.xlsx', onChange: handleEtradeSalesUpload,    labelCls: 'text-amber-400',   btnCls: 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-600',         delay: '0ms'   },
+              ] as const).map(({ label, accept, onChange, labelCls, btnCls, delay }) => (
+                <label
+                  key={label}
+                  className="flex items-center gap-3 cursor-pointer"
+                  style={{
+                    opacity: uploadExpanded ? 1 : 0,
+                    transform: uploadExpanded ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.97)',
+                    transition: `opacity 200ms ease ${uploadExpanded ? delay : '0ms'}, transform 200ms ease ${uploadExpanded ? delay : '0ms'}`,
+                    pointerEvents: uploadExpanded ? 'auto' : 'none',
+                  }}
+                >
+                  <span className={`text-[9px] font-black uppercase tracking-[0.2em] whitespace-nowrap ${labelCls}`}>{label}</span>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center border hover:text-white transition-all shadow-lg active:scale-95 ${btnCls}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  </div>
+                  <input type="file" accept={accept} onChange={onChange} className="hidden" disabled={uploading} />
+                </label>
+              ))}
             </div>
-          )}
-          {uploadMsg && (
-            <div className="px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-emerald-500/10 backdrop-blur-3xl">
-              {uploadMsg}
+
+            {/* Trigger button */}
+            <div
+              onMouseEnter={() => setUploadExpanded(true)}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-default transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             </div>
-          )}
-          {error && (
-            <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-red-500/10 backdrop-blur-3xl">
-              {error}
-            </div>
-          )}
+          </div>
+
+          {/* Status messages — bottom left */}
+          <div className="absolute bottom-4 left-8">
+            {uploading && (
+              <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
+                <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                Processing DataMatrix…
+              </div>
+            )}
+            {uploadMsg && (
+              <div className="px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-emerald-500/10 backdrop-blur-3xl">
+                {uploadMsg}
+              </div>
+            )}
+            {error && (
+              <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-red-500/10 backdrop-blur-3xl">
+                {error}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-module gofolio-analysis
+module portfolio-analysis
 
 go 1.26.1
 

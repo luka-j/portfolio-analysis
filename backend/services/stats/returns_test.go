@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/stats"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/stats"
 )
 
 // parseDate makes time.Time creation inline-friendly.

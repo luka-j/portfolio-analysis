@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

@@ -77,7 +77,7 @@ function WeightsModal({
           {weightsLoading ? (
             <p className="text-sm text-slate-500 text-center py-10">Loading…</p>
           ) : weights.length === 0 ? (
-            <p className="text-sm text-slate-500 text-center py-10">No portfolio data. Upload a FlexQuery first.</p>
+            <p className="text-sm text-slate-500 text-center py-10">No portfolio data. Upload portfolio data first.</p>
           ) : (
             <table className="w-full text-sm">
               <thead>

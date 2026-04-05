@@ -32,11 +32,9 @@ export default function NavBar() {
         {/* Left: Logo */}
         <div className="flex-1 flex items-center justify-start">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-linear-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-indigo-500/20">
-              G
-            </div>
+            <img src="/favicon.svg" alt="Portfolio Analysis" className="w-8 h-8 rounded-xl" />
             <span className="text-base font-bold text-white select-none">
-              Gofolio
+              Portfolio Analysis
             </span>
           </div>
         </div>

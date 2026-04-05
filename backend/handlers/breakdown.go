@@ -6,12 +6,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gofolio-analysis/middleware"
-	breakdownsvc "gofolio-analysis/services/breakdown"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/fundamentals"
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/portfolio"
+	"portfolio-analysis/middleware"
+	breakdownsvc "portfolio-analysis/services/breakdown"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fundamentals"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/portfolio"
 )
 
 // BreakdownHandler handles portfolio breakdown endpoints.

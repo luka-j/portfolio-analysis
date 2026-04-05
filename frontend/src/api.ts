@@ -1,15 +1,15 @@
 const API_BASE = '/api/v1';
 
 function getToken(): string {
-  return localStorage.getItem('gofolio_token') || '';
+  return localStorage.getItem('portfolio_token') || '';
 }
 
 export function setToken(token: string) {
-  localStorage.setItem('gofolio_token', token);
+  localStorage.setItem('portfolio_token', token);
 }
 
 export function clearToken() {
-  localStorage.removeItem('gofolio_token');
+  localStorage.removeItem('portfolio_token');
 }
 
 export function hasToken(): boolean {
@@ -64,6 +64,7 @@ export interface PortfolioValueResponse {
   value: number;
   currency: string;
   positions: PositionValue[];
+  has_transactions: boolean;
 }
 
 export interface DailyValue {

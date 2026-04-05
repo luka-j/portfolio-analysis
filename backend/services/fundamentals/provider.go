@@ -3,7 +3,7 @@ package fundamentals
 import (
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // RateLimitConfig configures per-provider request budgets.

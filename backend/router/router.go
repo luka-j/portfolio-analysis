@@ -8,17 +8,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"gofolio-analysis/config"
-	"gofolio-analysis/handlers"
-	"gofolio-analysis/middleware"
-	breakdownsvc "gofolio-analysis/services/breakdown"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/fundamentals"
-	"gofolio-analysis/services/fx"
-	"gofolio-analysis/services/llm"
-	"gofolio-analysis/services/market"
-	"gofolio-analysis/services/portfolio"
-	"gofolio-analysis/services/tax"
+	"portfolio-analysis/config"
+	"portfolio-analysis/handlers"
+	"portfolio-analysis/middleware"
+	breakdownsvc "portfolio-analysis/services/breakdown"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fundamentals"
+	"portfolio-analysis/services/fx"
+	"portfolio-analysis/services/llm"
+	"portfolio-analysis/services/market"
+	"portfolio-analysis/services/portfolio"
+	"portfolio-analysis/services/tax"
 )
 
 // SetupRouter creates the Gin engine with all routes wired.

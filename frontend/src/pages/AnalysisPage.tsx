@@ -329,28 +329,30 @@ export default function AnalysisPage() {
             <div className="flex items-center justify-center gap-3 mb-8">
               <h2 className="text-xl font-semibold text-slate-100">Risk & Return Metrics</h2>
               {stats && portfolioStandalone && (
-                <button
-                  onClick={() => {
-                    const twr = typeof stats.statistics['twr'] === 'number' ? `${(stats.statistics['twr'] * 100).toFixed(2)}%` : 'N/A'
-                    const mwr = typeof stats.statistics['mwr'] === 'number' ? `${(stats.statistics['mwr'] * 100).toFixed(2)}%` : 'N/A'
-                    navigate('/llm', {
-                      state: {
-                        initialPrompt: {
-                          displayMessage: `Analyze my portfolio's risk & return metrics for ${periodLabel}`,
-                          message: `Act as a private wealth manager performing a year-end review for a client. Please interpret the following portfolio data in plain English, focusing on "The Story of the Money" rather than just the math.\n\nPeriod: ${periodLabel}\nTWR: ${twr}\nMWR: ${mwr}\nSharpe Ratio: ${portfolioStandalone.sharpe_ratio.toFixed(3)}\nSortino Ratio: ${portfolioStandalone.sortino_ratio.toFixed(3)}\nVAMI: ${portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}\nVolatility: ${(portfolioStandalone.volatility * 100).toFixed(2)}%\nMax Drawdown: -${(portfolioStandalone.max_drawdown * 100).toFixed(2)}%\n\nPLEASE PROVIDE: 1. The Returns Narrative: Explain the difference between my TWR and MWR. Am I a good "timer" of my own deposits/withdrawals, or is my behavior costing me money? 2. Wealth Growth: Based on the VAMI, how has the "purchasing power" of this portfolio changed? 3. The Efficiency Test: Using Sharpe and Sortino, tell me if I'm taking "productive" risk or "reckless" risk. Is the "downside pain" (Sortino) significantly different from the "total swing" (Sharpe)? 4. The Stress Test: Contextualize the Max Drawdown. How long did it take to recover, and is this level of loss sustainable for a long-term investor? 5. Investor profile: Is this portfolio more suited for the aggressive growth investor, defensive value-preservation investor, or neither? 6. The Verdict: Is this a "smooth ride" or a "rollercoaster," and am I being rewarded for staying on it?`,
+                <div className="relative group">
+                  <button
+                    onClick={() => {
+                      const twr = typeof stats.statistics['twr'] === 'number' ? `${(stats.statistics['twr'] * 100).toFixed(2)}%` : 'N/A'
+                      const mwr = typeof stats.statistics['mwr'] === 'number' ? `${(stats.statistics['mwr'] * 100).toFixed(2)}%` : 'N/A'
+                      navigate('/llm', {
+                        state: {
+                          initialPrompt: {
+                            displayMessage: `Analyze my portfolio's risk & return metrics for ${periodLabel}`,
+                            message: `Act as a private wealth manager performing a year-end review for a client. Please interpret the following portfolio data in plain English, focusing on "The Story of the Money" rather than just the math.\n\nPeriod: ${periodLabel}\nTWR: ${twr}\nMWR: ${mwr}\nSharpe Ratio: ${portfolioStandalone.sharpe_ratio.toFixed(3)}\nSortino Ratio: ${portfolioStandalone.sortino_ratio.toFixed(3)}\nVAMI: ${portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}\nVolatility: ${(portfolioStandalone.volatility * 100).toFixed(2)}%\nMax Drawdown: -${(portfolioStandalone.max_drawdown * 100).toFixed(2)}%\n\nPLEASE PROVIDE: 1. The Returns Narrative: Explain the difference between my TWR and MWR. Am I a good "timer" of my own deposits/withdrawals, or is my behavior costing me money? 2. Wealth Growth: Based on the VAMI, how has the "purchasing power" of this portfolio changed? 3. The Efficiency Test: Using Sharpe and Sortino, tell me if I'm taking "productive" risk or "reckless" risk. Is the "downside pain" (Sortino) significantly different from the "total swing" (Sharpe)? 4. The Stress Test: Contextualize the Max Drawdown. How long did it take to recover, and is this level of loss sustainable for a long-term investor? 5. Investor profile: Is this portfolio more suited for the aggressive growth investor, defensive value-preservation investor, or neither? 6. The Verdict: Is this a "smooth ride" or a "rollercoaster," and am I being rewarded for staying on it?`,
+                          },
                         },
-                      },
-                    })
-                  }}
-                  className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
-                  title="AI analysis of risk & return metrics"
-                >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
-                    <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
-                    <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
-                  </svg>
-                </button>
+                      })
+                    }}
+                    className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
+                      <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
+                      <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
+                    </svg>
+                  </button>
+                  <HoverTooltip direction="down" className="w-max whitespace-nowrap">AI analysis of risk &amp; return metrics</HoverTooltip>
+                </div>
               )}
             </div>
             {loading ? (

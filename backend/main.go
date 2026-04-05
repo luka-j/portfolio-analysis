@@ -9,17 +9,17 @@ import (
 	"syscall"
 	"time"
 
-	"gofolio-analysis/config"
-	"gofolio-analysis/db"
-	"gofolio-analysis/router"
-	breakdownsvc "gofolio-analysis/services/breakdown"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/fundamentals"
-	"gofolio-analysis/services/fx"
-	"gofolio-analysis/services/llm"
-	"gofolio-analysis/services/market"
-	"gofolio-analysis/services/portfolio"
-	"gofolio-analysis/services/tax"
+	"portfolio-analysis/config"
+	"portfolio-analysis/db"
+	"portfolio-analysis/router"
+	breakdownsvc "portfolio-analysis/services/breakdown"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fundamentals"
+	"portfolio-analysis/services/fx"
+	"portfolio-analysis/services/llm"
+	"portfolio-analysis/services/market"
+	"portfolio-analysis/services/portfolio"
+	"portfolio-analysis/services/tax"
 )
 
 func main() {
@@ -75,7 +75,7 @@ func main() {
 	fundamentalsSvc.StartBackgroundFetcher(ctx)
 
 	go func() {
-		log.Printf("Starting gofolio-analysis on :%s", cfg.Port)
+		log.Printf("Starting portfolio-analysis on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

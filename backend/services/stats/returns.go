@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // ---------- MWR (Money-Weighted Return / IRR) ----------

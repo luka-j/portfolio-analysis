@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/market"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/market"
 )
 
 // Service provides currency conversion using Yahoo Finance FX pairs.

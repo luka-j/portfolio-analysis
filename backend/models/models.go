@@ -157,9 +157,10 @@ type PositionValue struct {
 
 // PortfolioValueResponse is the response for GET /portfolio/value.
 type PortfolioValueResponse struct {
-	Value     float64         `json:"value"`
-	Currency  string          `json:"currency"`
-	Positions []PositionValue `json:"positions"`
+	Value           float64         `json:"value"`
+	Currency        string          `json:"currency"`
+	Positions       []PositionValue `json:"positions"`
+	HasTransactions bool            `json:"has_transactions"`
 }
 
 // TradeEntry is a frontend-friendly representation of a single trade.

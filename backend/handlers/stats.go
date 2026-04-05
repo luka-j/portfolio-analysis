@@ -9,13 +9,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gofolio-analysis/middleware"
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/fx"
-	"gofolio-analysis/services/market"
-	"gofolio-analysis/services/portfolio"
-	"gofolio-analysis/services/stats"
+	"portfolio-analysis/middleware"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fx"
+	"portfolio-analysis/services/market"
+	"portfolio-analysis/services/portfolio"
+	"portfolio-analysis/services/stats"
 )
 
 // StatsHandler handles portfolio statistics and comparison endpoints.

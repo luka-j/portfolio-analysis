@@ -39,11 +39,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-2xl mb-4 shadow-lg shadow-indigo-500/25">
-            G
-          </div>
+          <img src="/favicon.svg" alt="Portfolio Analysis" className="w-16 h-16 mb-4 rounded-2xl" />
           <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-            Gofolio
+            Portfolio Analysis
           </h1>
           <p className="text-slate-400 mt-2 text-sm">Portfolio Analysis Dashboard</p>
         </div>
@@ -58,7 +56,7 @@ export default function LoginPage() {
             type="password"
             value={token}
             onChange={(e) => setTokenValue(e.target.value)}
-            placeholder="Enter your pre-shared token"
+            placeholder="Enter your user token"
             className="w-full px-4 py-3 bg-[#0f1117] border border-[#2a2e42] rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
             autoFocus
           />

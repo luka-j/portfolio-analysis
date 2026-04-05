@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 func setupTestDB(t *testing.T) *gorm.DB {

@@ -8,7 +8,7 @@ import (
 )
 
 func TestInitSQLite(t *testing.T) {
-	dbPath := "test_gofolio.db"
+	dbPath := "test_portfolio.db"
 	defer os.Remove(dbPath)
 
 	// Test with sqlite: prefix
@@ -23,7 +23,7 @@ func TestInitSQLite(t *testing.T) {
 }
 
 func TestInitSQLiteNoPrefix(t *testing.T) {
-	dbPath := "test_gofolio_no_prefix.db"
+	dbPath := "test_portfolio_no_prefix.db"
 	defer os.Remove(dbPath)
 
 	// Test without sqlite: prefix

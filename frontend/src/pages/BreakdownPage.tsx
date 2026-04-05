@@ -229,9 +229,7 @@ export default function BreakdownPage() {
         )}
 
         {!loading && !error && sections.length === 0 && (
-          <div className="text-center text-slate-800 py-40 font-black uppercase tracking-[0.4em] text-[10px] opacity-40">
-            Sync required to generate breakdown matrix
-          </div>
+          <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
         )}
 
         {!loading && !error && sections.length > 0 && (

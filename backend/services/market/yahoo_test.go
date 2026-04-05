@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"

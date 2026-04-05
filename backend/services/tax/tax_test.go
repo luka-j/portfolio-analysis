@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/fx"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/fx"
 )
 
 // mockMarketProvider from main_test logic for fx.Service fallback testing.

@@ -2,37 +2,37 @@ package main
 
 import (
 	"context"
+	"embed"
+	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"gofolio-analysis/config"
-	"gofolio-analysis/db"
-	"gofolio-analysis/router"
-	breakdownsvc "gofolio-analysis/services/breakdown"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/fundamentals"
-	"gofolio-analysis/services/fx"
-	"gofolio-analysis/services/llm"
-	"gofolio-analysis/services/market"
-	"gofolio-analysis/services/portfolio"
-	"gofolio-analysis/services/tax"
+	"portfolio-analysis/config"
+	"portfolio-analysis/db"
+	"portfolio-analysis/router"
+	breakdownsvc "portfolio-analysis/services/breakdown"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fundamentals"
+	"portfolio-analysis/services/fx"
+	"portfolio-analysis/services/llm"
+	"portfolio-analysis/services/market"
+	"portfolio-analysis/services/portfolio"
+	"portfolio-analysis/services/tax"
 )
+
+//go:embed all:frontend/dist
+var embeddedFrontend embed.FS
 
 func main() {
 	cfg := config.Load()
-
-	frontendDir := os.Getenv("FRONTEND_DIR")
-	if frontendDir == "" {
-		frontendDir = "./frontend/dist"
-	}
 
 	// Connect to Database via GORM
 	database, err := db.Init(cfg.DatabaseURL)
@@ -74,30 +74,53 @@ func main() {
 	// Build Gin engine using the backend router setup.
 	r := router.SetupRouter(cfg, repo, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
 
-	// Serve static files from the frontend build directory.
-	// We use NoRoute to implement SPA fallback (serving index.html for unknown routes).
-	r.StaticFS("/assets", http.Dir(filepath.Join(frontendDir, "assets")))
-	
-	// Serve other static files in the root of FrontendDir (like favicon, etc.)
-	// We do this manually to avoid shadowing the API routes.
+	// Set up frontend file serving.
+	// If FRONTEND_DIR is set, serve from disk (useful during development).
+	// Otherwise, serve from the binary-embedded frontend/dist.
+	var fileSystem http.FileSystem
+	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
+		fileSystem = http.Dir(dir)
+		log.Printf("Serving frontend from disk: %s", dir)
+	} else {
+		sub, err := fs.Sub(embeddedFrontend, "frontend/dist")
+		if err != nil {
+			log.Fatalf("Failed to access embedded frontend: %v", err)
+		}
+		fileSystem = http.FS(sub)
+		log.Printf("Serving frontend from embedded binary")
+	}
+
+	fileServer := http.FileServer(fileSystem)
+
+	// NoRoute handles all non-API paths: static files + SPA fallback.
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
-		
-		// If it's an API route that reached here, it's a 404 API.
+
 		if strings.HasPrefix(path, "/api/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "API route not found"})
 			return
 		}
 
-		// Try to serve static file from FrontendDir.
-		fullPath := filepath.Join(frontendDir, filepath.FromSlash(path))
-		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
-			c.File(fullPath)
-			return
+		// Serve the file if it exists in the frontend FS.
+		f, err := fileSystem.Open(path)
+		if err == nil {
+			info, err := f.Stat()
+			f.Close()
+			if err == nil && !info.IsDir() {
+				fileServer.ServeHTTP(c.Writer, c.Request)
+				return
+			}
 		}
 
-		// Otherwise, serve index.html for SPA routing.
-		c.File(filepath.Join(frontendDir, "index.html"))
+		// SPA fallback: serve index.html for all unknown paths.
+		index, err := fileSystem.Open("/index.html")
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		defer index.Close()
+		content, _ := io.ReadAll(index)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
 	})
 
 	srv := &http.Server{
@@ -110,8 +133,7 @@ func main() {
 	fundamentalsSvc.StartBackgroundFetcher(ctx)
 
 	go func() {
-		log.Printf("Starting unified gofolio-analysis on :%s", cfg.Port)
-		log.Printf("Serving frontend from: %s", frontendDir)
+		log.Printf("Starting unified portfolio-analysis on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

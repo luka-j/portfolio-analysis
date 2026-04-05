@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/fx"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/fx"
 )
 
 // Service handles calculations for Czech tax returns.

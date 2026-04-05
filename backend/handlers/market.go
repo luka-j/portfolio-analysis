@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/market"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/market"
 )
 
 // MarketHandler handles market data endpoints.

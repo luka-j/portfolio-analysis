@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/fifo"
-	"gofolio-analysis/services/fx"
-	"gofolio-analysis/services/market"
-	"gofolio-analysis/services/stats"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/fifo"
+	"portfolio-analysis/services/fx"
+	"portfolio-analysis/services/market"
+	"portfolio-analysis/services/stats"
 )
 
 // Service reconstructs and values portfolios from FlexQuery data.

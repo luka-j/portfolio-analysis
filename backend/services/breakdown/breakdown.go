@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 const (

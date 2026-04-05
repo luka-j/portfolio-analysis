@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
@@ -42,7 +42,9 @@ function getPeriodDates(period: string, customFrom: string, customTo: string): {
 
 export default function PortfolioPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { privacy } = usePrivacy()
+  const [showWelcome, setShowWelcome] = useState(() => !!(location.state as { firstUpload?: boolean } | null)?.firstUpload)
   const [currency, setCurrency] = usePersistentState('portfolio_currency', 'CZK')
   const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('portfolio_acctModel', 'historical')
   const [period, setPeriod] = usePersistentState('portfolio_period', '1m')
@@ -232,6 +234,30 @@ export default function PortfolioPage() {
           onClose={() => setMappingTarget(null)}
         />
       )}
+      {showWelcome && (
+        <div className="mb-8 flex items-start gap-4 px-5 py-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 shadow-lg shadow-emerald-500/5">
+          <div className="mt-0.5 w-8 h-8 shrink-0 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-emerald-300">Portfolio data successfully uploaded!</p>
+            <p className="mt-0.5 text-xs text-emerald-400/70 leading-relaxed">
+              Use the{' '}
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 text-slate-300 align-middle">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </span>{' '}
+              pencil icon next to each position to adjust Yahoo! Finance symbol mappings.<br/>This ensures accurate price data and performance calculations.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowWelcome(false)}
+            className="shrink-0 text-emerald-400/40 hover:text-emerald-400 transition-colors"
+            aria-label="Dismiss"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      )}
           {/* Header centered */}
           <div className="w-full flex flex-col items-center mb-16 text-center">
             <div className="flex items-center justify-center gap-3">
@@ -269,9 +295,9 @@ export default function PortfolioPage() {
         )}
 
         {loading ? (
-          <Spinner label="Hydrating state…" className="py-24" />
+          <Spinner label="Loading…" className="py-24" />
         ) : positions.length === 0 ? (
-          <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Synchronize your data.</div>
+          <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
         ) : (
           <div className="w-full selection:bg-indigo-500/20">
             {/* Table header */}
@@ -351,25 +377,30 @@ export default function PortfolioPage() {
                                 </HoverTooltip>
                               </div>
                             )}
-                            <button
-                              onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}
-                              className="text-slate-700 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={(e) => handleSparkle(e, pos)}
-                              className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
-                              title="AI market analysis"
-                            >
-                              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
-                                <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
-                                <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
-                              </svg>
-                            </button>
+                            <div className="relative group">
+                              <button
+                                onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}
+                                className="text-slate-700 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              </button>
+                              <HoverTooltip direction="down" className="w-max whitespace-nowrap">Edit Yahoo! symbol</HoverTooltip>
+                            </div>
+                            <div className="relative group">
+                              <button
+                                onClick={(e) => handleSparkle(e, pos)}
+                                className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
+                              >
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                  <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
+                                  <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
+                                  <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
+                                </svg>
+                              </button>
+                              <HoverTooltip direction="down" className="w-max whitespace-nowrap">AI market analysis</HoverTooltip>
+                            </div>
                           </div>
                           <div className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-1 opacity-80">
                             <span>{pos.native_currency}</span>

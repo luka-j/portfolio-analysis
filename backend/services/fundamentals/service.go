@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // QuoteTypeFetcher resolves a symbol's asset class and display name using a free price API (no premium quota).

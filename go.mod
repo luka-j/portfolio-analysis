@@ -2,11 +2,11 @@ module server
 
 go 1.26.1
 
-replace gofolio-analysis => ./backend
+replace portfolio-analysis => ./backend
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	gofolio-analysis v0.0.0-00010101000000-000000000000
+	portfolio-analysis v0.0.0-00010101000000-000000000000
 )
 
 require (

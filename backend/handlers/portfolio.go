@@ -7,12 +7,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gofolio-analysis/middleware"
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/fx"
-	"gofolio-analysis/services/parsers"
-	"gofolio-analysis/services/portfolio"
+	"portfolio-analysis/middleware"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fx"
+	"portfolio-analysis/services/parsers"
+	"portfolio-analysis/services/portfolio"
 )
 
 // PortfolioHandler handles portfolio-related endpoints.
@@ -198,6 +198,7 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 		}
 	}
 
+	result.HasTransactions = len(data.Trades) > 0 || len(data.CashTransactions) > 0
 	c.JSON(http.StatusOK, result)
 }
 

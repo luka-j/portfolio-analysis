@@ -61,3 +61,5 @@ coverage/
 *.sln
 *.sw?
 .DS_Store
+
+.task/

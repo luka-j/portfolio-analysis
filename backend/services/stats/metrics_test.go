@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 
 	"github.com/stretchr/testify/assert"
 )

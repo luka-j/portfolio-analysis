@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/market"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/market"
 )
 
 // parseDateRange extracts and validates from/to query parameters.

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // Lot represents an open buy lot in FIFO matching.

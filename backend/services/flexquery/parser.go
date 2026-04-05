@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 )
 
 // ---------- XML schema for IB FlexQuery reports ----------

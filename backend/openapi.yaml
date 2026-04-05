@@ -1,6 +1,6 @@
 openapi: "3.0.3"
 info:
-  title: Gofolio Analysis API
+  title: Portfolio Analysis API
   description: |
     Portfolio analysis backend. Parses InteractiveBrokers FlexQuery XML reports,
     fetches historical market data from Yahoo Finance, and provides portfolio

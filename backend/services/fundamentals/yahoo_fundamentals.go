@@ -3,8 +3,8 @@ package fundamentals
 import (
 	"time"
 
-	"gofolio-analysis/models"
-	"gofolio-analysis/services/market"
+	"portfolio-analysis/models"
+	"portfolio-analysis/services/market"
 )
 
 // YahooFundamentalsProvider fetches asset fundamentals from Yahoo Finance's

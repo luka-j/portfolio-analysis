@@ -17,15 +17,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gofolio-analysis/config"
-	"gofolio-analysis/models"
-	"gofolio-analysis/router"
-	breakdownsvc "gofolio-analysis/services/breakdown"
-	"gofolio-analysis/services/flexquery"
-	"gofolio-analysis/services/fundamentals"
-	"gofolio-analysis/services/fx"
-	"gofolio-analysis/services/portfolio"
-	"gofolio-analysis/services/tax"
+	"portfolio-analysis/config"
+	"portfolio-analysis/models"
+	"portfolio-analysis/router"
+	breakdownsvc "portfolio-analysis/services/breakdown"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fundamentals"
+	"portfolio-analysis/services/fx"
+	"portfolio-analysis/services/portfolio"
+	"portfolio-analysis/services/tax"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -116,7 +116,7 @@ func (m *mockMarketProvider) GetCurrentPrice(symbol string, cachedOnly bool) (fl
 func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "gofolio-test-*")
+	tmpDir, err := os.MkdirTemp("", "portfolio-test-*")
 	require.NoError(t, err)
 
 	cfg := &config.Config{
@@ -427,7 +427,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 	m.currencies["EUR_BENCH"] = "EUR"
 
 	// Spin up an isolated test server using this mock as both Provider and CurrencyGetter.
-	tmpDir, err := os.MkdirTemp("", "gofolio-fxtest-*")
+	tmpDir, err := os.MkdirTemp("", "portfolio-fxtest-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
@@ -722,7 +722,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
   </FlexStatements>
 </FlexQueryResponse>`)
 
-	tmpDir, err := os.MkdirTemp("", "gofolio-costbasis-test-*")
+	tmpDir, err := os.MkdirTemp("", "portfolio-costbasis-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 

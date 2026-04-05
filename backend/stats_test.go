@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"gofolio-analysis/models"
+	"portfolio-analysis/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
