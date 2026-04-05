@@ -19,6 +19,7 @@
 
 # Go workspace file
 go.work
+go.work.sum
 
 backend/testdata/pp_export.xml
 old_codereview.md

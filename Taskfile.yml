@@ -20,6 +20,15 @@ tasks:
     generates:
       - dist/**/*
 
+  go-work:
+    desc: Generate go.work if it doesn't exist (useful for CI/Docker)
+    status:
+      - test -f go.work
+    cmds:
+      - go work init
+      - go work use . ./backend
+
+
   go-build:
     desc: |
       Compile the Go binary only — frontend/dist must already exist.
@@ -27,6 +36,7 @@ tasks:
       OS: linux | windows | darwin
       ARCH: amd64 | arm64
     internal: false
+    deps: [go-work]
     vars:
       OS: '{{.OS | default "linux"}}'
       ARCH: '{{.ARCH | default "amd64"}}'

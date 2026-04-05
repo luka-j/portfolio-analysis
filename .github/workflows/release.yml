@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ─── Build frontend once, share across all binary jobs ──────────────────────
   frontend:
@@ -36,6 +39,8 @@ jobs:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: frontend
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:

@@ -8,16 +8,15 @@ ARG TARGETARCH
 ARG TARGETOS=linux
 
 # Install Node.js, npm, and Task runner.
-RUN apk add --no-cache nodejs npm curl bash && \
-    sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+RUN apk add --no-cache nodejs npm bash && \
+    go install github.com/go-task/task/v3/cmd/task@latest
 
 WORKDIR /app
 
 # Cache Go modules — layer is reused as long as go files don't change.
-COPY go.work go.work.sum ./
 COPY go.mod go.sum ./
 COPY backend/go.mod backend/go.sum ./backend/
-RUN go work sync
+RUN go work init . ./backend
 
 # Cache npm dependencies — layer is reused as long as package-lock.json doesn't change.
 COPY frontend/package.json frontend/package-lock.json ./frontend/
