@@ -1,0 +1,75 @@
+services:
+  portfolio-analysis:
+    image: ghcr.io/luka-j/portfolio-analysis:latest
+
+    ports:
+      - "8888:8080"
+
+    volumes:
+      # Persists the SQLite database and any data files across container restarts.
+      - data:/app/data
+
+    environment:
+      # ── Required ────────────────────────────────────────────────────────────
+
+      # SQLite (default): a single file inside the named volume.
+      DATABASE_URL: sqlite:/app/data/portfolio.db
+      # PostgreSQL: uncomment and fill in to use Postgres instead.
+      # DATABASE_URL: host=db user=postgres password=secret dbname=portfolio port=5432 sslmode=disable
+      # DATABASE_URL: postgres://postgres:secret@db:5432/portfolio?sslmode=disable
+
+      # ── Auth ────────────────────────────────────────────────────────────────
+
+      # Comma-separated SHA-256 hashes of bearer tokens accepted in X-Auth-Token.
+      # Omit entirely (or leave blank) to run in open/unauthenticated mode.
+      # Generate a hash: echo -n "mysecrettoken" | sha256sum
+      # ALLOWED_TOKEN_HASHES: ${ALLOWED_TOKEN_HASHES}
+
+      # ── Optional: Gemini LLM features ───────────────────────────────────────
+
+      # Enables portfolio summary and chat. Leave unset to disable LLM features.
+      # GEMINI_API_KEY: ${GEMINI_API_KEY}
+
+      # Model used for one-shot portfolio summaries. Default: gemini-3.1-flash-lite-preview
+      # GEMINI_SUMMARY_MODEL: gemini-3.1-flash-lite-preview
+
+      # Model used for multi-turn chat. Default: gemini-3.1-pro-preview
+      # GEMINI_CHAT_MODEL: gemini-3.1-pro-preview
+
+      # ── Optional: Data providers ─────────────────────────────────────────────
+
+      # Comma-separated list of providers for stock/ETF fundamentals. Only Yahoo is supported currently.
+      # FUNDAMENTALS_PROVIDERS: Yahoo
+
+      # Comma-separated list of providers for ETF breakdown weights. Only Yahoo is supported currently.
+      # BREAKDOWN_PROVIDERS: Yahoo
+
+      # ── Optional: Server ─────────────────────────────────────────────────────
+
+      # Internal port the server listens on. Must match the right side of `ports`. Default: 8080
+      # PORT: 8080
+
+      # Directory used for miscellaneous data files. Default: ./data
+      # DATA_DIR: /app/data
+
+      # Allowed CORS origin for the API. Only relevant when frontend is served separately.
+      # CORS_ORIGIN: http://localhost:5173
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Drop all Linux capabilities — the app is a plain HTTP server and needs none.
+    cap_drop:
+      - ALL
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  data:

@@ -45,16 +45,6 @@ func Init(dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("connecting to database: %w", err)
 	}
 
-	// Backfill model column (added later; existing rows used the pro/chat model).
-	database.Exec(`UPDATE llm_caches SET model = 'pro' WHERE model IS NULL OR model = ''`)
-	// Deduplicate llm_caches before migration adds/recreates the unique index.
-	database.Exec(`
-		DELETE FROM llm_caches
-		WHERE id NOT IN (
-			SELECT MAX(id) FROM llm_caches GROUP BY user_hash, prompt_type, model
-		)
-	`)
-
 	log.Println("Migrating database schemas...")
 	err = database.AutoMigrate(
 		&models.User{},
@@ -67,12 +57,6 @@ func Init(dsn string) (*gorm.DB, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("migrating database: %w", err)
-	}
-
-	// Cleanup any corrupted zero-price items previously saved due to Yahoo JSON null values
-	result := database.Where("close = 0 AND volume != -1").Delete(&models.MarketData{})
-	if result.RowsAffected > 0 {
-		log.Printf("Cleaned up %d corrupted zero-price market data rows", result.RowsAffected)
 	}
 
 	return database, nil

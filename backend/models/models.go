@@ -128,10 +128,9 @@ type UploadResponse struct {
 }
 
 // PositionValue shows one position's value in one or more display currencies.
-// Prices, CostBases, and Values are maps keyed by currency code (e.g. "USD", "CZK").
-// They are populated for every currency requested via the ?currencies param.
-// The singular Price/CostBasis/Value fields hold the primary (first) currency for
-// backward compatibility.
+// Prices, CostBases, and Values are maps keyed by currency code (e.g. "USD", "CZK"),
+// populated for every currency requested via the ?currencies param.
+// Price, CostBasis, and Value hold the primary (first) currency as convenience scalars.
 type PositionValue struct {
 	Symbol          string  `json:"symbol"`
 	ListingExchange string  `json:"listing_exchange,omitempty"`
@@ -144,7 +143,6 @@ type PositionValue struct {
 	CostBases map[string]float64 `json:"cost_bases,omitempty"`
 	Values    map[string]float64 `json:"values,omitempty"`
 
-	// Primary-currency scalars (backward compatibility; equal to maps[primary]).
 	Price      float64  `json:"price"`
 	CostBasis  float64  `json:"cost_basis"`
 	RealizedGL float64  `json:"realized_gl"`

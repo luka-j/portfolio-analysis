@@ -55,14 +55,14 @@ func SetupRouter(
 		c.Next()
 	})
 
+	// Health endpoint — unauthenticated, used by load balancers and container runtimes.
+	r.GET("/api/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
 	// API v1 group with auth.
 	api := r.Group("/api/v1")
 	api.Use(middleware.TokenAuth(cfg.AllowedTokenHashes))
-
-	// Health endpoint
-	api.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
-	})
 
 	// Portfolio endpoints.
 	ph := handlers.NewPortfolioHandler(repo, portfolioSvc, fxSvc)

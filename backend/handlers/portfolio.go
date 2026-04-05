@@ -143,8 +143,7 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 		return
 	}
 
-	// Support ?currencies=USD,CZK (plural) with ?currency=USD as fallback.
-	currenciesStr := c.DefaultQuery("currencies", c.DefaultQuery("currency", "USD"))
+	currenciesStr := c.DefaultQuery("currencies", "USD")
 	currencies := splitCurrencies(currenciesStr)
 	primaryCurrency := currencies[0]
 	acctModel := parseAccountingModel(c)

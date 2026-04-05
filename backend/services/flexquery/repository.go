@@ -49,17 +49,12 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 		}
 
 		// If IB provided a stable ID, use it for O(1) dedup.
-		// Fallback to the old float-matching query only for legacy rows without an ID.
+		// Fallback to float-matching for reports that omit TransactionID.
 		if t.TransactionID != "" {
 			var existing models.Transaction
 			err := r.DB.Where("user_id = ? AND transaction_id = ?", user.ID, t.TransactionID).
 				First(&existing).Error
 			if err == nil {
-				// Row already exists. Patch asset_category in case it was stored before
-				// subCategory resolution was added (old rows have "STK" instead of "ETF").
-				if existing.AssetCategory != t.AssetCategory {
-					r.DB.Model(&existing).Update("asset_category", t.AssetCategory)
-				}
 				log.Printf("Duplicate Trade skipped (id=%s): %s", t.TransactionID, t.Symbol)
 				continue
 			}
@@ -70,9 +65,6 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 				user.ID, "Trade", t.Symbol, t.DateTime, t.Quantity-1e-8, t.Quantity+1e-8, t.Price-1e-8, t.Price+1e-8,
 			).First(&existing).Error
 			if err == nil {
-				if existing.AssetCategory != t.AssetCategory {
-					r.DB.Model(&existing).Update("asset_category", t.AssetCategory)
-				}
 				log.Printf("Duplicate Trade skipped: %s %v qty=%v price=%v", t.Symbol, t.DateTime, t.Quantity, t.Price)
 				continue
 			}

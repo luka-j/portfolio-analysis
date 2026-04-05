@@ -409,7 +409,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 
 	// Pre-fetch prices for all symbols we'll need.
 	symbols := s.allSymbols(data)
-	// priceCache: posKey -> date_str -> adj-close price (fix 1.4)
+	// priceCache: posKey -> date_str -> adj-close price
 	priceCache := make(map[string]map[string]float64)
 	validDates := make(map[string]bool)
 	yMap := s.getYahooSymbolMap(data)
@@ -468,7 +468,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		priceCache[pk] = pc
 	}
 
-	// --- Fix 2.1: Pre-fetch FX rate histories before the daily loop ---
+	// Pre-fetch FX rate histories before the daily loop to avoid per-day fetches.
 	// Collect the unique native currencies we'll need to convert.
 	nativeCurrencies := make(map[string]bool)
 	for _, dayHoldings := range dailyHoldings {
@@ -479,7 +479,7 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		}
 	}
 
-	// Fix 1.8: validate single currency when using original accounting model
+	// Validate single currency when using original accounting model.
 	allCurrencies := make(map[string]bool)
 	for _, dayHoldings := range dailyHoldings {
 		for _, h := range dayHoldings {

@@ -242,7 +242,7 @@ export async function uploadEtradeSales(file: File): Promise<EtradeUploadRespons
 }
 
 export async function getPortfolioValue(currency = 'USD', accountingModel = 'historical', cachedOnly = false): Promise<PortfolioValueResponse> {
-  const query = `currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
+  const query = `currencies=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
   return request<PortfolioValueResponse>(`/portfolio/value?${query}`);
 }
 

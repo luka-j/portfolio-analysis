@@ -43,7 +43,7 @@ func (s *Service) Calculate(positions []models.PositionValue, currency string) (
 	for _, pos := range positions {
 		v := pos.Values[currency]
 		if v == 0 {
-			v = pos.Value // fallback for callers that populate the singular field only
+			v = pos.Value // fallback when Values map doesn't contain this currency
 		}
 		if v <= 0 {
 			continue
