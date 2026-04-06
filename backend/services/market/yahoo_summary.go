@@ -371,12 +371,21 @@ func (s *YahooFinanceService) doQuoteSummary(symbol, crumb, modules string) (*ET
 	req.Header.Set("User-Agent", yahooUserAgent)
 	req.Header.Set("Accept", "application/json")
 
+	requestType := "etf_breakdown"
+	if strings.Contains(modules, "assetProfile") {
+		requestType = "asset_profile"
+	}
+
 	// Use the crumb manager's jar-enabled client so session cookies are sent automatically.
+	start := time.Now()
 	resp, err := s.crumbMgr.client.Do(req)
+	elapsed := time.Since(start)
 	if err != nil {
+		observeYahooRequest("quoteSummary", requestType, 0, elapsed)
 		return nil, nil, fmt.Errorf("quoteSummary request: %w", err)
 	}
 	defer resp.Body.Close()
+	observeYahooRequest("quoteSummary", requestType, resp.StatusCode, elapsed)
 
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return nil, nil, fmt.Errorf("quoteSummary rate limit 429 for %s", symbol)

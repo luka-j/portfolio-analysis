@@ -246,11 +246,15 @@ func (s *YahooFinanceService) GetQuoteType(symbol string) (string, string, error
 	}
 	req.Header.Set("User-Agent", yahooUserAgent)
 
+	start := time.Now()
 	resp, err := s.HTTPClient.Do(req)
+	elapsed := time.Since(start)
 	if err != nil {
+		observeYahooRequest("chart", "quote_type", 0, elapsed)
 		return "", "", fmt.Errorf("yahoo quoteType request: %w", err)
 	}
 	defer resp.Body.Close()
+	observeYahooRequest("chart", "quote_type", resp.StatusCode, elapsed)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", "", fmt.Errorf("yahoo quoteType HTTP %d for %s", resp.StatusCode, symbol)
@@ -313,11 +317,15 @@ func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
 	}
 	req.Header.Set("User-Agent", yahooUserAgent)
 
+	start := time.Now()
 	resp, err := s.HTTPClient.Do(req)
+	elapsed := time.Since(start)
 	if err != nil {
+		observeYahooRequest("chart", "currency", 0, elapsed)
 		return "", fmt.Errorf("yahoo currency request: %w", err)
 	}
 	defer resp.Body.Close()
+	observeYahooRequest("chart", "currency", resp.StatusCode, elapsed)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("yahoo currency HTTP %d for %s", resp.StatusCode, symbol)
@@ -390,11 +398,15 @@ func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (f
 	}
 	req.Header.Set("User-Agent", yahooUserAgent)
 
+	start := time.Now()
 	resp, err := s.HTTPClient.Do(req)
+	elapsed := time.Since(start)
 	if err != nil {
+		observeYahooRequest("chart", "current_price", 0, elapsed)
 		return 0, fmt.Errorf("yahoo current price request: %w", err)
 	}
 	defer resp.Body.Close()
+	observeYahooRequest("chart", "current_price", resp.StatusCode, elapsed)
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("yahoo current price HTTP %d for %s", resp.StatusCode, symbol)
@@ -463,14 +475,18 @@ func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) 
 		}
 		req.Header.Set("User-Agent", yahooUserAgent)
 
+		start := time.Now()
 		resp, err := s.HTTPClient.Do(req)
+		elapsed := time.Since(start)
 		if err != nil {
+			observeYahooRequest("chart", "history", 0, elapsed)
 			lastErr = fmt.Errorf("yahoo finance request: %w", err)
 			continue
 		}
 
 		body, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
+		observeYahooRequest("chart", "history", resp.StatusCode, elapsed)
 		if err != nil {
 			lastErr = fmt.Errorf("reading yahoo response: %w", err)
 			continue

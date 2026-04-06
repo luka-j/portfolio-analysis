@@ -9,6 +9,7 @@ import (
 // Config holds all application configuration.
 type Config struct {
 	Port               string
+	MetricsPort        string   // METRICS_PORT, default "9090"
 	DataDir            string
 	DatabaseURL        string
 	AllowedTokenHashes []string // SHA-256 hashes of allowed tokens; empty = open mode
@@ -27,6 +28,7 @@ type Config struct {
 func Load() *Config {
 	cfg := &Config{
 		Port:        getEnv("PORT", "8080"),
+		MetricsPort: getEnv("METRICS_PORT", "9090"),
 		DataDir:     getEnv("DATA_DIR", "./data"),
 		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=portfolio port=5432 sslmode=disable"),
 		CORSOrigin:  getEnv("CORS_ORIGIN", "http://localhost:5173"),

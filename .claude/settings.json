@@ -19,7 +19,9 @@
       "Bash(find backend:*)",
       "Bash(find . -maxdepth 1 -name \"*.go\" -exec sed -i 's|\"gofolio-analysis/|\"portfolio-analysis/|g' {} +)",
       "Bash(find /d/projects/gofolio-analysis/frontend/src -type f \\\\\\( -name \"*.ts\" -o -name \"*.tsx\" \\\\\\) -exec wc -l {} +)",
-      "Bash(grep -n \"CalculateStandaloneMetrics\\\\|CalculateTWR\\\\|CalculateMWR\\\\|CalculateBenchmarkMetrics\" /d/projects/gofolio-analysis/backend/services/stats/*.go)"
+      "Bash(grep -n \"CalculateStandaloneMetrics\\\\|CalculateTWR\\\\|CalculateMWR\\\\|CalculateBenchmarkMetrics\" /d/projects/gofolio-analysis/backend/services/stats/*.go)",
+      "Bash(go get:*)",
+      "Bash(go work:*)"
     ]
   }
 }

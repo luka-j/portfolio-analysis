@@ -4,6 +4,7 @@ services:
 
     ports:
       - "8888:8080"
+      - "9098:9090"
 
     volumes:
       # Persists the SQLite database and any data files across container restarts.
@@ -48,6 +49,9 @@ services:
 
       # Internal port the server listens on. Must match the right side of `ports`. Default: 8080
       # PORT: 8080
+
+      # Port for the Prometheus /metrics endpoint. Must match the right side of `ports`. Default: 9090
+      # METRICS_PORT: 9090
 
       # Directory used for miscellaneous data files. Default: ./data
       # DATA_DIR: /app/data

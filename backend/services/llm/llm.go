@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 	"gorm.io/gorm"
@@ -185,17 +186,29 @@ func (s *Service) buildPortfolioJSONFromCustom(weights []CustomWeight) string {
 }
 
 // callGemini sends a multi-turn content slice to Gemini and returns the text response.
-func (s *Service) callGemini(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (string, error) {
+// callType labels the metric ("summary" or "analysis").
+func (s *Service) callGemini(ctx context.Context, model, callType string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (string, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: s.APIKey})
 	if err != nil {
 		return "", fmt.Errorf("creating genai client: %w", err)
 	}
 
-	log.Printf("DEBUG: callGemini [model=%s turns=%d]", model, len(contents))
+	log.Printf("DEBUG: callGemini [model=%s callType=%s turns=%d]", model, callType, len(contents))
+	start := time.Now()
 	resp, err := client.Models.GenerateContent(ctx, model, contents, cfg)
+	elapsed := time.Since(start)
 	if err != nil {
 		log.Printf("ERROR: Gemini GenerateContent failed [model=%s]: %v", model, err)
+		geminiRequests.WithLabelValues(model, callType, "error").Inc()
+		geminiRequestDuration.WithLabelValues(model, callType).Observe(elapsed.Seconds())
 		return "", fmt.Errorf("generating content: %w", err)
+	}
+
+	geminiRequests.WithLabelValues(model, callType, "ok").Inc()
+	geminiRequestDuration.WithLabelValues(model, callType).Observe(elapsed.Seconds())
+	if resp.UsageMetadata != nil {
+		geminiInputTokens.WithLabelValues(model, callType).Add(float64(resp.UsageMetadata.PromptTokenCount))
+		geminiOutputTokens.WithLabelValues(model, callType).Add(float64(resp.UsageMetadata.CandidatesTokenCount))
 	}
 
 	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
@@ -260,7 +273,7 @@ Keep each bullet point under 30 words.`, periodText)
 		},
 	}
 
-	return s.callGemini(ctx, s.SummaryModel, genai.Text(prompt), cfg)
+	return s.callGemini(ctx, s.SummaryModel, "summary", genai.Text(prompt), cfg)
 }
 
 // AnalyzePortfolio executes portfolio analysis with optional multi-turn history.
@@ -351,5 +364,5 @@ func (s *Service) AnalyzePortfolio(
 		},
 	}
 
-	return s.callGemini(ctx, model, contents, cfg)
+	return s.callGemini(ctx, model, "analysis", contents, cfg)
 }

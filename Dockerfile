@@ -42,6 +42,8 @@ ARG TARGETOS=linux
 COPY --from=builder /app/dist/portfolio-analysis-${TARGETOS}-${TARGETARCH} ./portfolio-analysis
 
 ENV PORT=8080
+ENV METRICS_PORT=9090
 EXPOSE 8080
+EXPOSE 9090
 
 ENTRYPOINT ["./portfolio-analysis"]

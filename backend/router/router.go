@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	ginprometheus "github.com/zsais/go-gin-prometheus"
 	"gorm.io/gorm"
 
 	"portfolio-analysis/config"
@@ -36,6 +37,12 @@ func SetupRouter(
 	llmService *llm.Service,
 ) *gin.Engine {
 	r := gin.New()
+
+	// Prometheus metrics — instrumented per-path; served on a separate port.
+	p := ginprometheus.NewPrometheus("gin")
+	p.SetListenAddress(":" + cfg.MetricsPort)
+	p.Use(r)
+
 	r.Use(gin.Logger())
 	r.Use(gin.RecoveryWithWriter(gin.DefaultErrorWriter, func(c *gin.Context, err any) {
 		log.Printf("panic recovered: %v", err)
