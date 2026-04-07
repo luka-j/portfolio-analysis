@@ -36,8 +36,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({ error: resp.statusText }));
-    throw new Error(body.error || resp.statusText);
+    let errorMsg: string;
+    try {
+      const body = await resp.json();
+      errorMsg = body.error || resp.statusText || `Request failed (${resp.status})`;
+    } catch {
+      // Non-JSON response (e.g. HTML error page from nginx)
+      if (resp.status === 413) {
+        errorMsg = 'File too large';
+      } else {
+        errorMsg = resp.statusText || `Request failed (${resp.status})`;
+      }
+    }
+    throw new Error(errorMsg);
   }
 
   return resp.json();
