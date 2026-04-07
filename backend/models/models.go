@@ -155,11 +155,14 @@ type PositionValue struct {
 }
 
 // PortfolioValueResponse is the response for GET /portfolio/value.
+// When PendingCash > 0, a synthetic PENDING_CASH position is included in Positions
+// representing sale proceeds that have not yet been reinvested.
 type PortfolioValueResponse struct {
 	Value           float64         `json:"value"`
 	Currency        string          `json:"currency"`
 	Positions       []PositionValue `json:"positions"`
 	HasTransactions bool            `json:"has_transactions"`
+	PendingCash     float64         `json:"pending_cash,omitempty"`
 }
 
 // TradeEntry is a frontend-friendly representation of a single trade.

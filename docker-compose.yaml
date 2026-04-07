@@ -59,6 +59,10 @@ services:
       # Allowed CORS origin for the API. Only relevant when frontend is served separately.
       # CORS_ORIGIN: http://localhost:5173
 
+      # Number of days proceeds from a sale are kept in a virtual "bucket" to fund purchases,
+      # avoiding artificial portfolio inflows/outflows for cross-broker trades. Default: 30
+      # CASH_BUCKET_EXPIRY_DAYS: 30
+
     restart: unless-stopped
 
     healthcheck:

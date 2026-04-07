@@ -3,6 +3,12 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      docker_tag:
+        description: 'Docker image tag'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -90,6 +96,7 @@ jobs:
         run: task go-build OS=${{ matrix.goos }} ARCH=${{ matrix.goarch }}
 
       - name: Upload to release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/portfolio-analysis-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
@@ -128,6 +135,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest
+            type=raw,value=${{ inputs.docker_tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6

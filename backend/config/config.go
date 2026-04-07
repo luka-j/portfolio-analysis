@@ -19,9 +19,14 @@ type Config struct {
 	FundamentalsProviders string // FUNDAMENTALS_PROVIDERS, default "Yahoo"
 	BreakdownProviders    string // BREAKDOWN_PROVIDERS,    default "Yahoo"
 
-	GeminiAPIKey       string // GEMINI_API_KEY
+	GeminiAPIKey     string // GEMINI_API_KEY
 	GeminiFlashModel string // GEMINI_FLASH_MODEL, default "gemini-3.1-flash-lite-preview"
 	GeminiProModel   string // GEMINI_PRO_MODEL,   default "gemini-3.1-pro-preview"
+
+	// CashBucketExpiryDays is the number of days sale proceeds are held in a
+	// temporary bucket before being counted as a real portfolio outflow. Set to
+	// 0 to disable the feature and revert to the legacy behaviour.
+	CashBucketExpiryDays int // CASH_BUCKET_EXPIRY_DAYS, default 30
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -36,9 +41,11 @@ func Load() *Config {
 		FundamentalsProviders: getEnv("FUNDAMENTALS_PROVIDERS", "Yahoo"),
 		BreakdownProviders:    getEnv("BREAKDOWN_PROVIDERS", "Yahoo"),
 
-		GeminiAPIKey:       getEnv("GEMINI_API_KEY", ""),
+		GeminiAPIKey:     getEnv("GEMINI_API_KEY", ""),
 		GeminiFlashModel: getEnv("GEMINI_FLASH_MODEL", "gemini-3.1-flash-lite-preview"),
 		GeminiProModel:   getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
+
+		CashBucketExpiryDays: getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
 	}
 
 	if v := os.Getenv("ALLOWED_TOKEN_HASHES"); v != "" {

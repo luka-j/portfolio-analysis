@@ -48,6 +48,12 @@ func (s *Service) Calculate(positions []models.PositionValue, currency string) (
 		if v <= 0 {
 			continue
 		}
+		// PENDING_CASH is a synthetic position representing unsettled sale proceeds.
+		if pos.Symbol == "PENDING_CASH" {
+			posValues = append(posValues, positionWithValue{symbol: "PENDING_CASH", value: v})
+			totalPortfolioValue += v
+			continue
+		}
 		eff := pos.YahooSymbol
 		if eff == "" {
 			eff = pos.Symbol
@@ -67,6 +73,15 @@ func (s *Service) Calculate(positions []models.PositionValue, currency string) (
 	byBondRating := make(map[string]float64)
 
 	for _, pos := range posValues {
+		// PENDING_CASH is classified as Cash and excluded from country/sector breakdowns.
+		if pos.symbol == "PENDING_CASH" {
+			byType["Cash"] += pos.value
+			byAsset["Pending Cash"] += pos.value
+			byCountry["Cash (excluded)"] += pos.value
+			bySector["Cash (excluded)"] += pos.value
+			continue
+		}
+
 		fund, err := s.loadFundamentals(pos.symbol)
 		if err != nil {
 			return nil, err

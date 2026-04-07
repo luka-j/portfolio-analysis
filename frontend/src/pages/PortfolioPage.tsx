@@ -334,6 +334,7 @@ export default function PortfolioPage() {
             {/* Rows */}
             <div className="divide-y divide-[#2a2e42]/40">
               {sortedPositions.map(pos => {
+                const isPendingCash = pos.symbol === 'PENDING_CASH'
                 const value = pos.value || 0
                 const price = pos.price || 0
                 const costBasis = pos.cost_basis || 0
@@ -345,6 +346,56 @@ export default function PortfolioPage() {
                 const posKey = pos.listing_exchange ? `${pos.symbol}@${pos.listing_exchange}` : pos.symbol
                 const isExpanded = expanded === posKey
                 const ph = priceHistory[posKey]
+
+                if (isPendingCash) {
+                  return (
+                    <div key="PENDING_CASH">
+                      <div
+                        className="grid gap-4 px-8 py-4 items-center hover:bg-white/2 transition-all duration-300"
+                        style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
+                      >
+                        {/* Symbol cell */}
+                        <div className="col-span-2 flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-amber-500/10 to-yellow-500/10 flex items-center justify-center text-xs font-bold text-amber-400 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
+                            $
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold flex items-center gap-2 text-slate-100 text-sm tracking-tight">
+                              <div className="relative group">
+                                <span className="cursor-default">Pending Cash</span>
+                                <HoverTooltip className="w-72" direction="down">
+                                  Cash from recent sales waiting to be reinvested. Purchases within 30 days use this cash instead of counting as new deposits. After 30 days without reinvestment, the cash is counted as a portfolio withdrawal.
+                                </HoverTooltip>
+                              </div>
+                            </div>
+                            <div className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-1 opacity-80">
+                              <span>{currency === 'Original' ? pos.native_currency : currency}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="col-span-1 text-right text-sm text-slate-600 tabular-nums">—</div>
+                        <div className="col-span-2 text-right text-sm text-slate-600 tabular-nums">—</div>
+
+                        <div className="col-span-2 text-right text-sm font-semibold text-slate-100 tabular-nums">
+                          {privacy ? '—' : formatCurrency(value, currency, pos.native_currency)}
+                        </div>
+                        <div className="col-span-2 text-right">
+                          <div className="inline-flex items-center gap-3">
+                            <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
+                              <div className="h-full bg-amber-500 rounded-full shadow-[0_0_12px_rgba(245,158,11,0.4)]" style={{ width: `${Math.min(pct, 100)}%` }} />
+                            </div>
+                            <span className="text-xs font-medium text-slate-400 tabular-nums w-10 text-right">{pct.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                        <div className="col-span-2 text-right text-slate-600 opacity-40">—</div>
+                        <div className="col-span-2 text-right text-slate-600 opacity-40">—</div>
+                        <div className="col-span-2 text-right text-slate-600 opacity-40">—</div>
+                        <div className="col-span-1" />
+                      </div>
+                    </div>
+                  )
+                }
 
                 return (
                   <div key={posKey}>

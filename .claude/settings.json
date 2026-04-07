@@ -25,7 +25,8 @@
       "Bash(./node_modules/.bin/tsc --noEmit)",
       "WebSearch",
       "Bash(gh api:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(grep -E \"\\\\.\\(go\\)$\")"
     ]
   }
 }

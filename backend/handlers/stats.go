@@ -80,7 +80,7 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel, false)
+	cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel, false, to)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

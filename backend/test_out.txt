@@ -1,0 +1,24 @@
+ok  	portfolio-analysis	(cached)
+?   	portfolio-analysis/config	[no test files]
+ok  	portfolio-analysis/db	(cached)
+?   	portfolio-analysis/handlers	[no test files]
+?   	portfolio-analysis/middleware	[no test files]
+?   	portfolio-analysis/models	[no test files]
+?   	portfolio-analysis/router	[no test files]
+ok  	portfolio-analysis/services/breakdown	(cached)
+ok  	portfolio-analysis/services/cashbucket	(cached)
+ok  	portfolio-analysis/services/fifo	(cached)
+ok  	portfolio-analysis/services/flexquery	(cached)
+ok  	portfolio-analysis/services/fundamentals	(cached)
+?   	portfolio-analysis/services/fx	[no test files]
+?   	portfolio-analysis/services/llm	[no test files]
+ok  	portfolio-analysis/services/market	(cached)
+ok  	portfolio-analysis/services/parsers	(cached)
+--- FAIL: TestGetDailyReturns_DatesOffsetSkip (0.00s)
+    portfolio_test.go:191: Expected recovered period start date to be 2024-10-03, got 2024-10-01
+    portfolio_test.go:194: Expected recovered period end date to be 2024-10-04, got 2024-10-02
+FAIL
+FAIL	portfolio-analysis/services/portfolio	0.233s
+ok  	portfolio-analysis/services/stats	(cached)
+ok  	portfolio-analysis/services/tax	(cached)
+FAIL

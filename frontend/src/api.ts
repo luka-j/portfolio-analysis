@@ -76,6 +76,7 @@ export interface PortfolioValueResponse {
   currency: string;
   positions: PositionValue[];
   has_transactions: boolean;
+  pending_cash?: number;
 }
 
 export interface DailyValue {

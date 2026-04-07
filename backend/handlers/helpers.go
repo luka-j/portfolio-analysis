@@ -190,7 +190,7 @@ func computePortfolioMetrics(
 	if err != nil {
 		return nil, fmt.Errorf("computing daily values: %w", err)
 	}
-	cashFlows, err := ps.GetCashFlows(data, currency, acctModel, false)
+	cashFlows, err := ps.GetCashFlows(data, currency, acctModel, false, to)
 	if err != nil {
 		return nil, fmt.Errorf("computing cash flows: %w", err)
 	}

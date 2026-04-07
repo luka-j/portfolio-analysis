@@ -70,7 +70,7 @@ func buildServices(cfg *config.Config, database *gorm.DB) *services {
 	cnbSvc := market.NewCNBProvider(database)
 	fxSvc := fx.NewService(marketSvc, cnbSvc)
 	repo := flexquery.NewRepository(database)
-	portfolioSvc := portfolio.NewService(marketSvc, fxSvc, marketSvc)
+	portfolioSvc := portfolio.NewService(marketSvc, fxSvc, marketSvc, cfg.CashBucketExpiryDays)
 	taxSvc := tax.NewService(fxSvc)
 
 	yahooFundamentalsProvider := fundamentals.NewYahooFundamentalsProvider(marketSvc, 30)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"portfolio-analysis/models"
+	"portfolio-analysis/services/cashbucket"
 	"portfolio-analysis/services/fifo"
 	"portfolio-analysis/services/fx"
 	"portfolio-analysis/services/market"
@@ -19,11 +20,12 @@ type Service struct {
 	MarketProvider       market.Provider
 	CurrentPriceProvider market.CurrentPriceProvider
 	FXService            *fx.Service
+	CashBucketExpiryDays int
 }
 
 // NewService creates a new portfolio service.
-func NewService(mp market.Provider, fxSvc *fx.Service, cpp market.CurrentPriceProvider) *Service {
-	return &Service{MarketProvider: mp, CurrentPriceProvider: cpp, FXService: fxSvc}
+func NewService(mp market.Provider, fxSvc *fx.Service, cpp market.CurrentPriceProvider, cashBucketExpiryDays int) *Service {
+	return &Service{MarketProvider: mp, CurrentPriceProvider: cpp, FXService: fxSvc, CashBucketExpiryDays: cashBucketExpiryDays}
 }
 
 // isFXTrade delegates to the centralized check in models.
@@ -177,10 +179,29 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 		})
 	}
 
+	// Compute pending cash from unsettled sale buckets.
+	pendingCash, err := s.computePendingCash(data, currency, acctModel, cachedOnly, today)
+	if err != nil {
+		log.Printf("Warning: computing pending cash: %v", err)
+	} else if pendingCash > 0 {
+		totalValue += pendingCash
+		positions = append(positions, models.PositionValue{
+			Symbol:         "PENDING_CASH",
+			NativeCurrency: currency,
+			Prices:         map[string]float64{currency: 1},
+			CostBases:      map[string]float64{currency: 0},
+			Values:         map[string]float64{currency: pendingCash},
+			Price:          1,
+			Value:          pendingCash,
+			Quantity:       pendingCash,
+		})
+	}
+
 	return &models.PortfolioValueResponse{
 		Value:     totalValue,
 		Currency:  currency,
 		Positions: positions,
+		PendingCash: pendingCash,
 	}, nil
 }
 
@@ -589,31 +610,19 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 	}, nil
 }
 
-// GetCashFlows returns external cash flows for IRR calculation, converted to the target currency.
-func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) ([]models.CashFlow, error) {
-	var flows []models.CashFlow
-
+// GetCashFlows returns external cash flows for IRR/TWR calculation, converted to the target currency.
+// It applies cash-bucket logic to prevent cross-broker reinvestments from appearing as outflows+inflows.
+func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) ([]models.CashFlow, error) {
+	var rawTradeFlows []models.Trade
 	for _, t := range data.Trades {
 		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
 			continue
 		}
-		// A buy introduces cash into the equity portfolio (Deposit). t.Proceeds is negative.
-		// A sell extracts cash (Withdrawal). t.Proceeds is positive.
-		amount := t.Proceeds + t.Commission
-		var err error
-		if t.Currency != currency && acctModel != models.AccountingModelOriginal {
-			if acctModel == models.AccountingModelSpot {
-				amount, err = s.FXService.ConvertSpot(amount, t.Currency, currency, cachedOnly)
-			} else {
-				amount, err = s.FXService.Convert(amount, t.Currency, currency, t.DateTime, cachedOnly)
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
-		flows = append(flows, models.CashFlow{Date: t.DateTime, Amount: amount})
+		rawTradeFlows = append(rawTradeFlows, t)
 	}
 
+	// Collect dividend/withholding flows (pass through unchanged).
+	var dividendFlows []models.CashFlow
 	for _, ct := range data.CashTransactions {
 		isValidTx := ct.Type == "Dividends" ||
 			ct.Type == "Withholding Tax" ||
@@ -633,10 +642,26 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 				return nil, err
 			}
 		}
-		flows = append(flows, models.CashFlow{Date: ct.DateTime, Amount: amount})
+		dividendFlows = append(dividendFlows, models.CashFlow{Date: ct.DateTime, Amount: amount})
 	}
-	sort.Slice(flows, func(i, j int) bool { return flows[i].Date.Before(flows[j].Date) })
-	return flows, nil
+
+	// Build a convert function for the cashbucket processor.
+	convertFn := func(amount float64, from string, date time.Time) (float64, error) {
+		if from == currency || acctModel == models.AccountingModelOriginal {
+			return amount, nil
+		}
+		if acctModel == models.AccountingModelSpot {
+			return s.FXService.ConvertSpot(amount, from, currency, cachedOnly)
+		}
+		return s.FXService.Convert(amount, from, currency, date, cachedOnly)
+	}
+
+	result, err := cashbucket.Process(rawTradeFlows, dividendFlows, s.CashBucketExpiryDays, asOf, convertFn)
+	if err != nil {
+		return nil, fmt.Errorf("cashbucket.Process: %w", err)
+	}
+
+	return result.AdjustedCashFlows, nil
 }
 
 // GetDailyReturns returns cash-flow-adjusted daily portfolio return series for statistics.
@@ -648,7 +673,7 @@ func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time
 		return nil, nil, nil, err
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel, false)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, false, to)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -767,7 +792,7 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 		}, nil
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly, to)
 	if err != nil {
 		return nil, err
 	}
@@ -833,7 +858,7 @@ func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Tim
 		}, nil
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly, to)
 	if err != nil {
 		return nil, err
 	}
@@ -919,4 +944,35 @@ func (s *Service) allSymbols(data *models.FlexQueryData) []string {
 	}
 	sort.Strings(syms)
 	return syms
+}
+
+// computePendingCash returns the current aggregate value of all active (non-expired) cash buckets.
+func (s *Service) computePendingCash(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) (float64, error) {
+	if s.CashBucketExpiryDays == 0 {
+		return 0, nil
+	}
+
+	var trades []models.Trade
+	for _, t := range data.Trades {
+		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
+			continue
+		}
+		trades = append(trades, t)
+	}
+
+	convertFn := func(amount float64, from string, date time.Time) (float64, error) {
+		if from == currency || acctModel == models.AccountingModelOriginal {
+			return amount, nil
+		}
+		if acctModel == models.AccountingModelSpot {
+			return s.FXService.ConvertSpot(amount, from, currency, cachedOnly)
+		}
+		return s.FXService.Convert(amount, from, currency, date, cachedOnly)
+	}
+
+	result, err := cashbucket.Process(trades, nil, s.CashBucketExpiryDays, asOf, convertFn)
+	if err != nil {
+		return 0, fmt.Errorf("computePendingCash: %w", err)
+	}
+	return result.PendingCash, nil
 }

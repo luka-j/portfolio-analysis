@@ -103,6 +103,7 @@ export DATABASE_URL="sqlite:portfolio.db"
 export PORT=8080
 # export ALLOWED_TOKEN_HASHES="a1b2c3..."
 # export GEMINI_API_KEY="AIza..."
+# export CASH_BUCKET_EXPIRY_DAYS=30
 
 ./portfolio-analysis-linux-amd64
 ```
