@@ -502,7 +502,7 @@ func TestMultipleUsers(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "user2 should be auto-created and succeed")
-	
+
 	var result models.PortfolioValueResponse
 	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
@@ -550,33 +550,33 @@ func TestGetPortfolioTrades(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-			var result map[string]interface{}
-			err := json.NewDecoder(resp.Body).Decode(&result)
-			require.NoError(t, err)
+		var result map[string]interface{}
+		err := json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
 
-			assert.Equal(t, "AAPL", result["symbol"])
-			assert.Equal(t, "USD", result["currency"])
-			assert.Equal(t, "CZK", result["display_currency"])
+		assert.Equal(t, "AAPL", result["symbol"])
+		assert.Equal(t, "USD", result["currency"])
+		assert.Equal(t, "CZK", result["display_currency"])
 
-			// Sample data has 3 AAPL trades: Buy 10@185, Buy 5@175, Sell 5@195
-			trades, _ := result["trades"].([]interface{})
-			require.Len(t, trades, 3, "AAPL should have 3 trades")
+		// Sample data has 3 AAPL trades: Buy 10@185, Buy 5@175, Sell 5@195
+		trades, _ := result["trades"].([]interface{})
+		require.Len(t, trades, 3, "AAPL should have 3 trades")
 
-			first := trades[0].(map[string]interface{})
-			assert.Equal(t, "SELL", first["side"])
-			assert.Equal(t, 5.0, first["quantity"])
-			assert.Equal(t, 195.0, first["price"])
-			assert.Equal(t, "USD", first["native_currency"])
-			assert.Equal(t, "2024-06-10", first["date"])
+		first := trades[0].(map[string]interface{})
+		assert.Equal(t, "SELL", first["side"])
+		assert.Equal(t, 5.0, first["quantity"])
+		assert.Equal(t, 195.0, first["price"])
+		assert.Equal(t, "USD", first["native_currency"])
+		assert.Equal(t, "2024-06-10", first["date"])
 
-			// ConvertedPrice should be price * USDCZK rate (23.50)
-			assert.InDelta(t, 195.0*23.50, first["converted_price"].(float64), 0.01,
-				"converted price should be native price * USDCZK rate")
+		// ConvertedPrice should be price * USDCZK rate (23.50)
+		assert.InDelta(t, 195.0*23.50, first["converted_price"].(float64), 0.01,
+			"converted price should be native price * USDCZK rate")
 
-			last := trades[2].(map[string]interface{})
-			assert.Equal(t, "BUY", last["side"])
-			assert.Equal(t, 10.0, last["quantity"])
-			assert.Equal(t, 185.0, last["price"])
+		last := trades[2].(map[string]interface{})
+		assert.Equal(t, "BUY", last["side"])
+		assert.Equal(t, 10.0, last["quantity"])
+		assert.Equal(t, 185.0, last["price"])
 	})
 
 	t.Run("AAPL trades in native currency", func(t *testing.T) {
@@ -692,7 +692,7 @@ func TestCostBasisInPortfolioValue(t *testing.T) {
 	t.Run("VWCE.DE computed cost basis from trades (EUR)", func(t *testing.T) {
 		vwce, ok := bySymbol["VWCE.DE"]
 		require.True(t, ok, "VWCE.DE should be in positions")
-		// VWCE.DE cost in XML=100 EUR. 
+		// VWCE.DE cost in XML=100 EUR.
 		// Currencies=USD requested, so cost is converted: 100 EUR * 1.087 EUR/USD = 108.7 USD
 		expected := 108.7
 		assert.InDelta(t, expected, vwce.CostBases["USD"], 0.01,
@@ -847,7 +847,7 @@ func TestPortfolioValueAccountingModels(t *testing.T) {
 	uploadFlexQuery(t, ts, testToken)
 
 	currencies := "USD,CZK"
-	
+
 	t.Run("spot model", func(t *testing.T) {
 		resp := doGet(t, ts, "/api/v1/portfolio/value?currencies="+currencies+"&accounting_model=spot", testToken)
 		defer resp.Body.Close()

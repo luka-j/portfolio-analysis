@@ -31,8 +31,8 @@ func NewService(db *gorm.DB) *Service {
 
 // positionWithValue combines a position and its total value in the display currency.
 type positionWithValue struct {
-	symbol   string
-	value    float64
+	symbol string
+	value  float64
 }
 
 // Calculate returns a complete BreakdownResponse for the given positions.
@@ -60,10 +60,10 @@ func (s *Service) Calculate(positions []models.PositionValue, currency string) (
 		return &models.BreakdownResponse{Currency: currency, Sections: nil}, nil
 	}
 
-	byType       := make(map[string]float64)
-	byAsset      := make(map[string]float64)
-	byCountry    := make(map[string]float64)
-	bySector     := make(map[string]float64)
+	byType := make(map[string]float64)
+	byAsset := make(map[string]float64)
+	byCountry := make(map[string]float64)
+	bySector := make(map[string]float64)
 	byBondRating := make(map[string]float64)
 
 	for _, pos := range posValues {
@@ -129,10 +129,10 @@ func (s *Service) Calculate(positions []models.PositionValue, currency string) (
 			byAsset[label] += pos.value
 
 			country := "Unknown"
-			sector  := "Unknown"
+			sector := "Unknown"
 			if fund != nil {
 				country = fund.Country
-				sector  = fund.Sector
+				sector = fund.Sector
 			}
 			// Commodities are excluded from geographic/sector breakdowns.
 			if assetType == "Commodity" {

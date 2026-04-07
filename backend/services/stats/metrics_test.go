@@ -74,7 +74,7 @@ func TestCalculateMWR_EdgeCases(t *testing.T) {
 		// which should be approx 0.001
 		assert.InDelta(t, 0.001, mwr, 1e-9)
 	})
-	
+
 	t.Run("Empty portfolio with withdrawal", func(t *testing.T) {
 		// This might cause Newton's method to struggle or converge to odd values.
 		cf := []models.CashFlow{
@@ -123,7 +123,7 @@ func TestCalculateTWR_EdgeCases(t *testing.T) {
 			{Date: "2023-01-02", Value: 1650},
 		}
 		cf := []models.CashFlow{
-			{Date: time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC), Amount: -500}, // Deposit is negative in models.CashFlow for MWR... 
+			{Date: time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC), Amount: -500}, // Deposit is negative in models.CashFlow for MWR...
 			// Wait, check returning.go line 110: cfAmount := cfDates[dateStr]
 			// line 112: adjustedPrevValue := prevValue - cfAmount
 			// If deposit is negative, - (-500) = +500. Correct.

@@ -21,19 +21,19 @@ func NewService(fxSvc *fx.Service) *Service {
 }
 
 type TaxTransaction struct {
-	Type            string  `json:"type"`                       // "ESPP_VEST", "RSU_VEST", or "SELL"
-	Symbol          string  `json:"symbol"`
-	Date            string  `json:"date"`                       // YYYY-MM-DD
-	Quantity        float64 `json:"quantity"`
-	NativePrice     float64 `json:"native_price"`
-	Currency        string  `json:"currency"`
-	ExchangeRate    float64 `json:"exchange_rate"`              // CZK rate for the primary event
-	CostCZK         float64 `json:"cost_czk"`
-	BenefitCZK      float64 `json:"benefit_czk"`
-	BuyDate         string  `json:"buy_date,omitempty"`         // For paired sells
-	BuyRate         float64 `json:"buy_rate,omitempty"`         // Exchange rate on buy
-	BuyCommission   float64 `json:"buy_commission,omitempty"`   // Pro-rated buy commission, native currency
-	SellCommission  float64 `json:"sell_commission,omitempty"`  // Pro-rated sell commission, native currency
+	Type           string  `json:"type"` // "ESPP_VEST", "RSU_VEST", or "SELL"
+	Symbol         string  `json:"symbol"`
+	Date           string  `json:"date"` // YYYY-MM-DD
+	Quantity       float64 `json:"quantity"`
+	NativePrice    float64 `json:"native_price"`
+	Currency       string  `json:"currency"`
+	ExchangeRate   float64 `json:"exchange_rate"` // CZK rate for the primary event
+	CostCZK        float64 `json:"cost_czk"`
+	BenefitCZK     float64 `json:"benefit_czk"`
+	BuyDate        string  `json:"buy_date,omitempty"`        // For paired sells
+	BuyRate        float64 `json:"buy_rate,omitempty"`        // Exchange rate on buy
+	BuyCommission  float64 `json:"buy_commission,omitempty"`  // Pro-rated buy commission, native currency
+	SellCommission float64 `json:"sell_commission,omitempty"` // Pro-rated sell commission, native currency
 }
 
 type TaxReportSection struct {

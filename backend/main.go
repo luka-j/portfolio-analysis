@@ -60,7 +60,7 @@ func main() {
 	)
 	breakdownService := breakdownsvc.NewService(database)
 
-	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiSummaryModel, cfg.GeminiChatModel, database, portfolioSvc)
+	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, database, portfolioSvc)
 
 	// Build Gin engine.
 	r := router.SetupRouter(cfg, repo, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)

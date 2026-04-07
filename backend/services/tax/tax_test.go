@@ -154,19 +154,19 @@ func TestInvestmentIncomeFIFO(t *testing.T) {
 	// Tx 1: matches 10 from 2020
 	assert.Equal(t, 10.0, inv.Transactions[0].Quantity)
 	assert.Equal(t, "2020-01-01", inv.Transactions[0].BuyDate)
-	assert.InDelta(t, 10*200*25.0, inv.Transactions[0].CostCZK, 0.01) // 50,000 CZK
+	assert.InDelta(t, 10*200*25.0, inv.Transactions[0].CostCZK, 0.01)    // 50,000 CZK
 	assert.InDelta(t, 10*300*25.0, inv.Transactions[0].BenefitCZK, 0.01) // 75,000 CZK
 
 	// Tx 2: matches 2 from 2024
 	assert.Equal(t, 2.0, inv.Transactions[1].Quantity)
 	assert.Equal(t, "2024-01-01", inv.Transactions[1].BuyDate)
-	assert.InDelta(t, 2*250*25.0, inv.Transactions[1].CostCZK, 0.01) // 12,500 CZK
+	assert.InDelta(t, 2*250*25.0, inv.Transactions[1].CostCZK, 0.01)    // 12,500 CZK
 	assert.InDelta(t, 2*300*25.0, inv.Transactions[1].BenefitCZK, 0.01) // 15,000 CZK
 
 	// Tx 3: matches 3 from 2024
 	assert.Equal(t, 3.0, inv.Transactions[2].Quantity)
 	assert.Equal(t, "2024-01-01", inv.Transactions[2].BuyDate)
-	assert.InDelta(t, 3*250*25.0, inv.Transactions[2].CostCZK, 0.01) // 18,750 CZK
+	assert.InDelta(t, 3*250*25.0, inv.Transactions[2].CostCZK, 0.01)    // 18,750 CZK
 	assert.InDelta(t, 3*350*25.0, inv.Transactions[2].BenefitCZK, 0.01) // 26,250 CZK
 
 	totalCost := inv.TotalCostCZK
@@ -251,14 +251,14 @@ func TestCommissionMultiLotSell(t *testing.T) {
 	tx0 := inv.Transactions[0]
 	assert.InDelta(t, 1.0, tx0.BuyCommission, 0.001)
 	assert.InDelta(t, 1.25, tx0.SellCommission, 0.001)
-	assert.InDelta(t, 5*100*25.0+1.0*25.0, tx0.CostCZK, 0.01)    // 12,525 CZK
+	assert.InDelta(t, 5*100*25.0+1.0*25.0, tx0.CostCZK, 0.01)     // 12,525 CZK
 	assert.InDelta(t, 5*150*25.0-1.25*25.0, tx0.BenefitCZK, 0.01) // 18,718.75 CZK
 
 	// Lot 2 (3 shares from 2021): buyComm=3/5*1.00=0.60, sellComm=3/8*2.00=0.75
 	tx1 := inv.Transactions[1]
 	assert.InDelta(t, 0.6, tx1.BuyCommission, 0.001)
 	assert.InDelta(t, 0.75, tx1.SellCommission, 0.001)
-	assert.InDelta(t, 3*120*25.0+0.6*25.0, tx1.CostCZK, 0.01)    // 9,015 CZK
+	assert.InDelta(t, 3*120*25.0+0.6*25.0, tx1.CostCZK, 0.01)     // 9,015 CZK
 	assert.InDelta(t, 3*150*25.0-0.75*25.0, tx1.BenefitCZK, 0.01) // 11,231.25 CZK
 
 	assert.InDelta(t, 21540.0, inv.TotalCostCZK, 0.01)

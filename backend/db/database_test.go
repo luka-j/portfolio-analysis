@@ -15,7 +15,7 @@ func TestInitSQLite(t *testing.T) {
 	database, err := Init("sqlite:" + dbPath)
 	assert.NoError(t, err)
 	assert.NotNil(t, database)
-	
+
 	// Test if it can actually write/read something (migration should have run)
 	// We can check if tables exist by querying GORM's Migrator
 	assert.True(t, database.Migrator().HasTable("users"))

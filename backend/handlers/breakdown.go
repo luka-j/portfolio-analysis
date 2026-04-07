@@ -7,10 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"portfolio-analysis/middleware"
+	"portfolio-analysis/models"
 	breakdownsvc "portfolio-analysis/services/breakdown"
 	"portfolio-analysis/services/flexquery"
 	"portfolio-analysis/services/fundamentals"
-	"portfolio-analysis/models"
 	"portfolio-analysis/services/portfolio"
 )
 

@@ -9,7 +9,7 @@ import (
 // Config holds all application configuration.
 type Config struct {
 	Port               string
-	MetricsPort        string   // METRICS_PORT, default "9090"
+	MetricsPort        string // METRICS_PORT, default "9090"
 	DataDir            string
 	DatabaseURL        string
 	AllowedTokenHashes []string // SHA-256 hashes of allowed tokens; empty = open mode
@@ -19,9 +19,9 @@ type Config struct {
 	FundamentalsProviders string // FUNDAMENTALS_PROVIDERS, default "Yahoo"
 	BreakdownProviders    string // BREAKDOWN_PROVIDERS,    default "Yahoo"
 
-	GeminiAPIKey      string // GEMINI_API_KEY
-	GeminiSummaryModel string // GEMINI_SUMMARY_MODEL, default "gemini-3.1-flash-lite-preview"
-	GeminiChatModel    string // GEMINI_CHAT_MODEL,    default "gemini-3.1-pro-preview"
+	GeminiAPIKey       string // GEMINI_API_KEY
+	GeminiFlashModel string // GEMINI_FLASH_MODEL, default "gemini-3.1-flash-lite-preview"
+	GeminiProModel   string // GEMINI_PRO_MODEL,   default "gemini-3.1-pro-preview"
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -37,8 +37,8 @@ func Load() *Config {
 		BreakdownProviders:    getEnv("BREAKDOWN_PROVIDERS", "Yahoo"),
 
 		GeminiAPIKey:       getEnv("GEMINI_API_KEY", ""),
-		GeminiSummaryModel: getEnv("GEMINI_SUMMARY_MODEL", "gemini-3.1-flash-lite-preview"),
-		GeminiChatModel:    getEnv("GEMINI_CHAT_MODEL", "gemini-3.1-pro-preview"),
+		GeminiFlashModel: getEnv("GEMINI_FLASH_MODEL", "gemini-3.1-flash-lite-preview"),
+		GeminiProModel:   getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
 	}
 
 	if v := os.Getenv("ALLOWED_TOKEN_HASHES"); v != "" {

@@ -190,7 +190,7 @@ func parseRSU(rows [][]string, headerMap map[string]int) []models.Transaction {
 		if len(parts) == 2 && vd.date != "" && vd.qty > 0 {
 			gn := parts[0]
 			fmv := vd.gain / vd.qty
-			
+
 			d1, err := parseEtradeDate(vd.date)
 			if err == nil {
 				fmvMap[gn+"_"+d1.Format("2006-01-02")] = fmv
@@ -203,7 +203,7 @@ func parseRSU(rows [][]string, headerMap map[string]int) []models.Transaction {
 		if err != nil {
 			continue
 		}
-		
+
 		dateKey := t.Format("2006-01-02")
 		fmv := fmvMap[ev.grantNumber+"_"+dateKey]
 		symbol := grantSymbols[ev.grantNumber]
@@ -294,15 +294,15 @@ func ParseGainsLosses(r io.Reader) ([]models.Transaction, error) {
 			}
 
 			txn := models.Transaction{
-				Type:     "Trade",
-				Symbol:   symbol,
-				Currency: "USD", // ETrade is typically USD
-				DateTime: date,
-				Quantity: -qty, // Sell is negative quantity
-				Price:    price,
-				Proceeds: proceeds,
+				Type:          "Trade",
+				Symbol:        symbol,
+				Currency:      "USD", // ETrade is typically USD
+				DateTime:      date,
+				Quantity:      -qty, // Sell is negative quantity
+				Price:         price,
+				Proceeds:      proceeds,
 				AssetCategory: "STK",
-				BuySell: "SELL",
+				BuySell:       "SELL",
 			}
 			results = append(results, txn)
 		}

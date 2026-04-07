@@ -34,7 +34,7 @@ Required env vars — see `backend/run.ps1` for a working local example:
 - `ALLOWED_TOKEN_HASHES` — comma-separated SHA-256 hashes of auth tokens; omit for open mode
 
 Optional:
-- `GEMINI_API_KEY` — enables LLM features (summary, chat). Models configured via `GEMINI_SUMMARY_MODEL` / `GEMINI_CHAT_MODEL`.
+- `GEMINI_API_KEY` — enables LLM features (summary, chat). Models configured via `GEMINI_FLASH_MODEL` / `GEMINI_PRO_MODEL`.
 - `FUNDAMENTALS_PROVIDERS` / `BREAKDOWN_PROVIDERS` — comma-separated provider names (default: `"Yahoo"`)
 
 ## Architecture

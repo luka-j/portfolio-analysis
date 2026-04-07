@@ -69,7 +69,7 @@ func main() {
 	)
 	breakdownService := breakdownsvc.NewService(database)
 
-	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiSummaryModel, cfg.GeminiChatModel, database, portfolioSvc)
+	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, database, portfolioSvc)
 
 	// Build Gin engine using the backend router setup.
 	r := router.SetupRouter(cfg, repo, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
@@ -133,7 +133,7 @@ func main() {
 	fundamentalsSvc.StartBackgroundFetcher(ctx)
 
 	go func() {
-		log.Printf("Starting unified portfolio-analysis on :%s", cfg.Port)
+		log.Printf("Starting portfolio-analysis on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

@@ -33,48 +33,27 @@ type PortfolioContextItem struct {
 	WeightPct float64 `json:"weight_pct"`
 }
 
-// CannedPrompt holds the configuration for a predefined system prompt.
-type CannedPrompt struct {
-	Message string
-}
-
-// CannedPrompts is the registry of available predefined prompts.
-var CannedPrompts = map[string]CannedPrompt{
-	"general_analysis": {
-		Message: "Analyze my current portfolio given current market conditions. What am I effectively betting on?\nStructure your response using these exact markdown headers:\n### 🌍 Macro Environment\n### 📊 Sector Concentration\n### 🎯 Implicit Bets",
-	},
-	"best_worst_scenarios": {
-		Message: "Analyze my current portfolio.\nFirst, use a <thinking> block to list out major macroeconomic tailwinds and headwinds for these specific tickers.\nThen, outside of the block, explain the best and worst realistic scenarios for my portfolio in the short-to-medium term.",
-	},
-}
-
-// IsValidCannedType returns true if the specified type is registered.
-func IsValidCannedType(promptType string) bool {
-	_, ok := CannedPrompts[promptType]
-	return ok
-}
-
 // ConversationTurn represents one turn in a multi-turn chat history.
 type ConversationTurn struct {
-	Role    string `json:"role"`    // "user" | "assistant"
+	Role    string `json:"role"` // "user" | "assistant"
 	Content string `json:"content"`
 }
 
 // Service provides LLM interactions via Gemini.
 type Service struct {
 	APIKey           string
-	SummaryModel     string
-	ChatModel        string
+	FlashModel       string
+	ProModel         string
 	DB               *gorm.DB
 	PortfolioService *portfolio.Service
 }
 
 // NewService creates a new LLM Service.
-func NewService(apiKey, summaryModel, chatModel string, db *gorm.DB, ps *portfolio.Service) *Service {
+func NewService(apiKey, flashModel, proModel string, db *gorm.DB, ps *portfolio.Service) *Service {
 	return &Service{
 		APIKey:           apiKey,
-		SummaryModel:     summaryModel,
-		ChatModel:        chatModel,
+		FlashModel:       flashModel,
+		ProModel:         proModel,
 		DB:               db,
 		PortfolioService: ps,
 	}
@@ -85,12 +64,12 @@ func (s *Service) isAvailable() bool {
 	return s.APIKey != ""
 }
 
-// resolveModel maps "flash"/"pro" to the configured model name. Empty string → ChatModel.
-func (s *Service) resolveModel(override string) string {
+// ResolveModel maps "flash"/"pro" to the configured model name. Empty string → ProModel.
+func (s *Service) ResolveModel(override string) string {
 	if override == "flash" {
-		return s.SummaryModel
+		return s.FlashModel
 	}
-	return s.ChatModel
+	return s.ProModel
 }
 
 // lookupNames batch-queries asset_fundamentals for the given symbols and returns a symbol→name map.
@@ -113,8 +92,8 @@ func (s *Service) lookupNames(symbols []string) map[string]string {
 }
 
 // getPortfolioJSON creates a compact JSON string of the latest portfolio weights with security names.
-func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string) string {
-	result, err := s.PortfolioService.GetCurrentValue(data, currency, models.AccountingModelSpot, false)
+func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) string {
+	result, err := s.PortfolioService.GetCurrentValue(data, currency, acctModel, false)
 	if err != nil {
 		log.Printf("WARN: getPortfolioJSON failed to get current value: %v", err)
 		return ""
@@ -240,7 +219,7 @@ func (s *Service) GetMarketSummary(ctx context.Context, data *models.FlexQueryDa
 		return "", ErrNotConfigured
 	}
 
-	portfolioJSON := s.getPortfolioJSON(data, currency)
+	portfolioJSON := s.getPortfolioJSON(data, currency, models.AccountingModelSpot)
 
 	periodMap := map[string]string{
 		"1d": "the past day",
@@ -252,12 +231,8 @@ func (s *Service) GetMarketSummary(ctx context.Context, data *models.FlexQueryDa
 		periodText = "the past day"
 	}
 
-	prompt := fmt.Sprintf(`Provide a brief market summary formatted as two short bullet points covering %s:
-- **Macro:** Focus on macroeconomic factors that had the biggest impact on the market.
-- **Portfolio:** Very briefly explain the biggest market movements in the <portfolio_data> provided, citing specific tickers.
-
-Keep each bullet point under 30 words.`, periodText)
-
+	cp := CannedPrompts["market_summary"]
+	prompt := cp.Render(map[string]string{"period": periodText})
 	if portfolioJSON != "" {
 		prompt += fmt.Sprintf("\n\nHere is the user's current portfolio data:\n<portfolio_data>\n%s\n</portfolio_data>", portfolioJSON)
 	}
@@ -265,7 +240,7 @@ Keep each bullet point under 30 words.`, periodText)
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{
-				{Text: "You are an expert, professional financial analyst. Provide concise, impactful summaries. Use short information-filled sentences. Avoid overly long compound sentences. Respect the length requirement."},
+				{Text: cp.SystemInstruction},
 			},
 		},
 		Tools: []*genai.Tool{
@@ -273,14 +248,15 @@ Keep each bullet point under 30 words.`, periodText)
 		},
 	}
 
-	return s.callGemini(ctx, s.SummaryModel, "summary", genai.Text(prompt), cfg)
+	return s.callGemini(ctx, s.FlashModel, "summary", genai.Text(prompt), cfg)
 }
 
 // AnalyzePortfolio executes portfolio analysis with optional multi-turn history.
-// modelOverride: "flash" or "pro" (empty → ChatModel).
+// modelOverride: "flash" or "pro" (empty → ProModel).
 // includePortfolio: if false, omit portfolio context (freeform only; canned always includes).
 // customWeights: if non-nil, use instead of live portfolio (freeform only).
 // history: prior conversation turns (freeform only; canned is always single-turn).
+// message must already be the fully rendered prompt text (the handler pre-renders canned prompts).
 func (s *Service) AnalyzePortfolio(
 	ctx context.Context,
 	data *models.FlexQueryData,
@@ -288,6 +264,7 @@ func (s *Service) AnalyzePortfolio(
 	includePortfolio bool,
 	customWeights []CustomWeight,
 	history []ConversationTurn,
+	acctModel string,
 ) (string, error) {
 	if !s.isAvailable() {
 		return "", ErrNotConfigured
@@ -301,35 +278,30 @@ func (s *Service) AnalyzePortfolio(
 		if !isCanned && customWeights != nil {
 			portfolioJSON = s.buildPortfolioJSONFromCustom(customWeights)
 		} else {
-			portfolioJSON = s.getPortfolioJSON(data, currency)
+			parsedAcct := models.ParseAccountingModel(acctModel)
+			portfolioJSON = s.getPortfolioJSON(data, currency, parsedAcct)
 		}
 	}
 
 	// Build system instruction — persona + portfolio context baked in once,
 	// so it does not need to be repeated across conversation turns.
-	sysText := "You are an expert, professional financial analyst.\n" +
+	var defaultSystemInstruction = "You are an expert, professional financial analyst.\n" +
 		"Focus on macroeconomic factors that affect the specific assets in the user's portfolio. " +
-		"Notice specifically if a ticker they hold has seen significant news lately.\n\n" +
-		"<constraints>\n" +
-		"- DO NOT provide personalized financial advice (e.g., never say \"You should sell X\").\n" +
-		"- DO NOT invent or hallucinate news events. If you are unsure about recent news for a ticker, state that explicitly.\n" +
-		"- DO NOT speculate on exact future price targets.\n" +
-		"</constraints>"
+		"Notice specifically if a ticker they hold has seen significant news lately."
+
+	sysBase := defaultSystemInstruction
+	if isCanned && CannedPrompts[cannedType].SystemInstruction != "" {
+		sysBase = CannedPrompts[cannedType].SystemInstruction
+	}
+
+	sysText := sysBase + "\n\n" + defaultConstraints
+
 	if portfolioJSON != "" {
 		sysText += "\n\nHere is the user's current portfolio data:\n<portfolio_data>\n" + portfolioJSON + "\n</portfolio_data>"
 	}
 
-	// Resolve the user-facing question for this turn.
-	var currentMessage string
-	if isCanned {
-		if cp, ok := CannedPrompts[cannedType]; ok {
-			currentMessage = cp.Message
-		} else {
-			currentMessage = message // Fallback
-		}
-	} else {
-		currentMessage = message
-	}
+	// message is already fully rendered by the handler (canned or freeform).
+	currentMessage := message
 
 	// Build contents: prior history turns + current user message.
 	// Canned prompts are always single-turn (history ignored).
@@ -351,7 +323,7 @@ func (s *Service) AnalyzePortfolio(
 		Parts: []*genai.Part{{Text: currentMessage}},
 	})
 
-	model := s.resolveModel(modelOverride)
+	model := s.ResolveModel(modelOverride)
 	log.Printf("DEBUG: AnalyzePortfolio [model=%s cannedType=%s historyTurns=%d includePortfolio=%v]",
 		model, cannedType, len(history), includePortfolio)
 

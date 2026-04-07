@@ -6,31 +6,31 @@ import (
 
 // User represents a user in the database.
 type User struct {
-	ID        uint      `gorm:"primaryKey"`
-	TokenHash string    `gorm:"uniqueIndex;not null"`
+	ID        uint   `gorm:"primaryKey"`
+	TokenHash string `gorm:"uniqueIndex;not null"`
 	CreatedAt time.Time
 }
 
 // Transaction represents a trade or cash cash transaction from FlexQuery.
 type Transaction struct {
-	ID            uint      `gorm:"primaryKey"`
-	UserID        uint      `gorm:"index;not null"`
-	Type          string    `gorm:"index;not null"` // e.g. "Trade", "Deposits/Withdrawals", "Dividends"
-	TransactionID string    `gorm:"index"` // IB's native tradeID / transactionID — used for deduplication
-	Symbol        string    `gorm:"index"`
-	Currency      string    `gorm:"not null"`
-	DateTime      time.Time `gorm:"index;not null"`
-	Quantity      float64
-	Price         float64
-	Amount        float64
-	Proceeds      float64
-	Commission    float64
-	BuySell          string
-	ListingExchange  string `gorm:"index"`
-	Description   string
-	YahooSymbol   string    `gorm:"index"`
-	AssetCategory string
-	TaxCostBasis  *float64
+	ID              uint      `gorm:"primaryKey"`
+	UserID          uint      `gorm:"index;not null"`
+	Type            string    `gorm:"index;not null"` // e.g. "Trade", "Deposits/Withdrawals", "Dividends"
+	TransactionID   string    `gorm:"index"`          // IB's native tradeID / transactionID — used for deduplication
+	Symbol          string    `gorm:"index"`
+	Currency        string    `gorm:"not null"`
+	DateTime        time.Time `gorm:"index;not null"`
+	Quantity        float64
+	Price           float64
+	Amount          float64
+	Proceeds        float64
+	Commission      float64
+	BuySell         string
+	ListingExchange string `gorm:"index"`
+	Description     string
+	YahooSymbol     string `gorm:"index"`
+	AssetCategory   string
+	TaxCostBasis    *float64
 }
 
 // MarketData represents cached end-of-day price data from Yahoo Finance.
@@ -44,18 +44,18 @@ type MarketData struct {
 	Close    float64
 	AdjClose float64
 	Volume   int64
-	Provider string    `gorm:"default:'Yahoo'"`
+	Provider string `gorm:"default:'Yahoo'"`
 }
 
 // AssetFundamental stores fundamentals for a single security (stock, ETF, commodity).
 // Symbol is the effective ticker used to query external APIs (YahooSymbol if set, else broker Symbol).
 type AssetFundamental struct {
-	ID          uint      `gorm:"primaryKey"`
-	Symbol      string    `gorm:"uniqueIndex;not null"` // effective ticker (e.g. AAPL, VWCE.DE)
+	ID          uint   `gorm:"primaryKey"`
+	Symbol      string `gorm:"uniqueIndex;not null"` // effective ticker (e.g. AAPL, VWCE.DE)
 	Name        string
-	AssetType   string    `gorm:"index"` // "Stock", "ETF", "Bond ETF", "Commodity", "Unknown"
-	Country     string    `gorm:"index"`
-	Sector      string    `gorm:"index"`
+	AssetType   string `gorm:"index"` // "Stock", "ETF", "Bond ETF", "Commodity", "Unknown"
+	Country     string `gorm:"index"`
+	Sector      string `gorm:"index"`
 	Exchange    string
 	Currency    string    // native trading currency, e.g. "USD", "EUR" (from IB transactions or Yahoo)
 	Duration    *float64  // bond ETF: effective duration in years (from Yahoo bondHoldings)
@@ -68,17 +68,17 @@ type AssetFundamental struct {
 type EtfBreakdown struct {
 	ID          uint      `gorm:"primaryKey"`
 	FundSymbol  string    `gorm:"uniqueIndex:idx_etf_bd;not null;index"` // e.g. "VWCE.DE"
-	Dimension   string    `gorm:"uniqueIndex:idx_etf_bd;not null"`        // "sector" or "country"
-	Label       string    `gorm:"uniqueIndex:idx_etf_bd;not null"`        // e.g. "Technology", "United States"
-	Weight      float64                                                   // fraction 0.0–1.0
-	DataSource  string                                                    // "Yahoo"
+	Dimension   string    `gorm:"uniqueIndex:idx_etf_bd;not null"`       // "sector" or "country"
+	Label       string    `gorm:"uniqueIndex:idx_etf_bd;not null"`       // e.g. "Technology", "United States"
+	Weight      float64   // fraction 0.0–1.0
+	DataSource  string    // "Yahoo"
 	LastUpdated time.Time `gorm:"index"`
 }
 
 // CurrentPrice stores the most recently fetched real-time market price for a symbol.
 type CurrentPrice struct {
-	ID        uint      `gorm:"primaryKey"`
-	Symbol    string    `gorm:"uniqueIndex;not null"`
+	ID        uint   `gorm:"primaryKey"`
+	Symbol    string `gorm:"uniqueIndex;not null"`
 	Price     float64
 	FetchedAt time.Time `gorm:"index"`
 }

@@ -24,7 +24,7 @@ func TestCNBProvider(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/cnbapi/exrates/daily", r.URL.Path)
 		assert.Contains(t, r.URL.Query().Get("date"), "2025-01-02")
-		
+
 		response := `{
 			"rates": [
 				{"validFor": "2025-01-02", "amount": 1, "currencyCode": "EUR", "rate": 25.50},
@@ -38,7 +38,7 @@ func TestCNBProvider(t *testing.T) {
 	defer ts.Close()
 
 	provider := NewCNBProvider(db)
-	
+
 	// Override the HTTPClient to redirect all API calls to the mock server
 	// We do this by swapping out the Transport
 	origTransport := http.DefaultTransport

@@ -21,7 +21,8 @@
       "Bash(find /d/projects/gofolio-analysis/frontend/src -type f \\\\\\( -name \"*.ts\" -o -name \"*.tsx\" \\\\\\) -exec wc -l {} +)",
       "Bash(grep -n \"CalculateStandaloneMetrics\\\\|CalculateTWR\\\\|CalculateMWR\\\\|CalculateBenchmarkMetrics\" /d/projects/gofolio-analysis/backend/services/stats/*.go)",
       "Bash(go get:*)",
-      "Bash(go work:*)"
+      "Bash(go work:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

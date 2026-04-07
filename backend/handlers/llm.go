@@ -2,43 +2,52 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"portfolio-analysis/middleware"
 	"portfolio-analysis/models"
 	"portfolio-analysis/services/flexquery"
 	"portfolio-analysis/services/llm"
+	"portfolio-analysis/services/market"
+	"portfolio-analysis/services/portfolio"
 )
 
 // LLMHandler manages LLM text generation and AI analysis endpoints.
 type LLMHandler struct {
-	Repo *flexquery.Repository
-	DB   *gorm.DB
-	LLM  *llm.Service
+	Repo             *flexquery.Repository
+	DB               *gorm.DB
+	LLM              *llm.Service
+	PortfolioService *portfolio.Service
+	MarketProvider   market.Provider
+	CurrencyGetter   market.CurrencyGetter
 }
 
 // NewLLMHandler creates a new handler.
-func NewLLMHandler(repo *flexquery.Repository, db *gorm.DB, llmSvc *llm.Service) *LLMHandler {
+func NewLLMHandler(
+	repo *flexquery.Repository,
+	db *gorm.DB,
+	llmSvc *llm.Service,
+	ps *portfolio.Service,
+	mp market.Provider,
+	cg market.CurrencyGetter,
+) *LLMHandler {
 	return &LLMHandler{
-		Repo: repo,
-		DB:   db,
-		LLM:  llmSvc,
+		Repo:             repo,
+		DB:               db,
+		LLM:              llmSvc,
+		PortfolioService: ps,
+		MarketProvider:   mp,
+		CurrencyGetter:   cg,
 	}
-}
-
-// normalizeModel maps client model strings to canonical cache keys.
-// Anything other than "flash" is treated as "pro".
-func normalizeModel(m string) string {
-	if m == "flash" {
-		return "flash"
-	}
-	return "pro"
 }
 
 // IsAvailable handles GET /api/v1/llm/available
@@ -67,11 +76,11 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 	currency := c.DefaultQuery("currency", "USD")
 	forceRefresh := c.Query("force_refresh") == "true"
 	promptType := "summary_" + period
-	model := "pro" // summary always uses the flash model internally; "pro" is just the cache key default
+	modelKey := h.LLM.FlashModel
 
 	// Check Cache (valid for 8h, skipped when force_refresh=true)
 	var cacheEntry models.LLMCache
-	cacheFound := h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, promptType, model).First(&cacheEntry).Error == nil
+	cacheFound := h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, promptType, modelKey).First(&cacheEntry).Error == nil
 	if !forceRefresh && cacheFound && time.Since(cacheEntry.CreatedAt) < 8*time.Hour {
 		c.JSON(http.StatusOK, gin.H{"summary": cacheEntry.Response})
 		return
@@ -97,13 +106,19 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	// Save Cache — Save performs UPDATE when ID is set (cache hit), INSERT otherwise.
+	// Upsert Cache entry
 	cacheEntry.UserHash = userHash
 	cacheEntry.PromptType = promptType
-	cacheEntry.Model = model
+	cacheEntry.Model = modelKey
 	cacheEntry.Response = summary
 	cacheEntry.CreatedAt = time.Now()
-	if err := h.DB.Save(&cacheEntry).Error; err != nil {
+	
+	err = h.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
+		DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
+	}).Create(&cacheEntry).Error
+	
+	if err != nil {
 		log.Printf("WARN: GetSummary failed to save cache [user=%s period=%s]: %v", userHash[:8], period, err)
 	}
 
@@ -112,13 +127,28 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 
 // ChatRequest defines the payload for LLM chatting.
 type ChatRequest struct {
-	PromptType       string                  `json:"prompt_type"`       // "general_analysis", "best_worst_scenarios", "freeform"
-	Message          string                  `json:"message"`
-	Currency         string                  `json:"currency"`
-	Model            string                  `json:"model"`             // "flash" | "pro" (default "pro")
-	IncludePortfolio *bool                   `json:"include_portfolio"` // nil = default true; ignored for canned
-	CustomWeights    []llm.CustomWeight      `json:"custom_weights"`    // nil = live portfolio; ignored for canned
-	History          []llm.ConversationTurn  `json:"history"`           // prior turns; ignored for canned
+	PromptType string `json:"prompt_type"` // "general_analysis", "best_worst_scenarios", "ticker_analysis", "risk_metrics", "benchmark_analysis", "upcoming_events", "freeform"
+	Message    string `json:"message"`
+	Currency   string `json:"currency"`
+	Model      string `json:"model"` // "flash" | "pro" (default "pro")
+
+	// Freeform-only fields (ignored for canned prompts).
+	IncludePortfolio         *bool                  `json:"include_portfolio"`          // nil = default true
+	OverridePortfolioWeights []llm.CustomWeight     `json:"override_portfolio_weights"` // overrides live portfolio weights
+	History                  []llm.ConversationTurn `json:"history"`                    // prior conversation turns
+
+	// ticker_analysis
+	Symbol string `json:"symbol"` // ticker symbol to analyse
+
+	// risk_metrics and benchmark_analysis
+	From            string  `json:"from"`             // ISO date YYYY-MM-DD
+	To              string  `json:"to"`               // ISO date YYYY-MM-DD
+	AccountingModel string  `json:"accounting_model"` // "historical" | "spot" (default "historical")
+	RiskFreeRate    float64 `json:"risk_free_rate"`   // annualised; 0 → defaults to 0.05
+	ForceRefresh    bool    `json:"force_refresh"`
+
+	// benchmark_analysis
+	BenchmarkSymbol string `json:"benchmark_symbol"`
 }
 
 // Chat handles POST /api/v1/llm/chat
@@ -143,16 +173,16 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	model := normalizeModel(req.Model)
+	modelKey := h.LLM.ResolveModel(req.Model)
 
-	// includePortfolio and customWeights only apply to freeform
+	// includePortfolio and override weights only apply to freeform.
 	includePortfolio := true
 	if req.IncludePortfolio != nil && cannedType == "" {
 		includePortfolio = *req.IncludePortfolio
 	}
-	var customWeights []llm.CustomWeight
-	if cannedType == "" && req.CustomWeights != nil {
-		customWeights = req.CustomWeights
+	var overrideWeights []llm.CustomWeight
+	if cannedType == "" && req.OverridePortfolioWeights != nil {
+		overrideWeights = req.OverridePortfolioWeights
 	}
 
 	data, err := h.Repo.LoadSaved(userHash)
@@ -162,19 +192,31 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// Cache retrieval for canned (keyed by user, prompt type, and model)
+	// Cache retrieval for cacheable canned prompts (keyed by user, prompt type, and model).
 	var cacheEntry models.LLMCache
+	if cannedType != "" && llm.CannedPrompts[cannedType].Cacheable {
+		cacheFound := h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, req.PromptType, modelKey).First(&cacheEntry).Error == nil
+		if cacheFound && !req.ForceRefresh && time.Since(cacheEntry.CreatedAt) < 8*time.Hour {
+			c.JSON(http.StatusOK, gin.H{"response": cacheEntry.Response, "cached": true})
+			return
+		}
+	}
+
+	// Pre-render message: data-driven canned prompts compute their metrics here;
+	// simple canned prompts expand their template; freeform uses req.Message verbatim.
+	message := req.Message
 	if cannedType != "" {
-		cacheFound := h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, req.PromptType, model).First(&cacheEntry).Error == nil
-		if cacheFound && time.Since(cacheEntry.CreatedAt) < 24*time.Hour {
-			c.JSON(http.StatusOK, gin.H{"response": cacheEntry.Response})
+		message, err = h.renderCannedPrompt(req, data)
+		if err != nil {
+			log.Printf("ERROR: renderCannedPrompt failed [user=%s type=%s]: %v", userHash[:8], cannedType, err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "preparing prompt: " + err.Error()})
 			return
 		}
 	}
 
 	// Call LLM
-	log.Printf("INFO: AnalyzePortfolio calling LLM [user=%s prompt_type=%s model=%s currency=%s includePortfolio=%v customWeights=%v]",
-		userHash[:8], req.PromptType, model, req.Currency, includePortfolio, customWeights != nil)
+	log.Printf("INFO: AnalyzePortfolio calling LLM [user=%s prompt_type=%s model=%s currency=%s includePortfolio=%v overrideWeights=%v]",
+		userHash[:8], req.PromptType, modelKey, req.Currency, includePortfolio, overrideWeights != nil)
 	var history []llm.ConversationTurn
 	if cannedType == "" {
 		history = req.History
@@ -183,8 +225,8 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 130*time.Second)
 	defer cancel()
 	response, err := h.LLM.AnalyzePortfolio(
-		reqCtx, data, req.Currency, cannedType, req.Message,
-		req.Model, includePortfolio, customWeights, history,
+		reqCtx, data, req.Currency, cannedType, message,
+		req.Model, includePortfolio, overrideWeights, history, req.AccountingModel,
 	)
 	if err != nil {
 		if errors.Is(err, llm.ErrNotConfigured) {
@@ -201,17 +243,155 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// Save Cache for canned — Save performs UPDATE when ID is set (cache hit), INSERT otherwise.
-	if cannedType != "" {
+	// Upsert Cache for cacheable canned prompts
+	if cannedType != "" && llm.CannedPrompts[cannedType].Cacheable {
 		cacheEntry.UserHash = userHash
 		cacheEntry.PromptType = req.PromptType
-		cacheEntry.Model = model
+		cacheEntry.Model = modelKey
 		cacheEntry.Response = response
 		cacheEntry.CreatedAt = time.Now()
-		if err := h.DB.Save(&cacheEntry).Error; err != nil {
+		
+		err = h.DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
+			DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
+		}).Create(&cacheEntry).Error
+		
+		if err != nil {
 			log.Printf("WARN: Chat failed to save cache [user=%s prompt_type=%s]: %v", userHash[:8], req.PromptType, err)
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"response": response})
+}
+
+// renderCannedPrompt builds the fully-rendered message for a canned prompt type.
+// Data-driven prompts (ticker_analysis, risk_metrics, benchmark_analysis) compute
+// their metrics from the portfolio data; simple prompts expand their template as-is.
+func (h *LLMHandler) renderCannedPrompt(req ChatRequest, data *models.FlexQueryData) (string, error) {
+	cp := llm.CannedPrompts[req.PromptType]
+
+	switch req.PromptType {
+
+	case "ticker_analysis":
+		return h.renderTickerAnalysis(&cp, req)
+
+	case "risk_metrics":
+		return h.renderRiskMetrics(&cp, req, data)
+
+	case "benchmark_analysis":
+		return h.renderBenchmarkAnalysis(&cp, req, data)
+
+	case "upcoming_events":
+		return cp.Render(map[string]string{
+			"current_date": time.Now().Format("Jan 2, 2006"),
+		}), nil
+
+	default:
+		// general_analysis, best_worst_scenarios — no template vars.
+		return cp.Message, nil
+	}
+}
+
+func (h *LLMHandler) renderTickerAnalysis(cp *llm.CannedPrompt, req ChatRequest) (string, error) {
+	if req.Symbol == "" {
+		return "", fmt.Errorf("symbol is required for ticker_analysis")
+	}
+	var fund models.AssetFundamental
+	err := h.DB.Select("name").Where("symbol = ?", req.Symbol).First(&fund).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", fmt.Errorf("database err querying ticker %s: %w", req.Symbol, err)
+	}
+
+	label := req.Symbol
+	if fund.Name != "" {
+		label = req.Symbol + " (" + fund.Name + ")"
+	}
+	return cp.Render(map[string]string{"label": label}), nil
+}
+
+func (h *LLMHandler) renderRiskMetrics(cp *llm.CannedPrompt, req ChatRequest, data *models.FlexQueryData) (string, error) {
+	from, to, err := parseDateStrings(req.From, req.To)
+	if err != nil {
+		return "", fmt.Errorf("invalid dates: %w", err)
+	}
+	rfr := req.RiskFreeRate
+	if rfr == 0 {
+		rfr = 0.05
+	}
+	metrics, err := computePortfolioMetrics(
+		h.PortfolioService, data, from, to,
+		req.Currency, models.ParseAccountingModel(req.AccountingModel), rfr,
+	)
+	if err != nil {
+		return "", fmt.Errorf("computing portfolio metrics: %w", err)
+	}
+	twr, mwr := "N/A", "N/A"
+	if metrics.TWRErr == "" {
+		twr = fmt.Sprintf("%.2f%%", metrics.TWR*100)
+	}
+	if metrics.MWRErr == "" {
+		mwr = fmt.Sprintf("%.2f%%", metrics.MWR*100)
+	}
+	payload := map[string]interface{}{
+		"period":       fmt.Sprintf("%s – %s", from.Format("Jan 2, 2006"), to.Format("Jan 2, 2006")),
+		"twr":          twr,
+		"mwr":          mwr,
+		"sharpe":       fmt.Sprintf("%.3f", metrics.Standalone.SharpeRatio),
+		"sortino":      fmt.Sprintf("%.3f", metrics.Standalone.SortinoRatio),
+		"vami":         fmt.Sprintf("%.1f", metrics.Standalone.VAMI),
+		"volatility":   fmt.Sprintf("%.2f%%", metrics.Standalone.Volatility*100),
+		"max_drawdown": fmt.Sprintf("-%.2f%%", metrics.Standalone.MaxDrawdown*100),
+	}
+	jsonBytes, _ := json.MarshalIndent(payload, "", "  ")
+
+	return cp.Render(map[string]string{
+		"data_json": string(jsonBytes),
+	}), nil
+}
+
+func (h *LLMHandler) renderBenchmarkAnalysis(cp *llm.CannedPrompt, req ChatRequest, data *models.FlexQueryData) (string, error) {
+	if req.BenchmarkSymbol == "" {
+		return "", fmt.Errorf("benchmark_symbol is required for benchmark_analysis")
+	}
+	from, to, err := parseDateStrings(req.From, req.To)
+	if err != nil {
+		return "", fmt.Errorf("invalid dates: %w", err)
+	}
+	rfr := req.RiskFreeRate
+	if rfr == 0 {
+		rfr = 0.05
+	}
+	acctModel := models.ParseAccountingModel(req.AccountingModel)
+	metrics, err := computePortfolioMetrics(h.PortfolioService, data, from, to, req.Currency, acctModel, rfr)
+	if err != nil {
+		return "", fmt.Errorf("computing portfolio metrics: %w", err)
+	}
+	bmMetrics, err := computeBenchmarkComparison(
+		h.MarketProvider, h.CurrencyGetter,
+		metrics.Returns, metrics.StartDates, metrics.EndDates,
+		req.BenchmarkSymbol, from, to, req.Currency, acctModel, rfr,
+	)
+	if err != nil {
+		return "", fmt.Errorf("computing benchmark metrics: %w", err)
+	}
+	payload := map[string]interface{}{
+		"period":         fmt.Sprintf("%s – %s", from.Format("Jan 2, 2006"), to.Format("Jan 2, 2006")),
+		"alpha":          fmt.Sprintf("%.2f%%", bmMetrics.Alpha*100),
+		"beta":           fmt.Sprintf("%.3f", bmMetrics.Beta),
+		"treynor":        fmt.Sprintf("%.4f", bmMetrics.TreynorRatio),
+		"tracking_error": fmt.Sprintf("%.2f%%", bmMetrics.TrackingError*100),
+		"info_ratio":     fmt.Sprintf("%.3f", bmMetrics.InformationRatio),
+		"correlation":    fmt.Sprintf("%.3f", bmMetrics.Correlation),
+		"sharpe":         fmt.Sprintf("%.3f", metrics.Standalone.SharpeRatio),
+		"sortino":        fmt.Sprintf("%.3f", metrics.Standalone.SortinoRatio),
+		"vami":           fmt.Sprintf("%.1f", metrics.Standalone.VAMI),
+		"volatility":     fmt.Sprintf("%.2f%%", metrics.Standalone.Volatility*100),
+		"max_drawdown":   fmt.Sprintf("-%.2f%%", metrics.Standalone.MaxDrawdown*100),
+	}
+	jsonBytes, _ := json.MarshalIndent(payload, "", "  ")
+
+	return cp.Render(map[string]string{
+		"benchmark": req.BenchmarkSymbol,
+		"data_json": string(jsonBytes),
+	}), nil
 }

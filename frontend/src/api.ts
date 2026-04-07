@@ -203,13 +203,25 @@ export interface LLMChatRequest {
   message: string;
   currency: string;
   model?: 'flash' | 'pro';
+  force_refresh?: boolean;
+  // Freeform-only
   include_portfolio?: boolean;
-  custom_weights?: { symbol: string; weight: number }[];
+  override_portfolio_weights?: { symbol: string; weight: number }[];
   history?: { role: 'user' | 'assistant'; content: string }[];
+  // ticker_analysis
+  symbol?: string;
+  // risk_metrics and benchmark_analysis
+  from?: string;
+  to?: string;
+  accounting_model?: string;
+  risk_free_rate?: number;
+  // benchmark_analysis
+  benchmark_symbol?: string;
 }
 
 export interface LLMChatResponse {
   response: string;
+  cached?: boolean;
 }
 
 // ---------- API Calls ----------

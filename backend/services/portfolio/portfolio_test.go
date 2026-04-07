@@ -87,7 +87,7 @@ func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {
 		t.Fatalf("Expected 1 return period over the weekend gap, got %d", len(returns))
 	}
 
-	// 4. Verify the dates are perfectly paired 
+	// 4. Verify the dates are perfectly paired
 	expectedStart := "2024-10-11"
 	expectedEnd := "2024-10-14"
 
@@ -104,10 +104,10 @@ func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {
 	// adjustedPrev = 1000 - (-100) = 1100.
 	// Day 3 (Monday): Holdings = 110. Price = 11. curValue = 110 * 11 = 1210.
 	// return = (1210 / 1100) - 1 = +10% (0.10)
-	// Without the bug fix, it would have been: 
+	// Without the bug fix, it would have been:
 	// Saturday skipped. Monday cfMap empty. adjustedPrev = 1000.
 	// return = (1210 / 1000) - 1 = +21% !!
-	
+
 	expectedReturn := 0.10
 	if math.Abs(returns[0]-expectedReturn) > 1e-6 {
 		t.Errorf("Expected return %f, got %f", expectedReturn, returns[0])
@@ -117,7 +117,7 @@ func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {
 func TestGetDailyReturns_DatesOffsetSkip(t *testing.T) {
 	// Verify that if a day experiences `adjustedPrev <= 0` and is skipped,
 	// the dates slice is not decoupled or offset.
-	
+
 	day1 := time.Date(2024, 10, 1, 0, 0, 0, 0, time.UTC)
 	day2 := day1.AddDate(0, 0, 1)
 	day3 := day1.AddDate(0, 0, 2)
@@ -162,9 +162,9 @@ func TestGetDailyReturns_DatesOffsetSkip(t *testing.T) {
 		prices: map[string][]models.PricePoint{
 			"TEST": {
 				{Date: day1, Close: 10, AdjClose: 10},
-				{Date: day2, Close: 12, AdjClose: 12}, 
-				{Date: day3, Close: 10, AdjClose: 10}, 
-				{Date: day4, Close: 10, AdjClose: 10}, 
+				{Date: day2, Close: 12, AdjClose: 12},
+				{Date: day3, Close: 10, AdjClose: 10},
+				{Date: day4, Close: 10, AdjClose: 10},
 			},
 		},
 	}
@@ -180,12 +180,12 @@ func TestGetDailyReturns_DatesOffsetSkip(t *testing.T) {
 	// Day 1 to Day 2: prev=100. cur=0 (sold). cfAmount=120. adjustedPrev = 100 - 120 = -20. SKIPPED.
 	// Day 2 to Day 3: prev=0. SKIPPED.
 	// Day 3 to Day 4: prev=0. cfAmount=-100. adjustedPrev=100. cur=100. Return = 100/100-1 = 0%.
-	
+
 	if len(returns) != 1 {
 		t.Fatalf("Expected strictly 1 evaluated return due to skips, got %d", len(returns))
 	}
-	
-	// The core bug was that dates were decoupled. 
+
+	// The core bug was that dates were decoupled.
 	// The start date corresponding to this recovered return MUST be day3, not day1.
 	if startDates[0] != day3.Format("2006-01-02") {
 		t.Errorf("Expected recovered period start date to be %v, got %s", day3.Format("2006-01-02"), startDates[0])

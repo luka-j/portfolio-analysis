@@ -20,7 +20,7 @@ func CalculateMWR(cashFlows []models.CashFlow, endValue float64, endDate time.Ti
 	}
 
 	startDate := cashFlows[0].Date
-	
+
 	// Basic validation: we need at least one deposit (negative amount) or some starting value.
 	hasDeposit := false
 	for _, cf := range cashFlows {
@@ -81,14 +81,14 @@ func CalculateMWR(cashFlows []models.CashFlow, endValue float64, endDate time.Ti
 	for i := 0; i < 1000; i++ {
 		f := npv(r)
 		fp := dnpv(r)
-		
+
 		// If derivative is too small or we hit NaN/Inf, stop.
 		if math.Abs(fp) < 1e-15 || math.IsNaN(f) || math.IsInf(f, 0) {
 			break
 		}
-		
+
 		rNew := r - f/fp
-		
+
 		// Safeguard: r must be > -1 (cannot lose more than 100% annualised)
 		if rNew <= -0.999 {
 			rNew = -0.999
@@ -109,10 +109,10 @@ func CalculateMWR(cashFlows []models.CashFlow, endValue float64, endDate time.Ti
 			return 0, fmt.Errorf("MWR did not converge")
 		}
 	}
-	
+
 	// Convert annualized IRR 'r' into the unannualized period return matching TWR.
 	periodReturn := math.Pow(1+r, T) - 1.0
-	
+
 	return periodReturn, nil
 }
 

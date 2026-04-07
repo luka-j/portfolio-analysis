@@ -136,7 +136,8 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 			// Insert a dummy marker at the start of the failing range to prevent future queries.
 			// "No data returned" means Yahoo doesn't know the ticker or date (e.g. pre-IPO).
 			if err.Error() == fmt.Sprintf("no data returned for symbol %s", symbol) ||
-				err.Error() == "yahoo finance error: No data found, symbol may be delisted" {
+				err.Error() == "yahoo finance error: No data found, symbol may be delisted" ||
+				err.Error() == fmt.Sprintf("yahoo returned HTTP 404 for %s", symbol) {
 				_ = s.saveCache(symbol, []models.PricePoint{
 					{Date: rng[0], Volume: -1},
 					{Date: rng[1], Volume: -1},
@@ -202,10 +203,10 @@ type yahooChartResponse struct {
 	Chart struct {
 		Result []struct {
 			Meta struct {
-				QuoteType            string  `json:"quoteType"`
-				LongName             string  `json:"longName"`
-				Currency             string  `json:"currency"`
-				RegularMarketPrice   float64 `json:"regularMarketPrice"`
+				QuoteType          string  `json:"quoteType"`
+				LongName           string  `json:"longName"`
+				Currency           string  `json:"currency"`
+				RegularMarketPrice float64 `json:"regularMarketPrice"`
 			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
@@ -370,6 +371,9 @@ func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (f
 		var cp models.CurrentPrice
 		if err := s.DB.Where("symbol = ?", symbol).First(&cp).Error; err == nil {
 			if cachedOnly || time.Since(cp.FetchedAt) < maxAge {
+				if cp.Price == -1 {
+					return 0, fmt.Errorf("no current price fetched for %s (negative cache)", symbol)
+				}
 				return cp.Price, nil
 			}
 		}
@@ -409,6 +413,19 @@ func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (f
 	observeYahooRequest("chart", "current_price", resp.StatusCode, elapsed)
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			if s.DB != nil {
+				s.DB.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "symbol"}},
+					DoUpdates: clause.AssignmentColumns([]string{"price", "fetched_at"}),
+				}).Create(&models.CurrentPrice{
+					Symbol:    symbol,
+					Price:     -1,
+					FetchedAt: time.Now().UTC(),
+				})
+			}
+			return 0, fmt.Errorf("yahoo current price HTTP 404 for %s", symbol)
+		}
 		return 0, fmt.Errorf("yahoo current price HTTP %d for %s", resp.StatusCode, symbol)
 	}
 
@@ -496,6 +513,11 @@ func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			lastErr = fmt.Errorf("yahoo returned HTTP %d for %s", resp.StatusCode, symbol)
 			continue
+		}
+
+		if resp.StatusCode == http.StatusNotFound {
+			lastErr = fmt.Errorf("yahoo returned HTTP 404 for %s", symbol)
+			break
 		}
 
 		lastErr = nil

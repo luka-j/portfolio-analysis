@@ -153,8 +153,9 @@ export default function PortfolioPage() {
     navigate('/llm', {
       state: {
         initialPrompt: {
+          promptType: 'ticker_analysis',
           displayMessage: `Analyze recent market activity for ${label}`,
-          message: `Summarize the recent market activity for ${label}. Analyze the current price action through three lenses: 1. Catalysts: (Earnings, regulatory filings, or macro shifts like the H-200 export updates) 2. Sentiment: (Shift in institutional vs. retail buzz on X and Bloomberg). 3. Technical Levels: (Current RSI and key support/resistance zones). Provide a "Bottom Line" summary followed by a bulleted breakdown of risks and opportunities.`,
+          extraParams: { symbol: pos.symbol },
         },
       },
     })

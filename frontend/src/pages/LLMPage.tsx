@@ -3,11 +3,18 @@ import ReactMarkdown from 'react-markdown'
 import NavBar from '../components/NavBar'
 import HoverTooltip from '../components/HoverTooltip'
 import { useLocation } from 'react-router-dom'
-import { postLLMChat, getPortfolioValue } from '../api'
+import { postLLMChat, getPortfolioValue, type LLMChatRequest } from '../api'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  cached?: boolean
+  originalRequest?: {
+    message: string
+    promptType: string
+    displayMessage?: string
+    extraParams?: Partial<LLMChatRequest>
+  }
 }
 
 interface WeightRow {
@@ -206,7 +213,7 @@ function AssistantMessage({ content }: { content: string }) {
 
 export default function LLMPage() {
   const location = useLocation()
-  const locationState = location.state as { initialMessages?: ChatMessage[]; initialPrompt?: { message: string; displayMessage: string } } | null
+  const locationState = location.state as { initialMessages?: ChatMessage[]; initialPrompt?: { promptType?: string; message?: string; displayMessage: string; extraParams?: Partial<LLMChatRequest> } } | null
   const initialMessages = locationState?.initialMessages ?? []
   const initialPrompt = locationState?.initialPrompt
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
@@ -255,7 +262,7 @@ export default function LLMPage() {
   useEffect(() => {
     if (initialPrompt && !autoSentRef.current) {
       autoSentRef.current = true
-      handleSend(initialPrompt.message, 'freeform', initialPrompt.displayMessage)
+      handleSend(initialPrompt.message ?? '', initialPrompt.promptType ?? 'freeform', initialPrompt.displayMessage, initialPrompt.extraParams)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -279,13 +286,13 @@ export default function LLMPage() {
   const isModified = weights.some((r, i) => liveWeights[i]?.symbol !== r.symbol || liveWeights[i]?.weight !== r.weight)
     || weights.length !== liveWeights.length
 
-  const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string) => {
+  const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string, extraParams?: Partial<LLMChatRequest>) => {
     if (!message && promptType === 'freeform') return
 
     const isCanned = promptType !== 'freeform'
     const priorMessages = messages // capture before state update — becomes history
     if (isCanned || includePortfolio) setPortfolioShared(true)
-    setMessages(prev => [...prev, { role: 'user', content: displayMessage || message }])
+    setMessages(prev => [...prev, { role: 'user', content: displayMessage || message, originalRequest: { message, promptType, displayMessage, extraParams } }])
     setInput('')
     setLoading(true)
 
@@ -295,11 +302,12 @@ export default function LLMPage() {
         message: promptType === 'freeform' ? message : '',
         currency: 'USD',
         model,
+        ...extraParams,
       }
       if (!isCanned) {
         req.include_portfolio = includePortfolio
         if (includePortfolio && weights.length > 0) {
-          req.custom_weights = weights.map(r => ({ symbol: r.symbol, weight: r.weight }))
+          req.override_portfolio_weights = weights.map(r => ({ symbol: r.symbol, weight: r.weight }))
         }
         if (priorMessages.length > 0) {
           req.history = priorMessages.map(m => ({ role: m.role, content: m.content }))
@@ -307,12 +315,55 @@ export default function LLMPage() {
       }
 
       const res = await postLLMChat(req)
-      setMessages(prev => [...prev, { role: 'assistant', content: res.response }])
+      setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
     } catch (err) {
       const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
         : error?.message || 'Failed to generate response.'
+      setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleRegenerate = async (idx: number) => {
+    const userMsg = messages[idx - 1]
+    if (!userMsg || !userMsg.originalRequest) return
+    const { message, promptType, extraParams } = userMsg.originalRequest
+    
+    const isCanned = promptType !== 'freeform'
+    const priorMessages = messages.slice(0, idx - 1)
+    
+    setMessages(prev => prev.slice(0, idx)) // Drop the assistant message
+    setLoading(true)
+
+    try {
+      const req: Parameters<typeof postLLMChat>[0] = {
+        prompt_type: promptType,
+        message: promptType === 'freeform' ? message : '',
+        currency: 'USD',
+        model,
+        force_refresh: true, // Bypass cache
+        ...extraParams,
+      }
+      if (!isCanned) {
+        req.include_portfolio = includePortfolio
+        if (includePortfolio && weights.length > 0) {
+          req.override_portfolio_weights = weights.map(r => ({ symbol: r.symbol, weight: r.weight }))
+        }
+        if (priorMessages.length > 0) {
+          req.history = priorMessages.map(m => ({ role: m.role, content: m.content }))
+        }
+      }
+
+      const res = await postLLMChat(req)
+      setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
+    } catch (err) {
+      const error = err as Error
+      const errMsg = error?.message?.includes('GEMINI_API_KEY')
+        ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
+        : error?.message || 'Failed to regenerate response.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
     } finally {
       setLoading(false)
@@ -371,7 +422,7 @@ export default function LLMPage() {
               title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
               className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-indigo-300/40 cursor-not-allowed' : 'text-indigo-300 hover:text-indigo-200'}`}
             >
-              General Analysis
+              What Am I Betting On?
             </button>
             <button
               onClick={() => handleSend('', 'best_worst_scenarios', 'Analyze my current portfolio. What are the best and worst realistic scenarios?')}
@@ -379,7 +430,15 @@ export default function LLMPage() {
               title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
               className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-emerald-400/40 cursor-not-allowed' : 'text-emerald-400 hover:text-emerald-300'}`}
             >
-              Scenario Analysis
+              Best & Worst Scenarios
+            </button>
+            <button
+              onClick={() => handleSend('', 'upcoming_events', 'What upcoming events (earnings, macroeconomic data, world events) might impact my portfolio?')}
+              disabled={cannedDisabled}
+              title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
+              className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-amber-400/40 cursor-not-allowed' : 'text-amber-400 hover:text-amber-300'}`}
+            >
+              Upcoming Events
             </button>
           </div>
         </div>
@@ -393,13 +452,27 @@ export default function LLMPage() {
           )}
 
           {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] px-5 py-3 text-sm leading-relaxed
-                ${msg.role === 'user' ? 'text-indigo-300 font-medium whitespace-pre-wrap' : 'text-indigo-100/90'}`}>
-                {msg.role === 'assistant'
-                  ? <AssistantMessage content={msg.content} />
-                  : msg.content
-                }
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group relative`}>
+              <div className="relative max-w-[85%]">
+                <div className={`px-5 py-3 text-sm leading-relaxed
+                  ${msg.role === 'user' ? 'text-indigo-300 font-medium whitespace-pre-wrap' : 'text-indigo-100/90'}`}>
+                  {msg.role === 'assistant'
+                    ? <AssistantMessage content={msg.content} />
+                    : msg.content
+                  }
+                </div>
+                {msg.role === 'assistant' && msg.cached && i === messages.length - 1 && (
+                  <button
+                    onClick={() => handleRegenerate(i)}
+                    className="absolute -right-8 top-1.5 p-1.5 text-indigo-400/40 hover:text-indigo-300 transition-colors opacity-0 group-hover:opacity-100 bg-[#1a1d2e] rounded-md border border-indigo-500/10 shadow-sm"
+                    title="Cached response. Click to force regenerate."
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="23 4 23 10 17 10" />
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
           ))}

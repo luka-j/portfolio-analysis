@@ -332,13 +332,18 @@ export default function AnalysisPage() {
                 <div className="relative group">
                   <button
                     onClick={() => {
-                      const twr = typeof stats.statistics['twr'] === 'number' ? `${(stats.statistics['twr'] * 100).toFixed(2)}%` : 'N/A'
-                      const mwr = typeof stats.statistics['mwr'] === 'number' ? `${(stats.statistics['mwr'] * 100).toFixed(2)}%` : 'N/A'
                       navigate('/llm', {
                         state: {
                           initialPrompt: {
+                            promptType: 'risk_metrics',
                             displayMessage: `Analyze my portfolio's risk & return metrics for ${periodLabel}`,
-                            message: `Act as a private wealth manager performing a year-end review for a client. Please interpret the following portfolio data in plain English, focusing on "The Story of the Money" rather than just the math.\n\nPeriod: ${periodLabel}\nTWR: ${twr}\nMWR: ${mwr}\nSharpe Ratio: ${portfolioStandalone.sharpe_ratio.toFixed(3)}\nSortino Ratio: ${portfolioStandalone.sortino_ratio.toFixed(3)}\nVAMI: ${portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}\nVolatility: ${(portfolioStandalone.volatility * 100).toFixed(2)}%\nMax Drawdown: -${(portfolioStandalone.max_drawdown * 100).toFixed(2)}%\n\nPLEASE PROVIDE: 1. The Returns Narrative: Explain the difference between my TWR and MWR. Am I a good "timer" of my own deposits/withdrawals, or is my behavior costing me money? 2. Wealth Growth: Based on the VAMI, how has the "purchasing power" of this portfolio changed? 3. The Efficiency Test: Using Sharpe and Sortino, tell me if I'm taking "productive" risk or "reckless" risk. Is the "downside pain" (Sortino) significantly different from the "total swing" (Sharpe)? 4. The Stress Test: Contextualize the Max Drawdown. How long did it take to recover, and is this level of loss sustainable for a long-term investor? 5. Investor profile: Is this portfolio more suited for the aggressive growth investor, defensive value-preservation investor, or neither? 6. The Verdict: Is this a "smooth ride" or a "rollercoaster," and am I being rewarded for staying on it?`,
+                            extraParams: {
+                              currency,
+                              from,
+                              to,
+                              accounting_model: acctModel,
+                              risk_free_rate: riskFreeRate,
+                            },
                           },
                         },
                       })
@@ -601,8 +606,16 @@ export default function AnalysisPage() {
                               onClick={() => navigate('/llm', {
                                 state: {
                                   initialPrompt: {
+                                    promptType: 'benchmark_analysis',
                                     displayMessage: `Analyze my portfolio vs ${bm.symbol} for ${periodLabel}`,
-                                    message: `Act as an institutional portfolio analyst. I am comparing my portfolio against ${bm.symbol}.\n\nPeriod: ${periodLabel}\nAlpha: ${(bm.alpha * 100).toFixed(2)}%\nBeta: ${bm.beta.toFixed(3)}\nTreynor Ratio: ${bm.treynor_ratio.toFixed(4)}\nTracking Error: ${(bm.tracking_error * 100).toFixed(2)}%\nInformation Ratio: ${bm.information_ratio.toFixed(3)}\nCorrelation: ${bm.correlation.toFixed(3)}\nSharpe Ratio: ${portfolioStandalone.sharpe_ratio.toFixed(3)}\nSortino Ratio: ${portfolioStandalone.sortino_ratio.toFixed(3)}\nVAMI: ${portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}\nVolatility: ${(portfolioStandalone.volatility * 100).toFixed(2)}%\nMax Drawdown: -${(portfolioStandalone.max_drawdown * 100).toFixed(2)}%\n\nPlease provide a "so what?" analysis of my performance based on the provided data. ANALYSIS REQUIREMENTS: 1. Manager Skill vs. Luck: Based on the Alpha and Information Ratio, is the outperformance (if any) consistent or just a result of high active risk? 2. Risk Profile: Use Beta and Treynor to explain if I am being properly compensated for the systematic risk I'm taking. 3. Benchmarking: Use Correlation and Tracking Error to tell me if this portfolio is a "closet indexer" or if it truly deviates from the benchmark. 4. Investor profile: is this portfolio better suited for an aggressive growth investor or a defensive value-preservation investor, or neither? 5. Verdict: Give me a blunt summary of whether this portfolio is efficiently managed relative to the benchmark.`,
+                                    extraParams: {
+                                      benchmark_symbol: bm.symbol,
+                                      currency,
+                                      from: effectiveFrom,
+                                      to,
+                                      accounting_model: acctModel,
+                                      risk_free_rate: riskFreeRate,
+                                    },
                                   },
                                 },
                               })}

@@ -102,7 +102,7 @@ func SetupRouter(
 	api.GET("/portfolio/breakdown", bh.GetBreakdown)
 
 	// LLM endpoints.
-	lh := handlers.NewLLMHandler(repo, database, llmService)
+	lh := handlers.NewLLMHandler(repo, database, llmService, portfolioSvc, marketSvc, currencyGetter)
 	api.GET("/llm/available", lh.IsAvailable)
 	api.GET("/llm/summary", lh.GetSummary)
 	api.POST("/llm/chat", lh.Chat)

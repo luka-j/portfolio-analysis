@@ -1060,7 +1060,7 @@ func TestBenchmarkMetrics_NumericalRobustness(t *testing.T) {
 		bench := make([]float64, n)
 		for i := 0; i < n; i++ {
 			bench[i] = 0.0001 + 2e-6*float64(i%3-1) // mean 0.01%, tiny stddev
-			port[i] = 0.001 * float64(i%5-2)          // more volatile
+			port[i] = 0.001 * float64(i%5-2)        // more volatile
 		}
 		m := CalculateBenchmarkMetrics(port, bench, 0.0)
 		assertFinite(t, "Beta", m.Beta)
@@ -1080,10 +1080,10 @@ func TestBenchmarkMetrics_NumericalRobustness(t *testing.T) {
 func TestBenchmarkMetrics_Invariants(t *testing.T) {
 	// Test universal invariants on a variety of input combinations.
 	scenarios := []struct {
-		name string
-		port []float64
+		name  string
+		port  []float64
 		bench []float64
-		rf   float64
+		rf    float64
 	}{
 		{"identical", benchSeries, benchSeries, 0.03},
 		{"2x_leverage", func() []float64 {

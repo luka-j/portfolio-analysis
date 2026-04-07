@@ -150,8 +150,8 @@ func TestCrumbManagerRefreshesAfterForce(t *testing.T) {
 
 func TestGetETFBreakdownParsesSectorWeightings(t *testing.T) {
 	sectors := map[string]float64{
-		"technology":        0.25,
-		"healthcare":        0.15,
+		"technology":         0.25,
+		"healthcare":         0.15,
 		"financial_services": 0.20,
 	}
 	transport := &mockSummaryTransport{

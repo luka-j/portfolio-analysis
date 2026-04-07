@@ -435,14 +435,16 @@ export default function LandingPage() {
                        >
                          {llmSummary}
                        </ReactMarkdown>
-                       <div className="text-center">
-                         <button
-                           onClick={digIntoThis}
-                           className="inline text-[10px] uppercase font-black tracking-widest text-emerald-500/80 hover:text-emerald-400 transition-colors shadow-sm"
-                         >
-                           Dig into this →
-                         </button>
-                       </div>
+                       {llmSummary !== "Failed to generate market summary." && (
+                         <div className="text-center">
+                           <button
+                             onClick={digIntoThis}
+                             className="inline text-[10px] uppercase font-black tracking-widest text-emerald-500/80 hover:text-emerald-400 transition-colors shadow-sm"
+                           >
+                             Dig into this →
+                           </button>
+                         </div>
+                       )}
                      </div>
                    ) : <span className="text-center w-full">No market summary available.</span>}
                  </div>

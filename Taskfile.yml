@@ -20,6 +20,20 @@ tasks:
     generates:
       - dist/**/*
 
+  frontend-dev:
+    desc: Build the frontend (development)
+    dir: '{{.FRONTEND_DIR}}'
+    cmds:
+      - npm run build -- --mode development
+    sources:
+      - src/**/*
+      - index.html
+      - package.json
+      - vite.config.ts
+      - tsconfig*.json
+    generates:
+      - dist/**/*
+
   go-work:
     desc: Generate go.work if it doesn't exist (useful for CI/Docker)
     status:
@@ -41,14 +55,18 @@ tasks:
       OS: '{{.OS | default "linux"}}'
       ARCH: '{{.ARCH | default "amd64"}}'
       OUT: '{{.DIST_DIR}}/{{.BINARY_NAME}}-{{.OS}}-{{.ARCH}}{{if eq .OS "windows"}}.exe{{end}}'
+      MODE: '{{.MODE | default "release"}}'
+      TAGS_FLAG: '{{if eq .MODE "release"}}-tags release{{end}}'
+      TRIMPATH_FLAG: '{{if eq .MODE "release"}}-trimpath{{end}}'
+      LDFLAGS_FLAG: '{{if eq .MODE "release"}}-ldflags="-s -w"{{end}}'
     env:
       GOOS: '{{.OS}}'
       GOARCH: '{{.ARCH}}'
       CGO_ENABLED: '0'
     cmds:
       - mkdir -p {{.DIST_DIR}}
-      - go build -ldflags="-s -w" -o {{.OUT}} ./server.go
-      - echo "Built {{.OUT}}"
+      - go build {{.TAGS_FLAG}} {{.TRIMPATH_FLAG}} {{.LDFLAGS_FLAG}} -o {{.OUT}} ./server.go
+      - echo "Built {{.OUT}} (mode={{.MODE}})"
 
   build:
     desc: |
@@ -59,7 +77,18 @@ tasks:
     deps: [frontend]
     cmds:
       - task: go-build
-        vars: {OS: '{{.OS}}', ARCH: '{{.ARCH}}'}
+        vars: {OS: '{{.OS}}', ARCH: '{{.ARCH}}', MODE: 'release'}
+
+  build-dev:
+    desc: |
+      Build the unified binary for the target OS/arch (dev mode).
+      Usage: task build-dev OS=linux ARCH=amd64
+      OS: linux | windows | darwin
+      ARCH: amd64 | arm64
+    deps: [frontend-dev]
+    cmds:
+      - task: go-build
+        vars: {OS: '{{.OS}}', ARCH: '{{.ARCH}}', MODE: 'dev'}
 
   # Convenience targets for each platform/arch combination
 

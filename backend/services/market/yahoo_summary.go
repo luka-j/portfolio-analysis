@@ -146,7 +146,9 @@ func (cm *CrumbManager) doFetchCrumb() (crumb string, expiry time.Time, err erro
 
 // ---------- Yahoo quoteSummary response types ----------
 
-type yahooRaw struct{ Raw float64 `json:"raw"` }
+type yahooRaw struct {
+	Raw float64 `json:"raw"`
+}
 
 type yahooSummaryResponse struct {
 	QuoteSummary struct {

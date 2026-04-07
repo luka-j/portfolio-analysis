@@ -27,7 +27,7 @@ func TestStandaloneMetrics_SingleDataPoint(t *testing.T) {
 	assertDelta(t, "VAMI", m.VAMI, 1000*1.05, 1e-9)
 	assertDelta(t, "Volatility", m.Volatility, 0.0, 1e-12) // stddev of 1 element = 0
 	assertDelta(t, "Sharpe", m.SharpeRatio, 0.0, 1e-12)    // pStd=0 → guard triggers
-	assertDelta(t, "MaxDD", m.MaxDrawdown, 0.0, 1e-12)      // single gain, never drops below peak
+	assertDelta(t, "MaxDD", m.MaxDrawdown, 0.0, 1e-12)     // single gain, never drops below peak
 	assertFinite(t, "Sortino", m.SortinoRatio)
 }
 
@@ -36,8 +36,8 @@ func TestStandaloneMetrics_AllZeroReturns(t *testing.T) {
 	m := CalculateStandaloneMetrics(zeros, 0.0)
 	assertDelta(t, "VAMI", m.VAMI, 1000.0, 1e-9) // no growth
 	assertDelta(t, "Volatility", m.Volatility, 0.0, 1e-12)
-	assertDelta(t, "Sharpe", m.SharpeRatio, 0.0, 1e-12)  // pStd=0 → guard
-	assertDelta(t, "MaxDD", m.MaxDrawdown, 0.0, 1e-12)   // never declines
+	assertDelta(t, "Sharpe", m.SharpeRatio, 0.0, 1e-12) // pStd=0 → guard
+	assertDelta(t, "MaxDD", m.MaxDrawdown, 0.0, 1e-12)  // never declines
 	assertFinite(t, "Sortino", m.SortinoRatio)
 }
 

@@ -193,7 +193,7 @@ func TestCalculateTWR(t *testing.T) {
 			name: "Heavy intra-period cashflow crossing 0 effectively",
 			dailyValues: []models.DailyValue{
 				{Date: "2020-01-01", Value: 100},
-				{Date: "2020-01-02", Value: 50}, // Assume -50% loss. From 100 to 50.
+				{Date: "2020-01-02", Value: 50},  // Assume -50% loss. From 100 to 50.
 				{Date: "2020-01-03", Value: 151}, // Then we deposit 100 on top of 50 -> Basis = 150. End = 151. Very minor gain.
 			},
 			cashFlows: []models.CashFlow{

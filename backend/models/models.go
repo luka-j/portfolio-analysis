@@ -32,10 +32,10 @@ type Trade struct {
 
 // OpenPosition represents an open position from the FlexQuery report.
 type OpenPosition struct {
-	Symbol        string  `json:"symbol"`
-	AssetCategory string  `json:"asset_category"`
-	Currency      string  `json:"currency"`
-	Quantity      float64 `json:"quantity"`
+	Symbol            string  `json:"symbol"`
+	AssetCategory     string  `json:"asset_category"`
+	Currency          string  `json:"currency"`
+	Quantity          float64 `json:"quantity"`
 	MarkPrice         float64 `json:"mark_price"`
 	PositionValue     float64 `json:"position_value"`
 	CostBasisPerShare float64 `json:"cost_basis_per_share"`
@@ -143,14 +143,14 @@ type PositionValue struct {
 	CostBases map[string]float64 `json:"cost_bases,omitempty"`
 	Values    map[string]float64 `json:"values,omitempty"`
 
-	Price      float64  `json:"price"`
-	CostBasis  float64  `json:"cost_basis"`
-	RealizedGL float64  `json:"realized_gl"`
-	Value      float64  `json:"value"`
-	Commission float64  `json:"commission"`
+	Price      float64 `json:"price"`
+	CostBasis  float64 `json:"cost_basis"`
+	RealizedGL float64 `json:"realized_gl"`
+	Value      float64 `json:"value"`
+	Commission float64 `json:"commission"`
 
 	BondDuration *float64 `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
-	Name         string   `json:"name,omitempty"`           // security long name from asset_fundamentals
+	Name         string   `json:"name,omitempty"`          // security long name from asset_fundamentals
 }
 
 // PortfolioValueResponse is the response for GET /portfolio/value.
@@ -163,13 +163,13 @@ type PortfolioValueResponse struct {
 
 // TradeEntry is a frontend-friendly representation of a single trade.
 type TradeEntry struct {
-	Date           string  `json:"date"`
-	Side           string  `json:"side"` // BUY or SELL
-	Quantity       float64 `json:"quantity"`
-	Price          float64 `json:"price"`
-	NativeCurrency string  `json:"native_currency"`
-	ConvertedPrice float64 `json:"converted_price"`
-	Commission     float64 `json:"commission"`
+	Date           string   `json:"date"`
+	Side           string   `json:"side"` // BUY or SELL
+	Quantity       float64  `json:"quantity"`
+	Price          float64  `json:"price"`
+	NativeCurrency string   `json:"native_currency"`
+	ConvertedPrice float64  `json:"converted_price"`
+	Commission     float64  `json:"commission"`
 	Proceeds       float64  `json:"proceeds"`
 	TaxCostBasis   *float64 `json:"tax_cost_basis,omitempty"`
 	YahooSymbol    string   `json:"yahoo_symbol,omitempty"`
