@@ -16,6 +16,7 @@ func IsFXTrade(t Trade) bool {
 // Trade represents a single trade from the FlexQuery report.
 type Trade struct {
 	TransactionID   string    `json:"transaction_id,omitempty"` // IB's native tradeID
+	Conid           string    `json:"conid,omitempty"`          // IB permanent contract ID
 	Symbol          string    `json:"symbol"`
 	AssetCategory   string    `json:"asset_category"`
 	Currency        string    `json:"currency"`

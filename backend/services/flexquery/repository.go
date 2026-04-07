@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -55,6 +57,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			err := r.DB.Where("user_id = ? AND transaction_id = ?", user.ID, t.TransactionID).
 				First(&existing).Error
 			if err == nil {
+				backfillConid(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped (id=%s): %s", t.TransactionID, t.Symbol)
 				continue
 			}
@@ -65,6 +68,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 				user.ID, "Trade", t.Symbol, t.DateTime, t.Quantity-1e-8, t.Quantity+1e-8, t.Price-1e-8, t.Price+1e-8,
 			).First(&existing).Error
 			if err == nil {
+				backfillConid(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped: %s %v qty=%v price=%v", t.Symbol, t.DateTime, t.Quantity, t.Price)
 				continue
 			}
@@ -74,6 +78,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			UserID:          user.ID,
 			Type:            "Trade",
 			TransactionID:   t.TransactionID,
+			Conid:           t.Conid,
 			Symbol:          t.Symbol,
 			AssetCategory:   t.AssetCategory,
 			Currency:        t.Currency,
@@ -136,7 +141,28 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 	return data, nil
 }
 
+// backfillConid updates an existing duplicate transaction's conid (and symbol)
+// when the incoming trade carries a conid that the stored row is missing.
+// This lets a re-upload of a FlexQuery retroactively enrich old rows that were
+// imported before conid support was added.
+func backfillConid(db *gorm.DB, existing *models.Transaction, incoming models.Trade) {
+	if incoming.Conid == "" || existing.Conid == incoming.Conid {
+		return
+	}
+	updates := map[string]interface{}{"conid": incoming.Conid}
+	if existing.Conid == "" {
+		// First time we see a conid for this trade — also refresh the symbol
+		// in case IBKR renamed the ticker since the original import.
+		updates["symbol"] = incoming.Symbol
+	}
+	db.Model(existing).Updates(updates)
+}
+
 // LoadSaved loads all historical transactions from the DB for a user.
+// Trades are symbol-normalised: all transactions sharing the same conid use
+// the symbol from that conid's most-recent trade.  eTrade transactions (no
+// conid) are enriched with the canonical symbol when the symbol maps to
+// exactly one conid; ambiguous cases are left unchanged.
 func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 	var user models.User
 	if err := r.DB.Where(models.User{TokenHash: userHash}).First(&user).Error; err != nil {
@@ -152,22 +178,78 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 		return nil, fmt.Errorf("fetching transactions: %w", err)
 	}
 
+	// --- Symbol normalisation via conid ---
+	//
+	// Step 1: for each conid, find the symbol of the most-recent trade.
+	conidLatest := make(map[string]time.Time)
+	conidSymbol := make(map[string]string) // conid → canonical symbol
+	for _, txn := range dbTxns {
+		if txn.Conid == "" {
+			continue
+		}
+		if txn.DateTime.After(conidLatest[txn.Conid]) {
+			conidLatest[txn.Conid] = txn.DateTime
+			conidSymbol[txn.Conid] = txn.Symbol
+		}
+	}
+
+	// Step 2: build a reverse map symbol(uppercase) → conid for eTrade enrichment.
+	// Only keep entries where exactly one conid owns a given symbol (ambiguous → skip).
+	symbolToConid := make(map[string]string) // uppercased symbol → conid
+	symbolConidCount := make(map[string]int) // number of distinct conids per symbol
+	for _, txn := range dbTxns {
+		if txn.Conid == "" {
+			continue
+		}
+		key := strings.ToUpper(txn.Symbol)
+		if existing, seen := symbolToConid[key]; !seen {
+			symbolToConid[key] = txn.Conid
+			symbolConidCount[key] = 1
+		} else if existing != txn.Conid {
+			symbolConidCount[key]++ // mark ambiguous
+		}
+	}
+
+	// getCanonical returns the canonical symbol for a transaction.
+	getCanonical := func(txn models.Transaction) string {
+		if txn.Conid != "" {
+			if s, ok := conidSymbol[txn.Conid]; ok {
+				return s
+			}
+		} else {
+			// eTrade / no-conid: enrich only when unambiguous
+			key := strings.ToUpper(txn.Symbol)
+			if symbolConidCount[key] == 1 {
+				if conid, ok := symbolToConid[key]; ok {
+					if s, ok := conidSymbol[conid]; ok {
+						return s
+					}
+				}
+			}
+		}
+		return txn.Symbol
+	}
+	// --- end normalisation setup ---
+
 	data := &models.FlexQueryData{}
 
-	exchangeMap := make(map[string]string)
+	exchangeMap := make(map[string]string) // canonical symbol → first-seen exchange
 	for _, txn := range dbTxns {
 		if (txn.Type == "Trade" || txn.Type == "ESPP_VEST" || txn.Type == "RSU_VEST") && txn.ListingExchange != "" {
-			if _, exists := exchangeMap[txn.Symbol]; !exists {
-				exchangeMap[txn.Symbol] = txn.ListingExchange
+			sym := getCanonical(txn)
+			if _, exists := exchangeMap[sym]; !exists {
+				exchangeMap[sym] = txn.ListingExchange
 			}
 		}
 	}
 
 	for _, txn := range dbTxns {
 		if txn.Type == "Trade" || txn.Type == "ESPP_VEST" || txn.Type == "RSU_VEST" {
+			sym := getCanonical(txn)
+
 			listingExchange := txn.ListingExchange
 			if listingExchange == "" {
-				if ex, ok := exchangeMap[txn.Symbol]; ok {
+				if ex, ok := exchangeMap[sym]; ok {
 					listingExchange = ex
 				}
 			}
@@ -179,7 +261,8 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 
 			data.Trades = append(data.Trades, models.Trade{
 				TransactionID:   txn.TransactionID,
-				Symbol:          txn.Symbol,
+				Conid:           txn.Conid,
+				Symbol:          sym,
 				AssetCategory:   txn.AssetCategory,
 				Currency:        txn.Currency,
 				ListingExchange: listingExchange,
@@ -212,19 +295,46 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 }
 
 // UpdateSymbolMapping updates the YahooSymbol for all trades of a given symbol and exchange for a user.
+// When the symbol belongs to transactions that have a conid, all transactions sharing those conids
+// are updated (covering historical rows where the symbol may differ due to a ticker rename).
 func (r *Repository) UpdateSymbolMapping(userHash, symbol, exchange, yahooSymbol string) error {
 	var user models.User
 	if err := r.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
 		return fmt.Errorf("user not found")
 	}
 
-	query := r.DB.Model(&models.Transaction{}).
-		Where("user_id = ? AND symbol = ? AND type IN ?", user.ID, symbol, []string{"Trade", "ESPP_VEST", "RSU_VEST"})
+	// Find all conids associated with the given (canonical) symbol for this user.
+	var conids []string
+	r.DB.Model(&models.Transaction{}).
+		Where("user_id = ? AND symbol = ? AND conid != ''", user.ID, symbol).
+		Distinct().
+		Pluck("conid", &conids)
 
-	if exchange != "" {
-		query = query.Where("(listing_exchange = ? OR listing_exchange = '')", exchange)
+	query := r.DB.Model(&models.Transaction{}).
+		Where("user_id = ? AND type IN ?", user.ID, []string{"Trade", "ESPP_VEST", "RSU_VEST"})
+
+	if len(conids) > 0 {
+		// Update every transaction that shares a conid with the canonical symbol
+		// (covers old rows with a previous ticker name), plus any zero-conid rows
+		// for this symbol restricted to the given exchange.
+		if exchange != "" {
+			query = query.Where(
+				"conid IN ? OR (conid = '' AND symbol = ? AND (listing_exchange = ? OR listing_exchange = ''))",
+				conids, symbol, exchange,
+			)
+		} else {
+			query = query.Where(
+				"conid IN ? OR (conid = '' AND symbol = ? AND listing_exchange = '')",
+				conids, symbol,
+			)
+		}
 	} else {
-		query = query.Where("listing_exchange = ''")
+		// No conid available — original exchange-scoped update.
+		if exchange != "" {
+			query = query.Where("symbol = ? AND (listing_exchange = ? OR listing_exchange = '')", symbol, exchange)
+		} else {
+			query = query.Where("symbol = ? AND listing_exchange = ''", symbol)
+		}
 	}
 
 	return query.Update("yahoo_symbol", yahooSymbol).Error

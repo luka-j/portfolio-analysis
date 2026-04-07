@@ -31,6 +31,7 @@ type Transaction struct {
 	YahooSymbol     string `gorm:"index"`
 	AssetCategory   string
 	TaxCostBasis    *float64
+	Conid           string `gorm:"index"` // IB permanent contract ID; empty for eTrade/cash txns
 }
 
 // MarketData represents cached end-of-day price data from Yahoo Finance.
