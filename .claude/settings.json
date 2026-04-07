@@ -22,7 +22,10 @@
       "Bash(grep -n \"CalculateStandaloneMetrics\\\\|CalculateTWR\\\\|CalculateMWR\\\\|CalculateBenchmarkMetrics\" /d/projects/gofolio-analysis/backend/services/stats/*.go)",
       "Bash(go get:*)",
       "Bash(go work:*)",
-      "Bash(./node_modules/.bin/tsc --noEmit)"
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "WebSearch",
+      "Bash(gh api:*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

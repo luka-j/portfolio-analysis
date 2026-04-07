@@ -71,6 +71,11 @@ func SetupRouter(
 	api := r.Group("/api/v1")
 	api.Use(middleware.TokenAuth(cfg.AllowedTokenHashes))
 
+	// Auth check — returns 200 if the token is valid, 401 otherwise (via middleware).
+	api.GET("/auth/verify", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
 	// Portfolio endpoints.
 	ph := handlers.NewPortfolioHandler(repo, portfolioSvc, fxSvc)
 	api.POST("/portfolio/upload", ph.Upload)

@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
+
+	"gorm.io/gorm"
 
 	"portfolio-analysis/config"
 	"portfolio-analysis/db"
@@ -22,16 +26,36 @@ import (
 	"portfolio-analysis/services/tax"
 )
 
+type services struct {
+	market       *market.YahooFinanceService
+	fx           *fx.Service
+	repo         *flexquery.Repository
+	portfolio    *portfolio.Service
+	tax          *tax.Service
+	fundamentals *fundamentals.Service
+	breakdown    *breakdownsvc.Service
+	llm          *llm.Service
+}
+
 func main() {
 	cfg := config.Load()
 
-	// Connect to Database via GORM
 	database, err := db.Init(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Database init failed: %v", err)
 	}
 
-	// Build services.
+	svc := buildServices(cfg, database)
+	r := router.SetupRouter(cfg, svc.repo, database, svc.market, svc.market, svc.fx, svc.portfolio, svc.tax, svc.fundamentals, svc.breakdown, svc.llm)
+
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
+
+	logStartupSummary(cfg)
+	runServer(srv, svc.fundamentals)
+}
+
+// buildServices wires together all application services.
+func buildServices(cfg *config.Config, database *gorm.DB) *services {
 	marketSvc := market.NewYahooFinanceService(database)
 	cnbSvc := market.NewCNBProvider(database)
 	fxSvc := fx.NewService(marketSvc, cnbSvc)
@@ -39,43 +63,60 @@ func main() {
 	portfolioSvc := portfolio.NewService(marketSvc, fxSvc, marketSvc)
 	taxSvc := tax.NewService(fxSvc)
 
-	// Build fundamentals / breakdown providers from config.
 	yahooFundamentalsProvider := fundamentals.NewYahooFundamentalsProvider(marketSvc, 30)
 	yahooBreakdownProvider := fundamentals.NewYahooBreakdownProvider(marketSvc, 30, 500)
-
-	allFundamentals := map[string]fundamentals.FundamentalsProvider{
-		"Yahoo": yahooFundamentalsProvider,
-	}
-	allBreakdowns := map[string]fundamentals.ETFBreakdownProvider{
-		"Yahoo": yahooBreakdownProvider,
-	}
 
 	fundamentalsSvc := fundamentals.BuildFromConfig(
 		database,
 		cfg.FundamentalsProviders,
 		cfg.BreakdownProviders,
-		allFundamentals,
-		allBreakdowns,
+		map[string]fundamentals.FundamentalsProvider{"Yahoo": yahooFundamentalsProvider},
+		map[string]fundamentals.ETFBreakdownProvider{"Yahoo": yahooBreakdownProvider},
 		marketSvc,
 	)
-	breakdownService := breakdownsvc.NewService(database)
 
-	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, database, portfolioSvc)
-
-	// Build Gin engine.
-	r := router.SetupRouter(cfg, repo, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
-
-	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: r,
+	return &services{
+		market:       marketSvc,
+		fx:           fxSvc,
+		repo:         repo,
+		portfolio:    portfolioSvc,
+		tax:          taxSvc,
+		fundamentals: fundamentalsSvc,
+		breakdown:    breakdownsvc.NewService(database),
+		llm:          llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, database, portfolioSvc),
 	}
+}
 
-	// Start background fundamentals fetcher. ctx is cancelled on shutdown.
+// logStartupSummary prints a human-readable summary of the active configuration.
+func logStartupSummary(cfg *config.Config) {
+	dbLabel := "SQLite (" + strings.TrimPrefix(cfg.DatabaseURL, "sqlite:") + ")"
+	if strings.HasPrefix(cfg.DatabaseURL, "postgres://") || strings.HasPrefix(cfg.DatabaseURL, "postgresql://") ||
+		(strings.Contains(cfg.DatabaseURL, "host=") && (strings.Contains(cfg.DatabaseURL, "user=") || strings.Contains(cfg.DatabaseURL, "dbname="))) {
+		dbLabel = "PostgreSQL"
+	}
+	authMode := "open (no token required)"
+	if len(cfg.AllowedTokenHashes) > 0 {
+		authMode = fmt.Sprintf("protected (%d token(s) configured)", len(cfg.AllowedTokenHashes))
+	}
+	llmStatus := "disabled — set GEMINI_API_KEY to enable"
+	if cfg.GeminiAPIKey != "" {
+		llmStatus = fmt.Sprintf("enabled (flash=%s, pro=%s)", cfg.GeminiFlashModel, cfg.GeminiProModel)
+	}
+	log.Printf("portfolio-analysis API starting on :%s", cfg.Port)
+	log.Printf("  API base:  http://localhost:%s/api/v1", cfg.Port)
+	log.Printf("  Database:  %s", dbLabel)
+	log.Printf("  Auth:      %s", authMode)
+	log.Printf("  LLM:       %s", llmStatus)
+	log.Printf("  Metrics:   http://localhost:%s/metrics", cfg.MetricsPort)
+}
+
+// runServer starts the background fundamentals fetcher, serves HTTP, and blocks until
+// SIGINT or SIGTERM is received, then shuts down gracefully.
+func runServer(srv *http.Server, fundamentalsSvc *fundamentals.Service) {
 	ctx, cancelFundamentals := context.WithCancel(context.Background())
 	fundamentalsSvc.StartBackgroundFetcher(ctx)
 
 	go func() {
-		log.Printf("Starting portfolio-analysis on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

@@ -329,7 +329,7 @@ export async function getPortfolioReturns(
 // Verify token is valid by making a lightweight call.
 export async function verifyToken(): Promise<boolean> {
   try {
-    await request('/health');
+    await request('/auth/verify');
     return true;
   } catch {
     return false;

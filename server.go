@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"portfolio-analysis/config"
 	"portfolio-analysis/db"
@@ -31,16 +33,39 @@ import (
 //go:embed all:frontend/dist
 var embeddedFrontend embed.FS
 
+type services struct {
+	market       *market.YahooFinanceService
+	fx           *fx.Service
+	repo         *flexquery.Repository
+	portfolio    *portfolio.Service
+	tax          *tax.Service
+	fundamentals *fundamentals.Service
+	breakdown    *breakdownsvc.Service
+	llm          *llm.Service
+}
+
 func main() {
 	cfg := config.Load()
 
-	// Connect to Database via GORM
 	database, err := db.Init(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Database init failed: %v", err)
 	}
 
-	// Build services.
+	svc := buildServices(cfg, database)
+	r := router.SetupRouter(cfg, svc.repo, database, svc.market, svc.market, svc.fx, svc.portfolio, svc.tax, svc.fundamentals, svc.breakdown, svc.llm)
+
+	fileSystem, frontendMode := buildFrontendFS()
+	setupFrontendRoutes(r, fileSystem)
+
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
+
+	logStartupSummary(cfg, frontendMode)
+	runServer(srv, svc.fundamentals)
+}
+
+// buildServices wires together all application services.
+func buildServices(cfg *config.Config, database *gorm.DB) *services {
 	marketSvc := market.NewYahooFinanceService(database)
 	cnbSvc := market.NewCNBProvider(database)
 	fxSvc := fx.NewService(marketSvc, cnbSvc)
@@ -48,51 +73,48 @@ func main() {
 	portfolioSvc := portfolio.NewService(marketSvc, fxSvc, marketSvc)
 	taxSvc := tax.NewService(fxSvc)
 
-	// Build fundamentals / breakdown providers from config.
 	yahooFundamentalsProvider := fundamentals.NewYahooFundamentalsProvider(marketSvc, 30)
 	yahooBreakdownProvider := fundamentals.NewYahooBreakdownProvider(marketSvc, 30, 500)
-
-	allFundamentals := map[string]fundamentals.FundamentalsProvider{
-		"Yahoo": yahooFundamentalsProvider,
-	}
-	allBreakdowns := map[string]fundamentals.ETFBreakdownProvider{
-		"Yahoo": yahooBreakdownProvider,
-	}
 
 	fundamentalsSvc := fundamentals.BuildFromConfig(
 		database,
 		cfg.FundamentalsProviders,
 		cfg.BreakdownProviders,
-		allFundamentals,
-		allBreakdowns,
+		map[string]fundamentals.FundamentalsProvider{"Yahoo": yahooFundamentalsProvider},
+		map[string]fundamentals.ETFBreakdownProvider{"Yahoo": yahooBreakdownProvider},
 		marketSvc,
 	)
-	breakdownService := breakdownsvc.NewService(database)
 
-	llmService := llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, database, portfolioSvc)
-
-	// Build Gin engine using the backend router setup.
-	r := router.SetupRouter(cfg, repo, database, marketSvc, marketSvc, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, llmService)
-
-	// Set up frontend file serving.
-	// If FRONTEND_DIR is set, serve from disk (useful during development).
-	// Otherwise, serve from the binary-embedded frontend/dist.
-	var fileSystem http.FileSystem
-	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
-		fileSystem = http.Dir(dir)
-		log.Printf("Serving frontend from disk: %s", dir)
-	} else {
-		sub, err := fs.Sub(embeddedFrontend, "frontend/dist")
-		if err != nil {
-			log.Fatalf("Failed to access embedded frontend: %v", err)
-		}
-		fileSystem = http.FS(sub)
-		log.Printf("Serving frontend from embedded binary")
+	return &services{
+		market:       marketSvc,
+		fx:           fxSvc,
+		repo:         repo,
+		portfolio:    portfolioSvc,
+		tax:          taxSvc,
+		fundamentals: fundamentalsSvc,
+		breakdown:    breakdownsvc.NewService(database),
+		llm:          llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, database, portfolioSvc),
 	}
+}
 
+// buildFrontendFS returns the HTTP filesystem for the frontend assets and a label describing
+// the source. If FRONTEND_DIR is set, files are served from disk (useful during development);
+// otherwise they are served from the embedded binary.
+func buildFrontendFS() (http.FileSystem, string) {
+	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
+		return http.Dir(dir), "disk (" + dir + ")"
+	}
+	sub, err := fs.Sub(embeddedFrontend, "frontend/dist")
+	if err != nil {
+		log.Fatalf("Failed to access embedded frontend: %v", err)
+	}
+	return http.FS(sub), "embedded"
+}
+
+// setupFrontendRoutes registers the catch-all NoRoute handler that serves the React SPA.
+// Static assets are served directly; all other paths fall back to index.html.
+func setupFrontendRoutes(r *gin.Engine, fileSystem http.FileSystem) {
 	fileServer := http.FileServer(fileSystem)
-
-	// NoRoute handles all non-API paths: static files + SPA fallback.
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
@@ -122,18 +144,39 @@ func main() {
 		content, _ := io.ReadAll(index)
 		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
 	})
+}
 
-	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: r,
+// logStartupSummary prints a human-readable summary of the active configuration.
+func logStartupSummary(cfg *config.Config, frontendMode string) {
+	dbLabel := "SQLite (" + strings.TrimPrefix(cfg.DatabaseURL, "sqlite:") + ")"
+	if strings.HasPrefix(cfg.DatabaseURL, "postgres://") || strings.HasPrefix(cfg.DatabaseURL, "postgresql://") ||
+		(strings.Contains(cfg.DatabaseURL, "host=") && (strings.Contains(cfg.DatabaseURL, "user=") || strings.Contains(cfg.DatabaseURL, "dbname="))) {
+		dbLabel = "PostgreSQL"
 	}
+	authMode := "open (no token required)"
+	if len(cfg.AllowedTokenHashes) > 0 {
+		authMode = fmt.Sprintf("protected (%d token(s) configured)", len(cfg.AllowedTokenHashes))
+	}
+	llmStatus := "disabled — set GEMINI_API_KEY to enable"
+	if cfg.GeminiAPIKey != "" {
+		llmStatus = fmt.Sprintf("enabled (flash=%s, pro=%s)", cfg.GeminiFlashModel, cfg.GeminiProModel)
+	}
+	log.Printf("portfolio-analysis starting on :%s", cfg.Port)
+	log.Printf("  Open:      http://localhost:%s", cfg.Port)
+	log.Printf("  Database:  %s", dbLabel)
+	log.Printf("  Auth:      %s", authMode)
+	log.Printf("  LLM:       %s", llmStatus)
+	log.Printf("  Frontend:  %s", frontendMode)
+	log.Printf("  Metrics:   http://localhost:%s/metrics", cfg.MetricsPort)
+}
 
-	// Start background fundamentals fetcher. ctx is cancelled on shutdown.
+// runServer starts the background fundamentals fetcher, serves HTTP, and blocks until
+// SIGINT or SIGTERM is received, then shuts down gracefully.
+func runServer(srv *http.Server, fundamentalsSvc *fundamentals.Service) {
 	ctx, cancelFundamentals := context.WithCancel(context.Background())
 	fundamentalsSvc.StartBackgroundFetcher(ctx)
 
 	go func() {
-		log.Printf("Starting portfolio-analysis on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

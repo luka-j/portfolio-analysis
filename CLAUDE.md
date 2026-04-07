@@ -29,8 +29,8 @@ npm run lint     # eslint
 ### Environment (backend)
 Required env vars — see `backend/run.ps1` for a working local example:
 - `DATABASE_URL` — Database connection string.
-  - **PostgreSQL:** `host=localhost user=postgres password=postgres dbname=gofolio port=5432 sslmode=disable` or `postgres://...`
-  - **SQLite:** `gofolio.db` or `sqlite:gofolio.db`
+  - **PostgreSQL:** `host=localhost user=postgres password=postgres dbname=portfolio port=5432 sslmode=disable` or `postgres://...`
+  - **SQLite:** `portfolio.db` or `sqlite:portfolio.db`
 - `ALLOWED_TOKEN_HASHES` — comma-separated SHA-256 hashes of auth tokens; omit for open mode
 
 Optional:

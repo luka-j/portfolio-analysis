@@ -29,13 +29,16 @@ func Init(dsn string) (*gorm.DB, error) {
 	)
 
 	var dialector gorm.Dialector
+	var dbLabel string
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") ||
 		(strings.Contains(dsn, "host=") && (strings.Contains(dsn, "user=") || strings.Contains(dsn, "dbname="))) {
 		dialector = postgres.Open(dsn)
+		dbLabel = "PostgreSQL"
 	} else {
 		// Assume SQLite. Strip optional "sqlite:" prefix for clarity.
 		sqlitePath := strings.TrimPrefix(dsn, "sqlite:")
 		dialector = sqlite.Open(sqlitePath)
+		dbLabel = "SQLite (" + sqlitePath + ")"
 	}
 
 	database, err := gorm.Open(dialector, &gorm.Config{
@@ -45,7 +48,7 @@ func Init(dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("connecting to database: %w", err)
 	}
 
-	log.Println("Migrating database schemas...")
+	log.Printf("Database: %s — running migrations", dbLabel)
 	err = database.AutoMigrate(
 		&models.User{},
 		&models.Transaction{},
