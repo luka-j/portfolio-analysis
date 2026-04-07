@@ -186,7 +186,7 @@ E\*Trade data supplements IB data for RSU and ESPP positions that originate at y
 
 #### RSU vests and ESPP purchases — `BenefitHistory.xlsx`
 
-Download from E\*Trade: **My Account → Benefits → Benefit History → Export to Excel**
+Download from E\*Trade: **At Work → My Account → Benefit History → Download → Download Expanded**
 
 This file covers RSU vest events and ESPP purchase events. The app auto-detects which type each worksheet contains.
 
@@ -198,7 +198,7 @@ The RSU cost basis is set to zero (shares received as income, consistent with Cz
 
 #### Stock sales — `G&L_Expanded.xlsx`
 
-Download from E\*Trade: **My Account → Gains & Losses → Expanded → Export to Excel**
+Download from E\*Trade: **At Work → My Account → Gains & Losses → Download → Download Expanded** (for every Tax Year)
 
 Only `Sell` rows are imported. Buy-side cost basis is not taken from this file — it comes from the benefit history above. This file covers the realisation side only.
 
