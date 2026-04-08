@@ -48,7 +48,12 @@ type YahooFinanceService struct {
 
 // NewYahooFinanceService creates a new Yahoo Finance service backed by DB caching.
 func NewYahooFinanceService(db *gorm.DB) *YahooFinanceService {
-	client := &http.Client{Timeout: 30 * time.Second}
+	transport := &http.Transport{
+		IdleConnTimeout:     10 * time.Second,
+		MaxIdleConns:        20,
+		MaxIdleConnsPerHost: 5,
+	}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: transport}
 	return &YahooFinanceService{
 		DB:             db,
 		HTTPClient:     client,

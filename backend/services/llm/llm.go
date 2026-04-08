@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -46,16 +47,23 @@ type Service struct {
 	ProModel         string
 	DB               *gorm.DB
 	PortfolioService *portfolio.Service
+	HTTPClient       *http.Client
 }
 
 // NewService creates a new LLM Service.
 func NewService(apiKey, flashModel, proModel string, db *gorm.DB, ps *portfolio.Service) *Service {
+	transport := &http.Transport{
+		IdleConnTimeout:     10 * time.Second,
+		MaxIdleConns:        20,
+		MaxIdleConnsPerHost: 5,
+	}
 	return &Service{
 		APIKey:           apiKey,
 		FlashModel:       flashModel,
 		ProModel:         proModel,
 		DB:               db,
 		PortfolioService: ps,
+		HTTPClient:       &http.Client{Transport: transport},
 	}
 }
 
@@ -167,7 +175,7 @@ func (s *Service) buildPortfolioJSONFromCustom(weights []CustomWeight) string {
 // callGemini sends a multi-turn content slice to Gemini and returns the text response.
 // callType labels the metric ("summary" or "analysis").
 func (s *Service) callGemini(ctx context.Context, model, callType string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (string, error) {
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: s.APIKey})
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: s.APIKey, HTTPClient: s.HTTPClient})
 	if err != nil {
 		return "", fmt.Errorf("creating genai client: %w", err)
 	}
