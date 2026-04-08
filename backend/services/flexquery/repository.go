@@ -303,12 +303,16 @@ func (r *Repository) UpdateSymbolMapping(userHash, symbol, exchange, yahooSymbol
 		return fmt.Errorf("user not found")
 	}
 
-	// Find all conids associated with the given (canonical) symbol for this user.
+	// Find all conids associated with the given (canonical) symbol and exchange for this user.
+	// Scoping by exchange prevents a mapping intended for one exchange from matching
+	// conids of the same ticker on a different exchange.
+	conidsQuery := r.DB.Model(&models.Transaction{}).
+		Where("user_id = ? AND symbol = ? AND conid != ''", user.ID, symbol)
+	if exchange != "" {
+		conidsQuery = conidsQuery.Where("listing_exchange = ?", exchange)
+	}
 	var conids []string
-	r.DB.Model(&models.Transaction{}).
-		Where("user_id = ? AND symbol = ? AND conid != ''", user.ID, symbol).
-		Distinct().
-		Pluck("conid", &conids)
+	conidsQuery.Distinct().Pluck("conid", &conids)
 
 	query := r.DB.Model(&models.Transaction{}).
 		Where("user_id = ? AND type IN ?", user.ID, []string{"Trade", "ESPP_VEST", "RSU_VEST"})

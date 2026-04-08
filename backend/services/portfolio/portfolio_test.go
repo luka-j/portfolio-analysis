@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"portfolio-analysis/models"
 )
 
@@ -111,6 +114,125 @@ func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {
 	expectedReturn := 0.10
 	if math.Abs(returns[0]-expectedReturn) > 1e-6 {
 		t.Errorf("Expected return %f, got %f", expectedReturn, returns[0])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cash-bucket / pending-cash tests
+// ---------------------------------------------------------------------------
+
+// TestGetDailyValues_PendingCashIncludedAfterSale verifies that after a sale the
+// sale proceeds appear in the daily portfolio value as pending cash, keeping
+// the total value flat rather than dropping to zero.
+func TestGetDailyValues_PendingCashIncludedAfterSale(t *testing.T) {
+	day0 := time.Date(2024, 1, 10, 12, 0, 0, 0, time.UTC)
+	day1 := day0.AddDate(0, 0, 1) // sell day
+	day5 := day0.AddDate(0, 0, 5) // still within 30-day bucket window
+
+	data := &models.FlexQueryData{
+		Trades: []models.Trade{
+			// Buy 10 shares at $100 on day0.
+			{Symbol: "TEST", ListingExchange: "EX", Currency: "USD",
+				BuySell: "BUY", Quantity: 10, Proceeds: -1000, DateTime: day0},
+			// Sell all 10 shares for $100 each on day1.
+			{Symbol: "TEST", ListingExchange: "EX", Currency: "USD",
+				BuySell: "SELL", Quantity: -10, Proceeds: 1000, DateTime: day1},
+		},
+	}
+	mockProvider := &mockMarketProvider{
+		prices: map[string][]models.PricePoint{
+			"TEST": {
+				{Date: day0, Close: 100, AdjClose: 100},
+				{Date: day1, Close: 100, AdjClose: 100},
+				{Date: day5, Close: 100, AdjClose: 100},
+			},
+		},
+	}
+
+	// expiryDays=30 — bucket is still active on day5.
+	svc := NewService(mockProvider, nil, nil, 30)
+	hist, err := svc.GetDailyValues(data, day0, day5, "USD", models.AccountingModelOriginal, false)
+	require.NoError(t, err)
+
+	// All days should show $1000: day0 via stock, day1+ via pending cash.
+	for _, pt := range hist.Data {
+		assert.InDelta(t, 1000.0, pt.Value, 0.01,
+			"daily value should remain $1000 (pending cash) on %s", pt.Date)
+	}
+}
+
+// TestGetCumulativeTWR_SaleWithActiveBucketIsFlat verifies that TWR stays flat
+// when the full portfolio is sold and the proceeds sit in an active cash bucket —
+// no phantom loss should appear on the sale day.
+func TestGetCumulativeTWR_SaleWithActiveBucketIsFlat(t *testing.T) {
+	day0 := time.Date(2024, 1, 10, 12, 0, 0, 0, time.UTC)
+	day1 := day0.AddDate(0, 0, 1)
+	day5 := day0.AddDate(0, 0, 5)
+
+	data := &models.FlexQueryData{
+		Trades: []models.Trade{
+			{Symbol: "TEST", ListingExchange: "EX", Currency: "USD",
+				BuySell: "BUY", Quantity: 10, Proceeds: -1000, DateTime: day0},
+			{Symbol: "TEST", ListingExchange: "EX", Currency: "USD",
+				BuySell: "SELL", Quantity: -10, Proceeds: 1000, DateTime: day1},
+		},
+	}
+	mockProvider := &mockMarketProvider{
+		prices: map[string][]models.PricePoint{
+			"TEST": {
+				{Date: day0, Close: 100, AdjClose: 100},
+				{Date: day1, Close: 100, AdjClose: 100},
+				{Date: day5, Close: 100, AdjClose: 100},
+			},
+		},
+	}
+
+	svc := NewService(mockProvider, nil, nil, 30)
+	hist, err := svc.GetCumulativeTWR(data, day0, day5, "USD", models.AccountingModelOriginal, false)
+	require.NoError(t, err)
+
+	// No price movement and no real external flows — TWR must be 0% throughout.
+	for _, pt := range hist.Data {
+		assert.InDelta(t, 0.0, pt.Value, 0.01,
+			"TWR should be 0%% (no real flows or price change) on %s", pt.Date)
+	}
+}
+
+// TestGetCumulativeTWR_BucketExpiryIsNeutral verifies that when a sale bucket
+// eventually expires the TWR remains flat: the portfolio value drops at expiry
+// and the matching withdrawal cash flow cancels it out exactly.
+func TestGetCumulativeTWR_BucketExpiryIsNeutral(t *testing.T) {
+	// Sell on day1; bucket expires on day31 (1+30).
+	day0 := time.Date(2024, 1, 10, 12, 0, 0, 0, time.UTC)
+	day1 := day0.AddDate(0, 0, 1)
+	day35 := day0.AddDate(0, 0, 35)
+
+	data := &models.FlexQueryData{
+		Trades: []models.Trade{
+			{Symbol: "TEST", ListingExchange: "EX", Currency: "USD",
+				BuySell: "BUY", Quantity: 10, Proceeds: -1000, DateTime: day0},
+			{Symbol: "TEST", ListingExchange: "EX", Currency: "USD",
+				BuySell: "SELL", Quantity: -10, Proceeds: 1000, DateTime: day1},
+		},
+	}
+
+	// Build enough daily price points so GetDailyValues has valid market dates.
+	var prices []models.PricePoint
+	for d := day0; !d.After(day35); d = d.AddDate(0, 0, 1) {
+		prices = append(prices, models.PricePoint{Date: d, Close: 100, AdjClose: 100})
+	}
+	mockProvider := &mockMarketProvider{
+		prices: map[string][]models.PricePoint{"TEST": prices},
+	}
+
+	svc := NewService(mockProvider, nil, nil, 30)
+	hist, err := svc.GetCumulativeTWR(data, day0, day35, "USD", models.AccountingModelOriginal, false)
+	require.NoError(t, err)
+
+	// TWR must stay 0% throughout — including after bucket expires on day31.
+	for _, pt := range hist.Data {
+		assert.InDelta(t, 0.0, pt.Value, 0.01,
+			"TWR should be 0%% after bucket expiry on %s", pt.Date)
 	}
 }
 

@@ -275,6 +275,115 @@ func TestBucketPartiallyConsumedThenExpires(t *testing.T) {
 	assert.Equal(t, d(2024, 2, 9), result.AdjustedCashFlows[0].Date)
 }
 
+// ---------------------------------------------------------------------------
+// BalanceChanges tests — verify the pending-cash timeline is recorded correctly.
+// ---------------------------------------------------------------------------
+
+// midnight returns d() truncated to midnight, matching truncDate in cashbucket.go.
+func midnight(year, month, day int) time.Time {
+	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+}
+
+// TestBalanceChanges_SellOnly — a sell with no subsequent buy or expiry within asOf
+// produces one balance change for the sell and one for the future expiry.
+func TestBalanceChanges_SellOnly_ActiveBucket(t *testing.T) {
+	trades := []models.Trade{sell(d(2024, 1, 10), 1000)}
+	asOf := d(2024, 1, 25) // bucket expires Feb 9 — still active
+
+	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	require.NoError(t, err)
+
+	// Sell: +1000 on Jan 10.
+	// Expiry: −1000 on Feb 9 (always recorded regardless of asOf).
+	require.Len(t, result.BalanceChanges, 2)
+	assert.Equal(t, midnight(2024, 1, 10), result.BalanceChanges[0].Date)
+	assert.InDelta(t, +1000, result.BalanceChanges[0].Delta, 0.01)
+	assert.Equal(t, midnight(2024, 2, 9), result.BalanceChanges[1].Date)
+	assert.InDelta(t, -1000, result.BalanceChanges[1].Delta, 0.01)
+
+	// Timeline sums correctly.
+	assert.InDelta(t, 1000, sumBalanceChangesOn(result.BalanceChanges, d(2024, 1, 15)), 0.01)
+	assert.InDelta(t, 0, sumBalanceChangesOn(result.BalanceChanges, d(2024, 2, 9)), 0.01)
+	assert.InDelta(t, 0, sumBalanceChangesOn(result.BalanceChanges, d(2024, 3, 1)), 0.01)
+}
+
+// TestBalanceChanges_SellPartialBuyExpiry — sell, partial buy, then expiry.
+func TestBalanceChanges_SellPartialBuyExpiry(t *testing.T) {
+	trades := []models.Trade{
+		sell(d(2024, 1, 10), 1000),
+		buy(d(2024, 1, 20), -400),
+	}
+	asOf := d(2024, 3, 1) // after expiry (Feb 9)
+
+	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	require.NoError(t, err)
+
+	// Expect: sell +1000, buy consume −400, expiry −600.
+	require.Len(t, result.BalanceChanges, 3)
+	assert.Equal(t, midnight(2024, 1, 10), result.BalanceChanges[0].Date)
+	assert.InDelta(t, +1000, result.BalanceChanges[0].Delta, 0.01)
+	assert.Equal(t, midnight(2024, 1, 20), result.BalanceChanges[1].Date)
+	assert.InDelta(t, -400, result.BalanceChanges[1].Delta, 0.01)
+	assert.Equal(t, midnight(2024, 2, 9), result.BalanceChanges[2].Date)
+	assert.InDelta(t, -600, result.BalanceChanges[2].Delta, 0.01)
+
+	// Timeline sums.
+	assert.InDelta(t, 1000, sumBalanceChangesOn(result.BalanceChanges, d(2024, 1, 15)), 0.01) // after sell, before buy
+	assert.InDelta(t, 600, sumBalanceChangesOn(result.BalanceChanges, d(2024, 1, 25)), 0.01)  // after buy, before expiry
+	assert.InDelta(t, 0, sumBalanceChangesOn(result.BalanceChanges, d(2024, 2, 9)), 0.01)     // on expiry date: drops to 0
+	assert.InDelta(t, 0, sumBalanceChangesOn(result.BalanceChanges, d(2024, 3, 1)), 0.01)     // after expiry
+}
+
+// TestBalanceChanges_FullyConsumedBucket — buy consumes the entire bucket,
+// so no expiry balance change is needed (remaining == 0).
+func TestBalanceChanges_FullyConsumedBucket(t *testing.T) {
+	trades := []models.Trade{
+		sell(d(2024, 1, 10), 1000),
+		buy(d(2024, 1, 20), -1000),
+	}
+	asOf := d(2024, 3, 1)
+
+	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	require.NoError(t, err)
+
+	// Sell +1000, buy consume −1000. No expiry (remaining == 0).
+	require.Len(t, result.BalanceChanges, 2)
+	assert.InDelta(t, +1000, result.BalanceChanges[0].Delta, 0.01)
+	assert.InDelta(t, -1000, result.BalanceChanges[1].Delta, 0.01)
+
+	// Net is zero throughout.
+	assert.InDelta(t, 0, sumBalanceChangesOn(result.BalanceChanges, d(2024, 3, 1)), 0.01)
+}
+
+// TestBalanceChanges_ZeroExpiryDays — with zero expiry the balance change for the
+// sell and its expiry both land on the same day, netting to zero.
+func TestBalanceChanges_ZeroExpiryDays(t *testing.T) {
+	trades := []models.Trade{sell(d(2024, 1, 10), 1000)}
+	asOf := d(2024, 3, 1)
+
+	result, err := Process(trades, nil, 0, asOf, noopConvert)
+	require.NoError(t, err)
+
+	// Sell +1000 and same-day expiry −1000 both on Jan 10.
+	require.Len(t, result.BalanceChanges, 2)
+	assert.Equal(t, midnight(2024, 1, 10), result.BalanceChanges[0].Date)
+	assert.Equal(t, midnight(2024, 1, 10), result.BalanceChanges[1].Date)
+
+	// Net pending cash is always zero (same-day create+expire).
+	assert.InDelta(t, 0, sumBalanceChangesOn(result.BalanceChanges, d(2024, 1, 10)), 0.01)
+}
+
+// sumBalanceChangesOn sums all deltas with Date <= date (same semantics as GetDailyValues).
+func sumBalanceChangesOn(changes []BalanceChange, date time.Time) float64 {
+	var total float64
+	for _, c := range changes {
+		if !c.Date.After(date) {
+			total += c.Delta
+		}
+	}
+	return total
+}
+
 // TestFXTradesIgnored — FX trades should not create buckets.
 func TestFXTradesIgnored(t *testing.T) {
 	trades := []models.Trade{

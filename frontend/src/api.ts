@@ -410,9 +410,9 @@ export async function getLLMAvailable(): Promise<{ available: boolean }> {
   return request<{ available: boolean }>('/llm/available');
 }
 
-export async function getLLMSummary(period = '1d', currency = 'USD', forceRefresh = false): Promise<LLMSummaryResponse> {
+export async function getLLMSummary(period = '1d', forceRefresh = false): Promise<LLMSummaryResponse> {
   const extra = forceRefresh ? '&force_refresh=true' : '';
-  return request<LLMSummaryResponse>(`/llm/summary?period=${period}&currency=${encodeURIComponent(currency)}${extra}`);
+  return request<LLMSummaryResponse>(`/llm/summary?period=${period}${extra}`);
 }
 
 export async function postLLMChat(req: LLMChatRequest): Promise<LLMChatResponse> {

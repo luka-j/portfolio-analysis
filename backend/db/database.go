@@ -49,6 +49,12 @@ func Init(dsn string) (*gorm.DB, error) {
 	}
 
 	log.Printf("Database: %s — running migrations", dbLabel)
+
+	// Drop stale llm_caches unique index if it covers only (user_hash, prompt_type) —
+	// the current schema requires all three columns (user_hash, prompt_type, model).
+	// AutoMigrate never drops/recreates indexes, so we do it manually once.
+	database.Exec(`DROP INDEX IF EXISTS idx_llmcache_user_prompt`)
+
 	err = database.AutoMigrate(
 		&models.User{},
 		&models.Transaction{},

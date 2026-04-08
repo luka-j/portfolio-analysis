@@ -203,6 +203,31 @@ func TestUpdateSymbolMapping_UpdatesByConid(t *testing.T) {
 	}
 }
 
+// TestUpdateSymbolMapping_ScopedByExchange verifies that a mapping for a symbol on one
+// exchange does not overwrite the yahoo_symbol of the same ticker on a different exchange.
+func TestUpdateSymbolMapping_ScopedByExchange(t *testing.T) {
+	db := setupTestDB(t)
+	user := createUserWithHash(t, db, "hash6")
+
+	dt := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Same ticker, different exchanges, different conids.
+	seedTrade(t, db, user.ID, "VUAA", "C_LSE", "LSEETF", dt)
+	seedTrade(t, db, user.ID, "VUAA", "C_XTRA", "XTRA", dt)
+
+	repo := NewRepository(db)
+	// Map VUAA only on LSEETF.
+	err := repo.UpdateSymbolMapping("hash6", "VUAA", "LSEETF", "VUAA.L")
+	require.NoError(t, err)
+
+	var lse, xtra models.Transaction
+	db.Where("user_id = ? AND conid = ?", user.ID, "C_LSE").First(&lse)
+	db.Where("user_id = ? AND conid = ?", user.ID, "C_XTRA").First(&xtra)
+
+	assert.Equal(t, "VUAA.L", lse.YahooSymbol, "LSEETF row should be mapped")
+	assert.Equal(t, "", xtra.YahooSymbol, "XTRA row must NOT be affected by a mapping scoped to LSEETF")
+}
+
 // TestParseAndSave_StoresConid verifies that ParseAndSave persists the conid
 // attribute from a FlexQuery XML trade into the database.
 func TestParseAndSave_StoresConid(t *testing.T) {

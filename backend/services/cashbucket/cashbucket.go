@@ -14,17 +14,35 @@ type Bucket struct {
 	ExpiryDate time.Time
 }
 
+// BalanceChange records a delta to the total pending-cash balance.
+// Date is truncated to midnight UTC so callers can compare against calendar dates.
+type BalanceChange struct {
+	Date  time.Time
+	Delta float64 // positive = cash added to pending; negative = cash removed
+}
+
 // Result is the output of the bucket processing pass.
 type Result struct {
 	// AdjustedCashFlows contains only real inflows/outflows plus expiry events.
 	AdjustedCashFlows []models.CashFlow
 	// PendingCash is the sum of all active (non-expired, non-consumed) bucket remainders as of asOf.
 	PendingCash float64
+	// BalanceChanges is a sorted list of pending-cash deltas covering all events (sells,
+	// buy-consumptions, and expirations) regardless of asOf. Callers can use this to
+	// reconstruct the pending-cash amount for any historical date by summing deltas up to
+	// and including that date.
+	BalanceChanges []BalanceChange
 }
 
 // ConvertFn converts an amount from fromCurrency to the display currency on the given date.
 // For Original accounting mode it should return the amount unchanged.
 type ConvertFn func(amount float64, from string, date time.Time) (float64, error)
+
+// truncDate returns t rounded down to midnight UTC so that BalanceChange dates
+// align with the calendar-day granularity used by GetDailyValues.
+func truncDate(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
 
 // Process applies cash-bucket logic to a list of trades and dividend cash flows.
 // Sells create buckets; buys consume from the oldest bucket first (FIFO). Dividends pass through
@@ -45,6 +63,7 @@ func Process(
 
 	var buckets []*Bucket
 	var adjustedFlows []models.CashFlow
+	var balanceChanges []BalanceChange
 
 	for _, t := range sorted {
 		if models.IsFXTrade(t) || t.BuySell == "TRANSFER_IN" {
@@ -69,6 +88,11 @@ func Process(
 					Remaining:  converted,
 					ExpiryDate: expiry,
 				})
+				// Pending cash increases when the sell bucket is created.
+				balanceChanges = append(balanceChanges, BalanceChange{
+					Date:  truncDate(t.DateTime),
+					Delta: +converted,
+				})
 			} else {
 				// Sell with zero/negative proceeds (e.g. short sale recorded oddly) — treat as real flow.
 				adjustedFlows = append(adjustedFlows, models.CashFlow{Date: t.DateTime, Amount: converted})
@@ -91,6 +115,11 @@ func Process(
 				consume := min64(b.Remaining, remaining)
 				b.Remaining -= consume
 				remaining -= consume
+				// Pending cash decreases as the bucket is consumed by a buy.
+				balanceChanges = append(balanceChanges, BalanceChange{
+					Date:  truncDate(t.DateTime),
+					Delta: -consume,
+				})
 			}
 
 			if remaining > 0 {
@@ -104,18 +133,28 @@ func Process(
 	adjustedFlows = append(adjustedFlows, dividendFlows...)
 
 	// Evaluate bucket expiry as of asOf.
+	// The expiry BalanceChange is always recorded (regardless of asOf) so callers can
+	// reconstruct per-day pending cash for any date range.
 	var pendingCash float64
 	for _, b := range buckets {
 		if b.Remaining <= 0 {
 			continue
 		}
+		outflowDate := b.ExpiryDate
+		if expiryDays == 0 {
+			// Zero expiry: outflow on the same day as the sale.
+			outflowDate = b.Date
+		}
+
+		// Record the expiry balance change unconditionally so the full pending-cash
+		// timeline is always available in BalanceChanges.
+		balanceChanges = append(balanceChanges, BalanceChange{
+			Date:  truncDate(outflowDate),
+			Delta: -b.Remaining,
+		})
+
 		if expiryDays == 0 || b.ExpiryDate.Before(asOf) {
 			// Bucket has expired — its remaining amount becomes a real outflow on the expiry date.
-			outflowDate := b.ExpiryDate
-			if expiryDays == 0 {
-				// Zero expiry: outflow on the same day as the sale.
-				outflowDate = b.Date
-			}
 			adjustedFlows = append(adjustedFlows, models.CashFlow{Date: outflowDate, Amount: b.Remaining})
 		} else {
 			// Still active — counts as pending cash.
@@ -123,14 +162,18 @@ func Process(
 		}
 	}
 
-	// Sort final flows chronologically.
+	// Sort final flows and balance changes chronologically.
 	sort.Slice(adjustedFlows, func(i, j int) bool {
 		return adjustedFlows[i].Date.Before(adjustedFlows[j].Date)
+	})
+	sort.Slice(balanceChanges, func(i, j int) bool {
+		return balanceChanges[i].Date.Before(balanceChanges[j].Date)
 	})
 
 	return &Result{
 		AdjustedCashFlows: adjustedFlows,
 		PendingCash:       pendingCash,
+		BalanceChanges:    balanceChanges,
 	}, nil
 }
 

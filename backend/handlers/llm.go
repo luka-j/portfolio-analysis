@@ -73,7 +73,6 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	currency := c.DefaultQuery("currency", "USD")
 	forceRefresh := c.Query("force_refresh") == "true"
 	promptType := "summary_" + period
 	modelKey := h.LLM.FlashModel
@@ -87,10 +86,10 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 	}
 
 	// Call LLM
-	log.Printf("INFO: GetMarketSummary calling LLM [user=%s period=%s currency=%s]", userHash[:8], period, currency)
+	log.Printf("INFO: GetMarketSummary calling LLM [user=%s period=%s]", userHash[:8], period)
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 130*time.Second)
 	defer cancel()
-	summary, err := h.LLM.GetMarketSummary(reqCtx, data, currency, period)
+	summary, err := h.LLM.GetMarketSummary(reqCtx, data, period)
 	if err != nil {
 		if errors.Is(err, llm.ErrNotConfigured) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error(), "code": "NOT_CONFIGURED"})
@@ -101,7 +100,7 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Model timed out. The servers may be overloaded, try again later or with a different model."})
 			return
 		}
-		log.Printf("ERROR: GetMarketSummary failed [user=%s period=%s currency=%s]: %v", userHash[:8], period, currency, err)
+		log.Printf("ERROR: GetMarketSummary failed [user=%s period=%s]: %v", userHash[:8], period, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "generating summary: " + err.Error()})
 		return
 	}

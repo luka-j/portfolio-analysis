@@ -545,9 +545,50 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		}
 	}
 
+	// Compute pending-cash balance changes from sale buckets so daily values correctly
+	// include unsettled sale proceeds throughout the bucket window.
+	var balanceChanges []cashbucket.BalanceChange
+	if s.CashBucketExpiryDays > 0 {
+		var tradeFlows []models.Trade
+		for _, t := range data.Trades {
+			if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
+				continue
+			}
+			tradeFlows = append(tradeFlows, t)
+		}
+		bucketConvertFn := func(amount float64, from string, date time.Time) (float64, error) {
+			if from == currency || acctModel == models.AccountingModelOriginal || s.FXService == nil {
+				return amount, nil
+			}
+			if acctModel == models.AccountingModelSpot {
+				return s.FXService.ConvertSpot(amount, from, currency, cachedOnly)
+			}
+			return s.FXService.Convert(amount, from, currency, date, cachedOnly)
+		}
+		// asOf=to ensures all expirations within the requested range generate cash flows;
+		// BalanceChanges covers all events regardless.
+		br, err := cashbucket.Process(tradeFlows, nil, s.CashBucketExpiryDays, to, bucketConvertFn)
+		if err != nil {
+			return nil, fmt.Errorf("GetDailyValues bucket balance: %w", err)
+		}
+		balanceChanges = br.BalanceChanges
+	}
+
+	// Running pending-cash total driven by balanceChanges (sorted by date).
+	// Applied day-by-day (including skipped weekends) so the correct amount is
+	// reflected on the next market day.
+	bcIdx := 0
+	pendingTotal := 0.0
+
 	result := make([]models.DailyValue, 0)
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
 		ds := d.Format("2006-01-02")
+
+		// Apply all balance changes for today or earlier (including pre-range events).
+		for bcIdx < len(balanceChanges) && !balanceChanges[bcIdx].Date.After(d) {
+			pendingTotal += balanceChanges[bcIdx].Delta
+			bcIdx++
+		}
 
 		// Omit weekends & bank holidays ONLY if we have some valid market dates.
 		// If validDates is empty (e.g. all symbols failed), we show all days.
@@ -598,6 +639,11 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 				}
 				totalValue += converted
 			}
+		}
+
+		// Add pending cash from active sale buckets (floor at zero for float safety).
+		if pendingTotal > 0 {
+			totalValue += pendingTotal
 		}
 
 		result = append(result, models.DailyValue{Date: ds, Value: totalValue})

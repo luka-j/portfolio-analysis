@@ -198,7 +198,7 @@ export default function LandingPage() {
     const fetchSummary = async (forceRefresh: boolean) => {
       setLlmSummaryLoading(true)
       try {
-        const res = await getLLMSummary(llmPeriod, currency, forceRefresh)
+        const res = await getLLMSummary(llmPeriod, forceRefresh)
         if (!cancelled) {
           setLlmSummary(res.summary)
           setLlmAvailable(true)
@@ -223,7 +223,7 @@ export default function LandingPage() {
     }
     fetchSummary(llmForceRefresh)
     return () => { cancelled = true }
-  }, [llmPeriod, currency, uploadCount, llmForceRefresh, shouldShowLlm])
+  }, [llmPeriod, uploadCount, llmForceRefresh, shouldShowLlm])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

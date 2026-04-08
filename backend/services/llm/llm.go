@@ -214,12 +214,14 @@ func (s *Service) callGemini(ctx context.Context, model, callType string, conten
 
 // GetMarketSummary generates a short market summary for the requested period.
 // This is always single-turn and is not affected by chat history.
-func (s *Service) GetMarketSummary(ctx context.Context, data *models.FlexQueryData, currency, period string) (string, error) {
+func (s *Service) GetMarketSummary(ctx context.Context, data *models.FlexQueryData, period string) (string, error) {
 	if !s.isAvailable() {
 		return "", ErrNotConfigured
 	}
 
-	portfolioJSON := s.getPortfolioJSON(data, currency, models.AccountingModelSpot)
+	// Currency is irrelevant here — only percentage weights are sent to the LLM,
+	// and weights are currency-independent ratios.
+	portfolioJSON := s.getPortfolioJSON(data, "USD", models.AccountingModelSpot)
 
 	periodMap := map[string]string{
 		"1d": "the past day",
