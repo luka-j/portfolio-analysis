@@ -36,6 +36,12 @@ type CurrencyGetter interface {
 	GetCurrency(symbol string) (string, error)
 }
 
+// PriceStatusChecker can report whether any cached market data exists for a symbol,
+// used to distinguish "symbol not found" from "had data but now stale".
+type PriceStatusChecker interface {
+	HasCachedData(symbol string) bool
+}
+
 // YahooFinanceService fetches historical OHLCV data from Yahoo Finance
 // and caches results in the database.
 type YahooFinanceService struct {
@@ -73,6 +79,17 @@ func NewYahooFinanceServiceWithTransport(transport http.RoundTripper) *YahooFina
 		summaryLimiter: rate.NewLimiter(rate.Inf, 1),
 		crumbMgr:       newCrumbManager(client),
 	}
+}
+
+// HasCachedData reports whether any market data rows exist for the given symbol,
+// regardless of date. Used to distinguish "never seen this symbol" from "had data but now stale".
+func (s *YahooFinanceService) HasCachedData(symbol string) bool {
+	if s.DB == nil {
+		return false
+	}
+	var count int64
+	s.DB.Model(&models.MarketData{}).Where("symbol = ? AND volume != -1", symbol).Count(&count)
+	return count > 0
 }
 
 // GetHistory returns daily price data for the symbol in [from, to].

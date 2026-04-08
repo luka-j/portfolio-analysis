@@ -69,6 +69,7 @@ export interface PositionValue {
   commission: number;
   bond_duration?: number; // bond ETF: effective duration in years
   name?: string;          // security long name
+  price_status?: 'no_data' | 'stale' | 'fetch_failed'; // absent/undefined means ok
 }
 
 export interface PortfolioValueResponse {

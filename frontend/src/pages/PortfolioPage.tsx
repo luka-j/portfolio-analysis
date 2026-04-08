@@ -225,6 +225,8 @@ export default function PortfolioPage() {
 
   const { from: periodFrom, to: periodTo } = getPeriodDates(period, customFrom, customTo)
 
+  const tableGridCols = 'minmax(0, 2.7fr) minmax(0, 0.8fr) repeat(4, minmax(0, 0.85fr)) repeat(2, minmax(0, 1.15fr)) repeat(6, minmax(0, 0.85fr)) minmax(0, 0.5fr)'
+
   return (
     <PageLayout maxWidth="max-w-[1400px]">
       {mappingTarget && (
@@ -304,11 +306,11 @@ export default function PortfolioPage() {
             {/* Table header */}
             <div
               className="grid gap-4 px-8 py-5 text-xs font-semibold text-slate-500 border-b border-[#2a2e42]/40"
-              style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
+              style={{ gridTemplateColumns: tableGridCols }}
             >
               {(['symbol', 'qty', 'price', 'value', 'pct', 'change', 'unrealized', 'realized_comm'] as const).map((col) => {
                 const labels: Record<string, string> = { symbol: 'Symbol', qty: 'Qty', price: 'Curr. Mkt. Price', value: 'Value', pct: 'Portfolio %', change: 'Price Change %', unrealized: 'Unrealized', realized_comm: 'Realized / Comm.' }
-                const spanClass: Record<string, string> = { symbol: 'col-span-2', qty: 'col-span-1', price: 'col-span-2', value: 'col-span-2', pct: 'col-span-2', change: 'col-span-2', unrealized: 'col-span-2', realized_comm: 'col-span-2' }
+                const spanClass: Record<string, string> = { symbol: 'col-span-1', qty: 'col-span-1', price: 'col-span-2', value: 'col-span-2', pct: 'col-span-2', change: 'col-span-2', unrealized: 'col-span-2', realized_comm: 'col-span-2' }
                 const isRight = col !== 'symbol'
                 return (
                   <div
@@ -352,10 +354,10 @@ export default function PortfolioPage() {
                     <div key="PENDING_CASH">
                       <div
                         className="grid gap-4 px-8 py-4 items-center hover:bg-white/2 transition-all duration-300"
-                        style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
+                        style={{ display: 'grid', gridTemplateColumns: tableGridCols }}
                       >
                         {/* Symbol cell */}
-                        <div className="col-span-2 flex items-center gap-4">
+                        <div className="col-span-1 flex items-center gap-4">
                           <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-amber-500/10 to-yellow-500/10 flex items-center justify-center text-xs font-bold text-amber-400 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
                             $
                           </div>
@@ -401,14 +403,29 @@ export default function PortfolioPage() {
                   <div key={posKey}>
                     <div
                       className={`grid gap-4 px-8 py-4 items-center cursor-pointer transition-all duration-300 ${isExpanded ? 'bg-[#1a1d2e] ring-1 ring-white/5 shadow-2xl z-10' : 'hover:bg-white/2'}`}
-                      style={{ display: 'grid', gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
+                      style={{ display: 'grid', gridTemplateColumns: tableGridCols }}
                       onClick={() => toggleExpand(pos.symbol, pos.listing_exchange)}
                     >
                       {/* Symbol cell */}
-                      <div className="col-span-2 flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center text-xs font-bold text-indigo-300 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
-                          {pos.symbol.slice(0, 2)}
-                        </div>
+                      <div className="col-span-1 flex items-center gap-4">
+                        {pos.price_status ? (
+                          <div className="relative group w-10 h-10 rounded-2xl bg-linear-to-br from-red-500/10 to-orange-500/10 flex items-center justify-center border border-red-500/20 shrink-0 shadow-lg ring-1 ring-red-500/10 cursor-help">
+                            <svg className="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                              <line x1="12" y1="9" x2="12" y2="13"/>
+                              <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            <HoverTooltip direction="down" align="left" className="w-60">
+                              {pos.price_status === 'no_data' && 'No price data available from Yahoo Finance. The symbol may not be recognised — try updating the Yahoo symbol mapping.'}
+                              {pos.price_status === 'stale' && 'Last available price is outdated. Yahoo Finance may have stopped tracking it, or there is some intermittent issue.'}
+                              {pos.price_status === 'fetch_failed' && 'Failed to retrieve price data. This may be a temporary connection issue, or the symbol mapping may be incorrect.'}
+                            </HoverTooltip>
+                          </div>
+                        ) : (
+                          <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center text-xs font-bold text-indigo-300 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
+                            {pos.symbol.slice(0, 2)}
+                          </div>
+                        )}
                         <div className="min-w-0">
                           <div className="font-semibold flex items-center gap-2 text-slate-100 text-sm tracking-tight">
                             <span className={pos.name ? 'relative group/name cursor-default' : undefined}>
@@ -429,29 +446,31 @@ export default function PortfolioPage() {
                                 </HoverTooltip>
                               </div>
                             )}
-                            <div className="relative group">
-                              <button
-                                onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}
-                                className="text-slate-700 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                </svg>
-                              </button>
-                              <HoverTooltip direction="down" className="w-max whitespace-nowrap">Edit Yahoo! symbol</HoverTooltip>
-                            </div>
-                            <div className="relative group">
-                              <button
-                                onClick={(e) => handleSparkle(e, pos)}
-                                className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
-                              >
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                  <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
-                                  <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
-                                  <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
-                                </svg>
-                              </button>
-                              <HoverTooltip direction="down" className="w-max whitespace-nowrap">AI market analysis</HoverTooltip>
+                            <div className="flex items-center gap-0.5">
+                              <div className="relative group">
+                                <button
+                                  onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}
+                                  className="text-slate-700 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                  </svg>
+                                </button>
+                                <HoverTooltip direction="down" className="w-max whitespace-nowrap">Edit Yahoo! symbol</HoverTooltip>
+                              </div>
+                              <div className="relative group">
+                                <button
+                                  onClick={(e) => handleSparkle(e, pos)}
+                                  className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
+                                >
+                                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
+                                    <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
+                                    <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
+                                  </svg>
+                                </button>
+                                <HoverTooltip direction="down" className="w-max whitespace-nowrap">AI market analysis</HoverTooltip>
+                              </div>
                             </div>
                           </div>
                           <div className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-1 opacity-80">
@@ -555,9 +574,9 @@ export default function PortfolioPage() {
             {/* Total row */}
             <div
               className="grid gap-4 px-8 py-8 mt-12 border-t-2 border-[#2a2e42]/60 bg-linear-to-r from-indigo-500/4 to-purple-500/4 items-center rounded-3xl ring-1 ring-white/5 shadow-2xl"
-              style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}
+              style={{ gridTemplateColumns: tableGridCols }}
             >
-              <div className="col-span-5 flex items-center">
+              <div className="col-span-4 flex items-center">
                 <span className="text-xs font-black text-slate-100 tracking-[0.25em] uppercase">Aggregated Total</span>
               </div>
               <div className="col-span-2 text-right">

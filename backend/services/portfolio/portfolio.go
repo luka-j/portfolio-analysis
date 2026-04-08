@@ -124,10 +124,12 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 		}
 
 		latestPrice := 0.0
+		var currentPriceErr, histErr error
 		if s.CurrentPriceProvider != nil {
 			p, err := s.CurrentPriceProvider.GetCurrentPrice(querySymbol, cachedOnly)
 			if err != nil {
 				log.Printf("Warning: fetching current price for %s (mapped to %s): %v; falling back to history", h.Symbol, querySymbol, err)
+				currentPriceErr = err
 			} else {
 				latestPrice = p
 			}
@@ -136,11 +138,24 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 			prices, err := s.MarketProvider.GetHistory(querySymbol, lookback, today, cachedOnly)
 			if err != nil {
 				log.Printf("Warning: fetching price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
+				histErr = err
 			} else if len(prices) > 0 {
 				latestPrice = prices[len(prices)-1].AdjClose
 				if latestPrice == 0 {
 					latestPrice = prices[len(prices)-1].Close
 				}
+			}
+		}
+
+		// Determine price status on a best-effort basis.
+		var priceStatus string
+		if latestPrice == 0 {
+			if histErr != nil || currentPriceErr != nil {
+				priceStatus = "fetch_failed"
+			} else if checker, ok := s.MarketProvider.(market.PriceStatusChecker); ok && checker.HasCachedData(querySymbol) {
+				priceStatus = "stale"
+			} else {
+				priceStatus = "no_data"
 			}
 		}
 		nativeValue := h.Quantity * latestPrice
@@ -176,6 +191,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 			RealizedGL:      realizedGLMap[k],
 			Value:           convertedValue,
 			Commission:      commissionsMap[k],
+			PriceStatus:     priceStatus,
 		})
 	}
 
