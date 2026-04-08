@@ -1,7 +1,6 @@
 package cashbucket
 
 import (
-	"log"
 	"sort"
 	"time"
 
@@ -86,8 +85,6 @@ func Process(
 		if !isSell(t) && t.BuySell != "BUY" && t.BuySell != "" {
 			if converted != 0 {
 				adjustedFlows = append(adjustedFlows, models.CashFlow{Date: t.DateTime, Amount: converted})
-				log.Printf("[cashbucket] PASS-THROUGH %s (%s) on %s: converted=%.2f → real flow (no bucket interaction)",
-					t.Symbol, t.BuySell, t.DateTime.Format("2006-01-02"), converted)
 			}
 			continue
 		}
@@ -106,31 +103,22 @@ func Process(
 					Date:  truncDate(t.DateTime),
 					Delta: +converted,
 				})
-				log.Printf("[cashbucket] SELL %s on %s: rawAmount=%.2f converted=%.2f → bucket created, expires %s",
-					t.Symbol, t.DateTime.Format("2006-01-02"), rawAmount, converted, expiry.Format("2006-01-02"))
 			} else {
 				// Sell with zero/negative proceeds (e.g. short sale recorded oddly) — treat as real flow.
 				adjustedFlows = append(adjustedFlows, models.CashFlow{Date: t.DateTime, Amount: converted})
-				log.Printf("[cashbucket] SELL %s on %s: converted=%.2f ≤ 0 → real flow (no bucket)",
-					t.Symbol, t.DateTime.Format("2006-01-02"), converted)
 			}
 		} else {
 			// BUY: converted is negative (cash leaves portfolio). The absolute value is the cost.
 			cost := -converted // positive number
 			remaining := cost
-			log.Printf("[cashbucket] BUY  %s (%s) on %s: rawAmount=%.2f converted=%.2f cost=%.2f, buckets available=%d",
-				t.Symbol, t.BuySell, t.DateTime.Format("2006-01-02"), rawAmount, converted, cost, len(buckets))
-
 			for _, b := range buckets {
 				if remaining <= 0 {
 					break
 				}
 				if b.Remaining <= 0 {
-					log.Printf("[cashbucket]   bucket from %s: remaining=0, skip", b.Date.Format("2006-01-02"))
 					continue
 				}
 				if b.ExpiryDate.Before(t.DateTime) {
-					log.Printf("[cashbucket]   bucket from %s: expired on %s, skip", b.Date.Format("2006-01-02"), b.ExpiryDate.Format("2006-01-02"))
 					continue
 				}
 				consume := min64(b.Remaining, remaining)
@@ -141,14 +129,11 @@ func Process(
 					Date:  truncDate(t.DateTime),
 					Delta: -consume,
 				})
-				log.Printf("[cashbucket]   consumed %.2f from bucket (date=%s), bucket remaining=%.2f, buy remaining=%.2f",
-					consume, b.Date.Format("2006-01-02"), b.Remaining, remaining)
 			}
 
 			if remaining > 0 {
 				// Excess buy cost not covered by buckets → real inflow (deposit).
 				adjustedFlows = append(adjustedFlows, models.CashFlow{Date: t.DateTime, Amount: -remaining})
-				log.Printf("[cashbucket]   excess %.2f not covered → real inflow", remaining)
 			}
 		}
 	}
@@ -180,13 +165,9 @@ func Process(
 		if expiryDays == 0 || b.ExpiryDate.Before(asOf) {
 			// Bucket has expired — its remaining amount becomes a real outflow on the expiry date.
 			adjustedFlows = append(adjustedFlows, models.CashFlow{Date: outflowDate, Amount: b.Remaining})
-			log.Printf("[cashbucket] bucket from %s: remaining=%.2f EXPIRED (expiry=%s asOf=%s) → real outflow on %s",
-				b.Date.Format("2006-01-02"), b.Remaining, b.ExpiryDate.Format("2006-01-02"), asOf.Format("2006-01-02"), outflowDate.Format("2006-01-02"))
 		} else {
 			// Still active — counts as pending cash.
 			pendingCash += b.Remaining
-			log.Printf("[cashbucket] bucket from %s: remaining=%.2f ACTIVE (expiry=%s asOf=%s) → pendingCash",
-				b.Date.Format("2006-01-02"), b.Remaining, b.ExpiryDate.Format("2006-01-02"), asOf.Format("2006-01-02"))
 		}
 	}
 
