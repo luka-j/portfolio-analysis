@@ -14,8 +14,11 @@ env:
 
 jobs:
   build:
-    name: Build
+    name: Build (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v6
 
@@ -38,5 +41,11 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Build (linux/amd64)
-        run: task build OS=linux ARCH=amd64
+      - name: Build (linux/${{ matrix.arch }})
+        run: task build OS=linux ARCH=${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-analysis-linux-${{ matrix.arch }}
+          path: dist/portfolio-analysis-linux-${{ matrix.arch }}
