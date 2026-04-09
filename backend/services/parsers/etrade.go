@@ -13,6 +13,34 @@ import (
 	"portfolio-analysis/models"
 )
 
+// validateHeaders returns an error listing any columns from required that are absent in headerMap.
+func validateHeaders(headerMap map[string]int, required []string) error {
+	var missing []string
+	for _, col := range required {
+		if _, ok := headerMap[col]; !ok {
+			missing = append(missing, col)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required columns: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+var esppRequiredCols = []string{
+	"Record Type", "Symbol", "Purchase Date", "Purchase Price", "Purchased Qty.", "Purchase Date FMV",
+}
+
+var rsuRequiredCols = []string{
+	"Record Type", "Grant Number", "Symbol", "Settlement Type",
+	"Vest Period", "Vest Date", "Vested Qty.", "Taxable Gain",
+	"Event Type", "Qty. or Amount", "Date",
+}
+
+var gainsLossesRequiredCols = []string{
+	"Record Type", "Symbol", "Date Sold", "Quantity", "Total Proceeds", "Proceeds Per Share",
+}
+
 // ParseBenefitHistory parses E*Trade BenefitHistory.xlsx for ESPP and RSU vests.
 func ParseBenefitHistory(r io.Reader) ([]models.Transaction, error) {
 	f, err := excelize.OpenReader(r)
@@ -26,6 +54,7 @@ func ParseBenefitHistory(r io.Reader) ([]models.Transaction, error) {
 	}
 
 	var results []models.Transaction
+	recognizedSheets := 0
 
 	for _, sheetName := range f.GetSheetList() {
 		rows, err := f.GetRows(sheetName)
@@ -33,9 +62,8 @@ func ParseBenefitHistory(r io.Reader) ([]models.Transaction, error) {
 			continue
 		}
 
-		headers := rows[0]
 		headerMap := make(map[string]int)
-		for i, h := range headers {
+		for i, h := range rows[0] {
 			headerMap[strings.TrimSpace(h)] = i
 		}
 
@@ -43,14 +71,25 @@ func ParseBenefitHistory(r io.Reader) ([]models.Transaction, error) {
 		_, isRSU := headerMap["Settlement Type"]
 
 		if isESPP {
+			recognizedSheets++
+			if err := validateHeaders(headerMap, esppRequiredCols); err != nil {
+				return nil, fmt.Errorf("sheet %q looks like ESPP data but %w", sheetName, err)
+			}
 			results = append(results, parseESPP(rows, headerMap)...)
 		} else if isRSU {
+			recognizedSheets++
+			if err := validateHeaders(headerMap, rsuRequiredCols); err != nil {
+				return nil, fmt.Errorf("sheet %q looks like RSU data but %w", sheetName, err)
+			}
 			results = append(results, parseRSU(rows, headerMap)...)
 		}
 	}
 
+	if recognizedSheets == 0 {
+		return nil, fmt.Errorf("no ESPP or RSU sheets found; verify this is an E*Trade Benefit History report")
+	}
 	if len(results) == 0 {
-		return nil, fmt.Errorf("did not find valid ESPP or RSU data in any sheet")
+		return nil, fmt.Errorf("found ESPP/RSU sheets but no transactions could be parsed; check the file content")
 	}
 
 	return results, nil
@@ -250,10 +289,13 @@ func ParseGainsLosses(r io.Reader) ([]models.Transaction, error) {
 		return nil, fmt.Errorf("excel file is empty or missing data")
 	}
 
-	headers := rows[0]
 	headerMap := make(map[string]int)
-	for i, h := range headers {
+	for i, h := range rows[0] {
 		headerMap[strings.TrimSpace(h)] = i
+	}
+
+	if err := validateHeaders(headerMap, gainsLossesRequiredCols); err != nil {
+		return nil, fmt.Errorf("file does not look like a G&L Expanded report: %w", err)
 	}
 
 	var results []models.Transaction
@@ -306,6 +348,10 @@ func ParseGainsLosses(r io.Reader) ([]models.Transaction, error) {
 			}
 			results = append(results, txn)
 		}
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no sell transactions found; verify this is a G&L Expanded report")
 	}
 
 	return results, nil
