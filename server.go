@@ -142,6 +142,7 @@ func setupFrontendRoutes(r *gin.Engine, fileSystem http.FileSystem) {
 		}
 		defer index.Close()
 		content, _ := io.ReadAll(index)
+		c.Header("Cache-Control", "no-cache")
 		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
 	})
 }
