@@ -8,6 +8,7 @@ export default function NavBar() {
   const navigate = useNavigate()
   const { privacy, togglePrivacy } = usePrivacy()
   const [llmAvailable, setLlmAvailable] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     getLLMAvailable()
@@ -25,9 +26,11 @@ export default function NavBar() {
       isActive ? 'text-white active' : 'text-slate-500 hover:text-slate-200'
     }`
 
+  const closeMobile = () => setMobileOpen(false)
+
   return (
-    <div className="w-full pt-4 pb-1 mb-4 flex justify-center">
-      <div className="w-full max-w-7xl px-8 flex items-center justify-between">
+    <div className="w-full pt-4 pb-1 mb-4 flex justify-center relative">
+      <div className="w-full max-w-7xl px-4 md:px-8 flex items-center justify-between">
 
         {/* Left: Logo */}
         <div className="flex-1 flex items-center justify-start">
@@ -39,8 +42,8 @@ export default function NavBar() {
           </div>
         </div>
 
-        {/* Center: Navigation Links */}
-        <nav className="flex-1 flex justify-center items-center gap-10">
+        {/* Center: Navigation Links (desktop only) */}
+        <nav className="hidden md:flex flex-1 justify-center items-center gap-10">
           <NavLink to="/" className={linkClass} end>
             Dashboard
           </NavLink>
@@ -83,7 +86,7 @@ export default function NavBar() {
           )}
         </nav>
 
-        {/* Right: Privacy indicator + Logout */}
+        {/* Right: Privacy indicator + Logout + (mobile) hamburger */}
         <div className="flex-1 flex justify-end items-center gap-1">
           {privacy && (
             <div className="relative group">
@@ -112,9 +115,66 @@ export default function NavBar() {
               <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </button>
+          <button
+            onClick={() => setMobileOpen(o => !o)}
+            className="md:hidden p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200"
+            aria-label="Toggle menu"
+            aria-expanded={mobileOpen}
+          >
+            {mobileOpen ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            )}
+          </button>
         </div>
 
       </div>
+
+      {/* Mobile drawer panel */}
+      {mobileOpen && (
+        <div className="md:hidden absolute top-full left-0 right-0 z-40 mt-1 mx-4 rounded-2xl bg-[#13151f] border border-white/8 shadow-2xl backdrop-blur-2xl overflow-hidden">
+          <nav className="flex flex-col divide-y divide-white/5">
+            <NavLink to="/" end onClick={closeMobile} className={({ isActive }) => `px-5 py-3.5 text-sm font-medium ${isActive ? 'text-white bg-indigo-500/10' : 'text-slate-300 hover:bg-white/5'}`}>
+              Dashboard
+            </NavLink>
+            <NavLink to="/portfolio" onClick={closeMobile} className={({ isActive }) => `px-5 py-3.5 text-sm font-medium ${isActive ? 'text-white bg-indigo-500/10' : 'text-slate-300 hover:bg-white/5'}`}>
+              Portfolio
+            </NavLink>
+            <NavLink to="/analysis" onClick={closeMobile} className={({ isActive }) => `px-5 py-3.5 text-sm font-medium ${isActive ? 'text-white bg-indigo-500/10' : 'text-slate-300 hover:bg-white/5'}`}>
+              Analysis
+            </NavLink>
+            <NavLink to="/breakdown" onClick={closeMobile} className={({ isActive }) => `px-5 py-3.5 text-sm font-medium ${isActive ? 'text-white bg-indigo-500/10' : 'text-slate-300 hover:bg-white/5'}`}>
+              Breakdown
+            </NavLink>
+            {privacy ? (
+              <span className="px-5 py-3.5 text-sm font-medium text-slate-600 cursor-not-allowed">
+                Tax <span className="text-[10px] font-normal">(unavailable in private mode)</span>
+              </span>
+            ) : (
+              <NavLink to="/tax" onClick={closeMobile} className={({ isActive }) => `px-5 py-3.5 text-sm font-medium ${isActive ? 'text-white bg-indigo-500/10' : 'text-slate-300 hover:bg-white/5'}`}>
+                Tax
+              </NavLink>
+            )}
+            {llmAvailable ? (
+              <NavLink to="/llm" onClick={closeMobile} className={({ isActive }) => `px-5 py-3.5 text-sm font-medium ${isActive ? 'text-white bg-indigo-500/10' : 'text-slate-300 hover:bg-white/5'}`}>
+                LLM
+              </NavLink>
+            ) : (
+              <span className="px-5 py-3.5 text-sm font-medium text-slate-600 cursor-not-allowed">
+                LLM <span className="text-[10px] font-normal">(configure GEMINI_API_KEY)</span>
+              </span>
+            )}
+          </nav>
+        </div>
+      )}
     </div>
   )
 }

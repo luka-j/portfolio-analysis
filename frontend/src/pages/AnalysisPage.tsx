@@ -271,7 +271,7 @@ export default function AnalysisPage() {
             <div className="flex flex-col items-center gap-2">
               <div className="relative group/rfr cursor-default">
                 <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Risk-free rate</span>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/rfr:opacity-100 transition-opacity z-50 shadow-2xl">
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 max-w-[calc(100vw-2rem)] px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/rfr:opacity-100 transition-opacity z-50 shadow-2xl">
                   The annual return of a theoretically risk-free asset. Used as the baseline in Sharpe and Sortino ratio calculations — only returns above this threshold are treated as compensation for risk.
                 </div>
               </div>
@@ -514,7 +514,7 @@ export default function AnalysisPage() {
                 {standaloneError && (
                   <p className="mb-3 px-4 py-3 rounded-xl bg-red-500/10 text-red-400 text-sm border border-red-500/20">{standaloneError}</p>
                 )}
-                <table className="w-full text-sm">
+                <table className="w-full min-w-160 text-sm">
                   <thead>
                     <tr className="border-b border-[#2a2e42]/60">
                       {(['Security', 'Sharpe', 'VAMI', 'Volatility', 'Sortino', 'Max DD'] as const).map(h => {
@@ -571,7 +571,7 @@ export default function AnalysisPage() {
             {compareResults.length > 0 && (
               <div className="overflow-x-auto overflow-y-hidden w-full">
                 <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Benchmark Comparison</p>
-                <table className="w-full text-sm">
+                <table className="w-full min-w-160 text-sm">
                   <thead>
                     <tr className="border-b border-[#2a2e42]/60">
                       {(['Security', 'Alpha', 'Beta', 'Treynor', 'Tracking Err', 'Info Ratio', 'Correlation'] as const).map(h => {
@@ -587,7 +587,7 @@ export default function AnalysisPage() {
                           </th>
                         )
                       })}
-                      <th className="py-4 px-4 w-8" />
+                      <th className="py-4 px-4 w-8 sticky right-0 bg-[#0f1117]" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#2a2e42]/30">
@@ -600,7 +600,7 @@ export default function AnalysisPage() {
                         <td className="py-4 px-4 text-right text-slate-400 font-medium">{(bm.tracking_error * 100).toFixed(2)}%</td>
                         <td className="py-4 px-4 text-right text-slate-300 font-medium tabular-nums">{bm.information_ratio.toFixed(3)}</td>
                         <td className="py-4 px-4 text-right text-slate-400 font-medium">{bm.correlation.toFixed(3)}</td>
-                        <td className="py-4 px-4 text-right">
+                        <td className="py-4 px-4 text-right sticky right-0 bg-[#0f1117]">
                           {portfolioStandalone && !bm.error && (
                             <button
                               onClick={() => navigate('/llm', {

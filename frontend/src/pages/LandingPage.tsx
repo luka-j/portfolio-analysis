@@ -311,13 +311,13 @@ export default function LandingPage() {
   const twr = typeof stats?.twr === 'number' ? (stats.twr as number) * 100 : null
 
   return (
-    <div className="h-screen bg-[#0f1117] flex flex-col overflow-hidden">
+    <div className="min-h-screen md:h-screen bg-[#0f1117] flex flex-col overflow-x-hidden md:overflow-hidden">
       <NavBar />
 
       {/* Hero section centered */}
       <div className="z-10 w-full flex flex-col items-center gap-2 pointer-events-none -mb-6">
         <div className="pointer-events-auto flex items-center gap-3">
-          <h1 className="text-4xl md:text-6xl font-bold text-white tabular-nums tracking-tight [text-shadow:0_0_20px_rgba(255,255,255,0.05)] flex items-baseline gap-2">
+          <h1 className="text-5xl md:text-6xl font-bold text-white tabular-nums tracking-tight [text-shadow:0_0_20px_rgba(255,255,255,0.05)] flex items-baseline gap-2">
             <button
               className="text-indigo-300/70 hover:text-indigo-300 px-1.5 py-0.5 rounded-lg hover:bg-white/[0.07] hover:backdrop-blur-sm transition-all duration-200 active:scale-95"
               onClick={cycleCurrency}
@@ -325,7 +325,7 @@ export default function LandingPage() {
             >
               {CURRENCY_SYMBOLS[currency]}
             </button>
-          {loading ? '—' : privacy ? '———' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
+          {loading || hasTransactions === false ? '—' : privacy ? '———' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
           </h1>
           {valueRefreshing && (
             <span className="w-5 h-5 rounded-full border-2 border-indigo-400/25 border-t-indigo-300 animate-spin" />
@@ -358,16 +358,16 @@ export default function LandingPage() {
           <div className="flex items-center gap-8">
             {twr !== null && (
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-xs text-slate-600">TWR</span>
-                <span className={`text-base font-semibold tabular-nums ${twr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span className="text-[10px] md:text-xs text-slate-600">TWR</span>
+                <span className={`text-sm md:text-base font-semibold tabular-nums ${twr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {twr >= 0 ? '+' : ''}{twr.toFixed(2)}%
                 </span>
               </div>
             )}
             {mwr !== null && (
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-xs text-slate-600">MWR</span>
-                <span className={`text-base font-semibold tabular-nums ${mwr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span className="text-[10px] md:text-xs text-slate-600">MWR</span>
+                <span className={`text-sm md:text-base font-semibold tabular-nums ${mwr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {mwr >= 0 ? '+' : ''}{mwr.toFixed(2)}%
                 </span>
               </div>
@@ -475,7 +475,7 @@ export default function LandingPage() {
 
       {hasTransactions === false ? (
         /* ── Empty state: no trades uploaded yet ── */
-        <div className="relative flex-1 flex flex-col items-center justify-center gap-8 px-8 mb-6">
+        <div className="relative flex-1 flex flex-col items-center justify-center gap-8 px-4 md:px-8 mb-6">
           <p className="text-slate-700 text-[10px] font-black uppercase tracking-[0.3em]">Upload your portfolio data to get started</p>
           <div className="flex flex-col sm:flex-row gap-4 w-full max-w-2xl">
             {([
@@ -500,7 +500,7 @@ export default function LandingPage() {
           </div>
 
           {/* Status messages */}
-          <div className="absolute bottom-4 left-8">
+          <div className="static md:absolute md:bottom-4 md:left-8">
             {uploading && (
               <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
                 <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
@@ -521,10 +521,10 @@ export default function LandingPage() {
         </div>
       ) : (
         /* ── Normal chart area ── */
-        <div className="relative flex-1 mt-auto flex flex-col justify-end pl-8 pr-24 mb-6">
+        <div className="relative flex-1 mt-auto flex flex-col justify-end pl-2 pr-2 md:pl-8 md:pr-24 mb-6 min-h-80 md:min-h-0">
 
           {/* The chart itself — axes returned and labels added */}
-          <div className="relative w-full h-[85%] min-h-87.5 [@media(max-aspect-ratio:18/10)]:h-[90%]">
+          <div className="relative w-full h-80 md:h-[85%] md:min-h-87.5 [@media(max-aspect-ratio:18/10)]:md:h-[90%]">
             {chartRefreshing && (
               <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
             )}
@@ -591,8 +591,8 @@ export default function LandingPage() {
             )}
           </div>
 
-          {/* Period vertical pills — middle-right */}
-          <div className="absolute right-8 bottom-44 flex flex-col items-center gap-2 z-10">
+          {/* Period vertical pills — middle-right (desktop) */}
+          <div className="hidden md:flex absolute right-8 bottom-44 flex-col items-center gap-2 z-10">
             {PERIODS.map(p => (
               <button
                 key={p.label}
@@ -608,7 +608,30 @@ export default function LandingPage() {
             ))}
           </div>
 
+          {/* Period horizontal pills — below chart (mobile) */}
+          <div className="md:hidden flex justify-center gap-2 mt-3">
+            {PERIODS.map(p => (
+              <button
+                key={p.label}
+                onClick={() => setPeriod(p.months)}
+                className={`px-4 py-2 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 shadow-lg ${
+                  period === p.months
+                    ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-indigo-600/20'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
           {/* Upload buttons — bottom right */}
+          {uploadExpanded && (
+            <div
+              className="fixed inset-0 z-10 md:hidden"
+              onClick={() => setUploadExpanded(false)}
+            />
+          )}
           <div
             className="absolute bottom-4 right-8 flex flex-col items-end gap-2 z-20"
             onMouseLeave={() => setUploadExpanded(false)}
@@ -631,6 +654,7 @@ export default function LandingPage() {
                 <label
                   key={label}
                   className="flex items-center gap-3 cursor-pointer"
+                  onClick={() => setUploadExpanded(false)}
                   style={{
                     opacity: uploadExpanded ? 1 : 0,
                     transform: uploadExpanded ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.97)',
@@ -648,12 +672,13 @@ export default function LandingPage() {
             </div>
 
             {/* Trigger button */}
-            <div
+            <button
               onMouseEnter={() => setUploadExpanded(true)}
-              className={`w-10 h-10 rounded-xl flex items-center justify-center cursor-default transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}
+              onClick={() => setUploadExpanded(o => !o)}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            </div>
+            </button>
           </div>
 
           {/* Status messages — bottom left */}

@@ -373,7 +373,7 @@ export default function LLMPage() {
   const cannedDisabled = loading || !includePortfolio
 
   return (
-    <div className="h-screen bg-[#0f1117] flex flex-col overflow-hidden">
+    <div className="min-h-screen md:h-screen bg-[#0f1117] flex flex-col md:overflow-hidden">
       <NavBar />
 
       {weightsOpen && (
@@ -389,7 +389,7 @@ export default function LLMPage() {
         />
       )}
 
-      <div className="flex-1 max-w-4xl w-full mx-auto p-4 flex flex-col gap-4 overflow-hidden mb-6">
+      <div className="flex-1 max-w-4xl w-full mx-auto p-4 flex flex-col gap-4 md:overflow-hidden mb-6 min-h-0">
 
         {/* Header */}
         <div className="flex flex-col gap-2 shrink-0">

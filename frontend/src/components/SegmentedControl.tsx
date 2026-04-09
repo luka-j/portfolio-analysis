@@ -25,7 +25,7 @@ export default function SegmentedControl<T extends string | number>({
           <div key={String(opt.value)} className="relative group">
             <button
               onClick={() => onChange(opt.value)}
-              className={`px-6 py-2 rounded-xl text-sm font-medium transition-all ${
+              className={`px-3 md:px-6 py-2 rounded-xl text-sm font-medium transition-all ${
                 value === opt.value ? 'glass active text-indigo-300' : 'text-slate-500 hover:text-slate-300'
               }`}
             >

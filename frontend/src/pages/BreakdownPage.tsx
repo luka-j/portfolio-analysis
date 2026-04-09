@@ -98,13 +98,13 @@ function SectionCard({ section, formatValue, privacy }: SectionCardProps) {
         </div>
 
         {/* Table */}
-        <div className="flex-1 w-full max-w-2xl">
-          <div className={section.entries.length > 6 ? 'overflow-y-auto max-h-78' : ''}>
+        <div className="flex-1 w-full max-w-2xl min-w-0">
+          <div className={`overflow-x-auto${section.entries.length > 6 ? ' overflow-y-auto max-h-78' : ''}`}>
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-[#0f1117] z-10">
               <tr className="text-slate-500 text-xs font-semibold border-b border-[#2a2e42]/40">
-                <th className="text-left py-4 pr-6 w-1/2">Category</th>
-                <th className="text-right py-4 pr-6 w-32">Value</th>
+                <th className="text-left py-4 pr-3 md:pr-6 w-1/2">Category</th>
+                <th className="text-right py-4 pr-3 md:pr-6 w-24 md:w-32">Value</th>
                 <th className="text-right py-4">Weight</th>
               </tr>
             </thead>
@@ -116,21 +116,21 @@ function SectionCard({ section, formatValue, privacy }: SectionCardProps) {
                   onMouseEnter={() => setActiveIdx(idx)}
                   onMouseLeave={() => setActiveIdx(null)}
                 >
-                  <td className="py-4 pr-6">
+                  <td className="py-4 pr-3 md:pr-6">
                     <div className="flex items-center gap-3">
                       <span
                         className={`w-2.5 h-2.5 rounded-full shrink-0 transition-transform duration-300 ${activeIdx === idx ? 'scale-125' : 'group-hover:scale-110'}`}
                         style={{ backgroundColor: sectionColor(idx) }}
                       />
-                      <span className="text-slate-200 text-sm group-hover:text-indigo-400 transition-colors truncate max-w-[320px]" title={e.label}>{e.label}</span>
+                      <span className="text-slate-200 text-sm group-hover:text-indigo-400 transition-colors truncate max-w-[40vw] md:max-w-[320px]" title={e.label}>{e.label}</span>
                     </div>
                   </td>
-                  <td className="py-4 pr-6 text-right text-slate-400 tabular-nums text-sm">
+                  <td className="py-4 pr-3 md:pr-6 text-right text-slate-400 tabular-nums text-sm">
                     {privacy ? '—' : formatValue(e.value)}
                   </td>
                   <td className="py-4 text-right">
                     <div className="flex items-center justify-end gap-3">
-                      <div className="w-20 h-1 bg-white/5 rounded-full overflow-hidden">
+                      <div className="hidden md:block w-20 h-1 bg-white/5 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-700 ease-out ${activeIdx === idx ? 'opacity-100' : 'opacity-60'}`}
                           style={{ width: `${Math.min(e.percentage, 100)}%`, backgroundColor: sectionColor(idx) }}

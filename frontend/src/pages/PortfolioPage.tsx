@@ -276,11 +276,14 @@ export default function PortfolioPage() {
         <div className="flex flex-wrap justify-center gap-4 mb-6">
           <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
           <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
-          <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+          {/* Period shown here on desktop only; on mobile it moves below the table */}
+          <div className="hidden md:block">
+            <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+          </div>
         </div>
 
         {period === 'custom' && (
-          <div className="flex justify-center mb-10">
+          <div className="hidden md:flex justify-center mb-10">
             <DateRangePicker
               initialFrom={customFrom}
               initialTo={customTo}
@@ -289,7 +292,7 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {period !== 'custom' && <div className="mb-10" />}
+        {period !== 'custom' && <div className="hidden md:block mb-10" />}
 
         {error && (
           <div className="w-full mb-10 px-8 py-4 rounded-2xl bg-red-500/10 text-red-400 text-xs font-black uppercase tracking-widest border border-red-500/20 text-center">
@@ -302,7 +305,8 @@ export default function PortfolioPage() {
         ) : positions.length === 0 ? (
           <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
         ) : (
-          <div className="w-full selection:bg-indigo-500/20">
+          <div className="w-full selection:bg-indigo-500/20 overflow-x-auto">
+          <div className="min-w-[960px]">
             {/* Table header */}
             <div
               className="grid gap-4 px-8 py-5 text-xs font-semibold text-slate-500 border-b border-[#2a2e42]/40"
@@ -422,12 +426,12 @@ export default function PortfolioPage() {
                             </HoverTooltip>
                           </div>
                         ) : (
-                          <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-indigo-500/10 to-purple-500/10 flex items-center justify-center text-xs font-bold text-indigo-300 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
+                          <div className="hidden md:flex w-10 h-10 rounded-2xl bg-linear-to-br from-indigo-500/10 to-purple-500/10 items-center justify-center text-xs font-bold text-indigo-300 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
                             {pos.symbol.slice(0, 2)}
                           </div>
                         )}
                         <div className="min-w-0">
-                          <div className="font-semibold flex items-center gap-2 text-slate-100 text-sm tracking-tight">
+                          <div className="font-semibold flex items-center gap-2 text-slate-100 text-sm tracking-tight min-w-0">
                             <span className={pos.name ? 'relative group/name cursor-default' : undefined}>
                               {pos.symbol}
                               {pos.name && (
@@ -446,7 +450,7 @@ export default function PortfolioPage() {
                                 </HoverTooltip>
                               </div>
                             )}
-                            <div className="flex items-center gap-0.5">
+                            <div className="flex items-center gap-0.5 shrink-0">
                               <div className="relative group">
                                 <button
                                   onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}
@@ -636,7 +640,20 @@ export default function PortfolioPage() {
               Change % and Avg. Price over {periodFrom} — {periodTo}
             </div>
           </div>
+          </div>
         )}
+
+        {/* Mobile period selector — below the table */}
+        <div className="md:hidden mt-8 flex flex-col items-center gap-4">
+          <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+          {period === 'custom' && (
+            <DateRangePicker
+              initialFrom={customFrom}
+              initialTo={customTo}
+              onApply={(f, t) => { setCustomFrom(f); setCustomTo(t) }}
+            />
+          )}
+        </div>
     </PageLayout>
   )
 }
@@ -669,8 +686,7 @@ function TradeDetail({ symbol, exchange, displayCurrency, privacy }: { symbol: s
 
   return (
     <div className="px-10 py-8 bg-[#0f1117]">
-      <div className="flex items-center gap-3 mb-5 px-5">
-        <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+      <div className="flex items-center mb-5 px-5">
         <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em]">Transaction History — {symbol}</p>
       </div>
       <div className="bg-[#1a1d2e]/40 border border-white/5 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-3xl ring-1 ring-white/5">

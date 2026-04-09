@@ -26,7 +26,8 @@
       "WebSearch",
       "Bash(gh api:*)",
       "WebFetch(domain:github.com)",
-      "Bash(grep -E \"\\\\.\\(go\\)$\")"
+      "Bash(grep -E \"\\\\.\\(go\\)$\")",
+      "Bash(wc -l /d/projects/gofolio-analysis/frontend/src/components/*.tsx)"
     ]
   }
 }

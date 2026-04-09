@@ -254,7 +254,7 @@ export default function TaxPage() {
               </div>
 
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-160 text-sm">
                   <thead>
                     <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
                       <th className="text-left py-2.5 px-4">Event</th>
@@ -332,7 +332,7 @@ export default function TaxPage() {
               </div>
 
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-3xl text-sm">
                   <thead>
                     <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
                       <th className="text-left py-2.5 px-4">Security</th>
