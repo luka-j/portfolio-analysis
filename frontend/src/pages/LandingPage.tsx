@@ -414,7 +414,7 @@ export default function LandingPage() {
                  <HoverTooltip direction="down" className="w-32 text-center">Regenerate summary</HoverTooltip>
                </div>
              </div>
-             <div className="text-xs text-indigo-100/90 text-left leading-relaxed font-medium min-h-[30px] w-full max-w-none px-4 mx-auto flex flex-col items-center justify-center mt-1">
+             <div className="text-xs text-indigo-100/90 text-left leading-relaxed font-medium min-h-7.5 w-full max-w-none px-4 mx-auto flex flex-col items-center justify-center mt-1">
                {llmSummaryLoading ? (
                  <span className="animate-pulse text-center">Analyzing latest market movements...</span>
                ) : (
@@ -524,7 +524,7 @@ export default function LandingPage() {
         <div className="relative flex-1 mt-auto flex flex-col justify-end pl-8 pr-24 mb-6">
 
           {/* The chart itself — axes returned and labels added */}
-          <div className="relative w-full h-[85%] min-h-[350px] [@media(max-aspect-ratio:18/10)]:h-[90%]">
+          <div className="relative w-full h-[85%] min-h-87.5 [@media(max-aspect-ratio:18/10)]:h-[90%]">
             {chartRefreshing && (
               <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
             )}
