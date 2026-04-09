@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,11 +21,23 @@ type PortfolioHandler struct {
 	Repo             *flexquery.Repository
 	PortfolioService *portfolio.Service
 	FXService        *fx.Service
+	activeUploads    sync.Map // key: userHash string, value: struct{}
 }
 
 // NewPortfolioHandler creates a new PortfolioHandler.
 func NewPortfolioHandler(repo *flexquery.Repository, ps *portfolio.Service, fxSvc *fx.Service) *PortfolioHandler {
 	return &PortfolioHandler{Repo: repo, PortfolioService: ps, FXService: fxSvc}
+}
+
+// claimUpload marks an upload as in-progress for the user. Returns false if one is already running.
+func (h *PortfolioHandler) claimUpload(userHash string) bool {
+	_, loaded := h.activeUploads.LoadOrStore(userHash, struct{}{})
+	return !loaded
+}
+
+// releaseUpload clears the in-progress upload marker for the user.
+func (h *PortfolioHandler) releaseUpload(userHash string) {
+	h.activeUploads.Delete(userHash)
 }
 
 // Upload handles POST /api/v1/portfolio/upload
@@ -33,6 +46,12 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 
 	userHash := c.GetString(middleware.UserHashKey)
+
+	if !h.claimUpload(userHash) {
+		c.JSON(http.StatusConflict, gin.H{"error": "an upload is already in progress for this user"})
+		return
+	}
+	defer h.releaseUpload(userHash)
 
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
@@ -60,6 +79,13 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 
 // UploadEtradeBenefits handles POST /api/v1/portfolio/upload/etrade/benefits
 func (h *PortfolioHandler) UploadEtradeBenefits(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+	if !h.claimUpload(userHash) {
+		c.JSON(http.StatusConflict, gin.H{"error": "an upload is already in progress for this user"})
+		return
+	}
+	defer h.releaseUpload(userHash)
+
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file field: " + err.Error()})
@@ -78,6 +104,13 @@ func (h *PortfolioHandler) UploadEtradeBenefits(c *gin.Context) {
 
 // UploadEtradeSales handles POST /api/v1/portfolio/upload/etrade/sales
 func (h *PortfolioHandler) UploadEtradeSales(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+	if !h.claimUpload(userHash) {
+		c.JSON(http.StatusConflict, gin.H{"error": "an upload is already in progress for this user"})
+		return
+	}
+	defer h.releaseUpload(userHash)
+
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file field: " + err.Error()})
