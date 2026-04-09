@@ -1,32 +1,40 @@
 # syntax=docker/dockerfile:1
 
-# ─── Build stage ──────────────────────────────────────────────────────────────
+# ─── Frontend build stage ─────────────────────────────────────────────────────
+# Runs on host platform; output is architecture-independent, so this stage
+# is shared across all platform targets and only runs once.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN npm ci --prefix frontend
+COPY frontend/ ./frontend/
+RUN npm run build --prefix frontend
+
+# ─── Go build stage ───────────────────────────────────────────────────────────
 # Always runs on the host platform so cross-compilation is fast (pure Go).
 FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 
 ARG TARGETARCH
 ARG TARGETOS=linux
 
-# Install Node.js, npm, and Task runner.
-RUN apk add --no-cache nodejs npm bash && \
+# Install Task runner only (Node.js not needed here).
+RUN apk add --no-cache bash && \
     go install github.com/go-task/task/v3/cmd/task@latest
 
 WORKDIR /app
 
-# Cache Go modules — layer is reused as long as go files don't change.
+# Cache Go modules — layer is reused as long as go.mod/go.sum don't change.
 COPY go.mod go.sum ./
 COPY backend/go.mod backend/go.sum ./backend/
-RUN go work init . ./backend
+RUN go work init . ./backend && go mod download all
 
-# Cache npm dependencies — layer is reused as long as package-lock.json doesn't change.
-COPY frontend/package.json frontend/package-lock.json ./frontend/
-RUN npm ci --prefix frontend
-
-# Copy the rest of the source.
+# Copy source; frontend/dist is excluded by .dockerignore so the pre-built
+# artifact copied below won't be overwritten.
 COPY . .
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
 
-# Build: Task runs `npm run build` then `go build` with GOOS/GOARCH set.
-RUN task build OS=${TARGETOS} ARCH=${TARGETARCH}
+# Compile Go binary only (frontend already built above).
+RUN task go-build OS=${TARGETOS} ARCH=${TARGETARCH}
 
 # ─── Final image ──────────────────────────────────────────────────────────────
 FROM alpine:3.21
