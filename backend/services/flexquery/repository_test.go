@@ -23,7 +23,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&gorm.Config{},
 	)
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Transaction{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.CurrentPrice{}, &models.AssetFundamental{}, &models.EtfBreakdown{}))
 	return db
 }
 
@@ -226,6 +226,62 @@ func TestUpdateSymbolMapping_ScopedByExchange(t *testing.T) {
 
 	assert.Equal(t, "VUAA.L", lse.YahooSymbol, "LSEETF row should be mapped")
 	assert.Equal(t, "", xtra.YahooSymbol, "XTRA row must NOT be affected by a mapping scoped to LSEETF")
+}
+
+// TestUpdateSymbolMapping_PurgesOldCache verifies that switching the Yahoo symbol for a
+// broker ticker deletes cached market data, current prices, asset fundamentals, and ETF
+// breakdowns that were fetched under the old effective ticker.
+func TestUpdateSymbolMapping_PurgesOldCache(t *testing.T) {
+	db := setupTestDB(t)
+	user := createUserWithHash(t, db, "hash7")
+
+	dt := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedTrade(t, db, user.ID, "ARMY", "C1", "LSE", dt)
+
+	// Seed stale cache data under the broker symbol "ARMY" (fetched before mapping existed).
+	db.Create(&models.MarketData{Symbol: "ARMY", Date: dt, Volume: 100})
+	db.Create(&models.CurrentPrice{Symbol: "ARMY", Price: 10.0, FetchedAt: dt})
+	db.Create(&models.AssetFundamental{Symbol: "ARMY", AssetType: "Stock"})
+	db.Create(&models.EtfBreakdown{FundSymbol: "ARMY", Dimension: "sector", Label: "Defense", Weight: 1.0})
+
+	repo := NewRepository(db)
+	err := repo.UpdateSymbolMapping("hash7", "ARMY", "LSE", "ARMY.L")
+	require.NoError(t, err)
+
+	var mdCount, cpCount, afCount, etfCount int64
+	db.Model(&models.MarketData{}).Where("symbol = ?", "ARMY").Count(&mdCount)
+	db.Model(&models.CurrentPrice{}).Where("symbol = ?", "ARMY").Count(&cpCount)
+	db.Model(&models.AssetFundamental{}).Where("symbol = ?", "ARMY").Count(&afCount)
+	db.Model(&models.EtfBreakdown{}).Where("fund_symbol = ?", "ARMY").Count(&etfCount)
+
+	assert.Zero(t, mdCount, "market_data for old ticker should be purged")
+	assert.Zero(t, cpCount, "current_prices for old ticker should be purged")
+	assert.Zero(t, afCount, "asset_fundamentals for old ticker should be purged")
+	assert.Zero(t, etfCount, "etf_breakdowns for old ticker should be purged")
+}
+
+// TestUpdateSymbolMapping_NoPurgeWhenTickerUnchanged verifies that updating to the
+// same effective Yahoo symbol does not delete any cached data.
+func TestUpdateSymbolMapping_NoPurgeWhenTickerUnchanged(t *testing.T) {
+	db := setupTestDB(t)
+	user := createUserWithHash(t, db, "hash8")
+
+	dt := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedTrade(t, db, user.ID, "AAPL", "C2", "NASDAQ", dt)
+
+	// Seed cache data for AAPL.L (the existing Yahoo mapping).
+	db.Create(&models.MarketData{Symbol: "AAPL.L", Date: dt, Volume: 50})
+
+	// First mapping: AAPL → AAPL.L
+	repo := NewRepository(db)
+	require.NoError(t, repo.UpdateSymbolMapping("hash8", "AAPL", "NASDAQ", "AAPL.L"))
+
+	// Second call with identical Yahoo symbol — should not purge.
+	require.NoError(t, repo.UpdateSymbolMapping("hash8", "AAPL", "NASDAQ", "AAPL.L"))
+
+	var mdCount int64
+	db.Model(&models.MarketData{}).Where("symbol = ?", "AAPL.L").Count(&mdCount)
+	assert.Equal(t, int64(1), mdCount, "market_data for unchanged ticker must not be purged")
 }
 
 // TestParseAndSave_StoresConid verifies that ParseAndSave persists the conid

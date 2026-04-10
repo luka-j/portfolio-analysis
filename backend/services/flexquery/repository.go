@@ -292,10 +292,31 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 // UpdateSymbolMapping updates the YahooSymbol for all trades of a given symbol and exchange for a user.
 // When the symbol belongs to transactions that have a conid, all transactions sharing those conids
 // are updated (covering historical rows where the symbol may differ due to a ticker rename).
+// If the effective Yahoo ticker changes, all cached market data fetched under the old ticker is purged
+// so the next request fetches fresh data under the correct symbol.
 func (r *Repository) UpdateSymbolMapping(userHash, symbol, exchange, yahooSymbol string) error {
 	var user models.User
 	if err := r.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
 		return fmt.Errorf("user not found")
+	}
+
+	// Capture the currently-used effective symbol before the update so we can purge
+	// cached data that was fetched under the wrong ticker.
+	var oldYahooSymbol string
+	oldSymQuery := r.DB.Model(&models.Transaction{}).
+		Where("user_id = ? AND symbol = ? AND yahoo_symbol != ''", user.ID, symbol)
+	if exchange != "" {
+		oldSymQuery = oldSymQuery.Where("listing_exchange = ?", exchange)
+	}
+	oldSymQuery.Limit(1).Pluck("yahoo_symbol", &oldYahooSymbol)
+
+	oldEffective := oldYahooSymbol
+	if oldEffective == "" {
+		oldEffective = symbol
+	}
+	newEffective := yahooSymbol
+	if newEffective == "" {
+		newEffective = symbol
 	}
 
 	// Find all conids associated with the given (canonical) symbol and exchange for this user.
@@ -336,5 +357,18 @@ func (r *Repository) UpdateSymbolMapping(userHash, symbol, exchange, yahooSymbol
 		}
 	}
 
-	return query.Update("yahoo_symbol", yahooSymbol).Error
+	if err := query.Update("yahoo_symbol", yahooSymbol).Error; err != nil {
+		return err
+	}
+
+	// Purge all cached data fetched under the old effective ticker so the next
+	// request fetches fresh, correct data under the new Yahoo symbol.
+	if oldEffective != newEffective {
+		r.DB.Where("symbol = ?", oldEffective).Delete(&models.MarketData{})
+		r.DB.Where("symbol = ?", oldEffective).Delete(&models.CurrentPrice{})
+		r.DB.Where("symbol = ?", oldEffective).Delete(&models.AssetFundamental{})
+		r.DB.Where("fund_symbol = ?", oldEffective).Delete(&models.EtfBreakdown{})
+	}
+
+	return nil
 }
