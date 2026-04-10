@@ -3,6 +3,7 @@ package flexquery
 import (
 	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
 	"strconv"
 	"strings"
@@ -102,10 +103,11 @@ type xmlCashTxn struct {
 // Parser handles parsing IB FlexQuery XML files into FlexQueryData.
 type Parser struct{}
 
-// ParseBytes parses raw XML bytes into FlexQueryData.
-func (p *Parser) ParseBytes(raw []byte) (*models.FlexQueryData, error) {
+// Parse reads an IB FlexQuery XML stream and returns the parsed FlexQueryData.
+// It uses xml.NewDecoder so the raw bytes are never fully buffered in memory.
+func (p *Parser) Parse(r io.Reader) (*models.FlexQueryData, error) {
 	var resp flexQueryResponse
-	if err := xml.Unmarshal(raw, &resp); err != nil {
+	if err := xml.NewDecoder(r).Decode(&resp); err != nil {
 		return nil, fmt.Errorf("parsing XML: %w", err)
 	}
 

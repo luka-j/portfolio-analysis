@@ -27,6 +27,10 @@ func (m *mockMarket) GetHistory(symbol string, from, to time.Time, cachedOnly bo
 	}, nil
 }
 
+func (m *mockMarket) TradingDates(from, to time.Time) ([]time.Time, error) {
+	return nil, nil
+}
+
 func setupTaxService() *Service {
 	market := &mockMarket{
 		rates: map[string]float64{

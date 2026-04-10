@@ -27,12 +27,7 @@ func NewRepository(db *gorm.DB) *Repository {
 // ParseAndSave reads an IB FlexQuery XML from r, parses it,
 // and saves new transactions into the database, skipping duplicates.
 func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.FlexQueryData, error) {
-	raw, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, fmt.Errorf("reading upload: %w", err)
-	}
-
-	data, err := r.parser.ParseBytes(raw)
+	data, err := r.parser.Parse(reader)
 	if err != nil {
 		return nil, err
 	}

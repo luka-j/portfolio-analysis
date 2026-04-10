@@ -23,6 +23,10 @@ import (
 // This allows swapping in a mock for testing.
 type Provider interface {
 	GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error)
+	// TradingDates returns the set of market-open dates in [from, to], ordered ascending.
+	// Used by the portfolio service to skip non-trading days without forward-filling
+	// price data across every calendar day.
+	TradingDates(from, to time.Time) ([]time.Time, error)
 }
 
 // CurrentPriceProvider returns a live or recently-cached market price for a symbol.
@@ -81,6 +85,19 @@ func NewYahooFinanceServiceWithTransport(transport http.RoundTripper) *YahooFina
 	}
 }
 
+// TradingDates returns all dates in [from, to] that have at least one real (non-dummy)
+// market-data row, ordered ascending. Used by the portfolio service to avoid iterating
+// every calendar day when computing daily portfolio values.
+func (s *YahooFinanceService) TradingDates(from, to time.Time) ([]time.Time, error) {
+	var dates []time.Time
+	err := s.DB.Model(&models.MarketData{}).
+		Where("date >= ? AND date <= ? AND volume != -1", from, to).
+		Distinct("date").
+		Order("date ASC").
+		Pluck("date", &dates).Error
+	return dates, err
+}
+
 // HasCachedData reports whether any market data rows exist for the given symbol,
 // regardless of date. Used to distinguish "never seen this symbol" from "had data but now stale".
 func (s *YahooFinanceService) HasCachedData(symbol string) bool {
@@ -98,43 +115,23 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 	fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
 	toDate := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Fetch raw cache models to include dummy cache points
-	dbData, err := s.loadRawCache(symbol, fromDate, toDate)
+	if cachedOnly {
+		return s.loadCache(symbol, fromDate, toDate)
+	}
+
+	firstDate, lastDate, hasCache, err := s.loadCacheBounds(symbol, fromDate, toDate)
 	if err != nil {
 		return nil, err
 	}
 
-	if cachedOnly {
-		// Just return what we have in DB, no external fetch.
-		var cachedData []models.PricePoint
-		for _, m := range dbData {
-			if m.Volume == -1 {
-				continue // skip negative cache markers
-			}
-			cachedData = append(cachedData, models.PricePoint{
-				Date:     m.Date,
-				Open:     m.Open,
-				High:     m.High,
-				Low:      m.Low,
-				Close:    m.Close,
-				AdjClose: m.AdjClose,
-				Volume:   m.Volume,
-			})
-		}
-		return cachedData, nil
-	}
-
 	var missingRanges [][2]time.Time
 
-	if len(dbData) == 0 {
+	if !hasCache {
 		missingRanges = append(missingRanges, [2]time.Time{fromDate, toDate})
 	} else {
-		first := dbData[0].Date
-		last := dbData[len(dbData)-1].Date
-
 		// If the first cached date is > from + 5 days (weekends/holidays leeway)
-		if first.After(fromDate.AddDate(0, 0, 5)) {
-			missingRanges = append(missingRanges, [2]time.Time{fromDate, first.AddDate(0, 0, -1)})
+		if firstDate.After(fromDate.AddDate(0, 0, 5)) {
+			missingRanges = append(missingRanges, [2]time.Time{fromDate, firstDate.AddDate(0, 0, -1)})
 		}
 
 		// Don't request future dates from Yahoo
@@ -144,12 +141,11 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 			end = now
 		}
 
-		if last.Before(end.AddDate(0, 0, -5)) {
-			missingRanges = append(missingRanges, [2]time.Time{last.AddDate(0, 0, 1), end})
+		if lastDate.Before(end.AddDate(0, 0, -5)) {
+			missingRanges = append(missingRanges, [2]time.Time{lastDate.AddDate(0, 0, 1), end})
 		}
 	}
 
-	fetchedAny := false
 	var lastErr error
 	for _, rng := range missingRanges {
 		points, err := s.fetchFromYahoo(symbol, rng[0], rng[1])
@@ -174,7 +170,6 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 				points = append(points, models.PricePoint{Date: rng[0], Volume: -1})
 			}
 			_ = s.saveCache(symbol, points)
-			fetchedAny = true
 		} else {
 			// Yahoo returned success but empty array
 			_ = s.saveCache(symbol, []models.PricePoint{
@@ -184,39 +179,14 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 		}
 	}
 
-	// Read again to get the final merged data (filtered of dummies)
-	if fetchedAny || len(dbData) == 0 {
-		cachedData, err := s.loadCache(symbol, fromDate, toDate)
-		if len(cachedData) > 0 {
-			return cachedData, nil
-		}
-		if lastErr != nil {
-			return nil, lastErr
-		}
-		return nil, err
-	}
-
-	// If we didn't fetch any new real data, just map the dbData we already queried
-	var cachedData []models.PricePoint
-	for _, m := range dbData {
-		if m.Volume == -1 {
-			continue // skip negative cache markers
-		}
-		cachedData = append(cachedData, models.PricePoint{
-			Date:     m.Date,
-			Open:     m.Open,
-			High:     m.High,
-			Low:      m.Low,
-			Close:    m.Close,
-			AdjClose: m.AdjClose,
-			Volume:   m.Volume,
-		})
-	}
-
+	cachedData, err := s.loadCache(symbol, fromDate, toDate)
 	if len(cachedData) > 0 {
 		return cachedData, nil
 	}
-	return nil, lastErr
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, err
 }
 
 // ---------- Yahoo Finance v8 chart API ----------
@@ -616,34 +586,32 @@ func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) 
 
 // ---------- Database cache ----------
 
-func (s *YahooFinanceService) loadRawCache(symbol string, from, to time.Time) ([]models.MarketData, error) {
-	var dbData []models.MarketData
-	err := s.DB.Where("symbol = ? AND date >= ? AND date <= ?", symbol, from, to).Order("date ASC").Find(&dbData).Error
-	return dbData, err
+// loadCacheBounds returns the first and last dates of cached rows (including dummy
+// negative-cache markers) for symbol in [from, to]. Returns hasData=false when no
+// rows exist. The dates guide missing-range detection without loading full OHLCV data.
+func (s *YahooFinanceService) loadCacheBounds(symbol string, from, to time.Time) (first, last time.Time, hasData bool, err error) {
+	var dates []time.Time
+	err = s.DB.Model(&models.MarketData{}).
+		Select("date").
+		Where("symbol = ? AND date >= ? AND date <= ?", symbol, from, to).
+		Order("date ASC").
+		Pluck("date", &dates).Error
+	if err != nil || len(dates) == 0 {
+		return
+	}
+	return dates[0], dates[len(dates)-1], true, nil
 }
 
+// loadCache returns real (non-dummy) price points for symbol in [from, to],
+// scanning directly into []models.PricePoint without an intermediate MarketData allocation.
 func (s *YahooFinanceService) loadCache(symbol string, from, to time.Time) ([]models.PricePoint, error) {
-	dbData, err := s.loadRawCache(symbol, from, to)
-	if err != nil {
-		return nil, err
-	}
-
 	var points []models.PricePoint
-	for _, m := range dbData {
-		if m.Volume == -1 {
-			continue // skip dummy records used for negative caching
-		}
-		points = append(points, models.PricePoint{
-			Date:     m.Date,
-			Open:     m.Open,
-			High:     m.High,
-			Low:      m.Low,
-			Close:    m.Close,
-			AdjClose: m.AdjClose,
-			Volume:   m.Volume,
-		})
-	}
-	return points, nil
+	err := s.DB.Model(&models.MarketData{}).
+		Select("date, open, high, low, close, adj_close, volume").
+		Where("symbol = ? AND date >= ? AND date <= ? AND volume != -1", symbol, from, to).
+		Order("date ASC").
+		Scan(&points).Error
+	return points, err
 }
 
 func (s *YahooFinanceService) saveCache(symbol string, points []models.PricePoint) error {

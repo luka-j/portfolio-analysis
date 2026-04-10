@@ -108,9 +108,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	lookback := today.AddDate(0, 0, -5)
 
-	costBasisMap := s.computeCostBasis(data, currency, acctModel, cachedOnly)
-	realizedGLMap := s.computeRealizedGL(data, currency, acctModel, cachedOnly)
-	commissionsMap := s.computeCommissions(data, currency, acctModel, cachedOnly)
+	costBasisMap, realizedGLMap, commissionsMap := s.computeCurrentValueMaps(data, currency, acctModel, cachedOnly)
 
 	yMap := s.getYahooSymbolMap(data)
 
@@ -221,11 +219,18 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 	}, nil
 }
 
-// computeCostBasis returns a map of posKey -> average cost basis per share in the given currency.
-// Only open FIFO lots contribute, giving the weighted average for the current position.
-func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) map[string]float64 {
-	result := make(map[string]float64)
+// computeCurrentValueMaps returns cost-basis, realized GL, and commissions maps in
+// a single pass over trades, calling fifo.Match once per position instead of twice.
+func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) (costBasisMap, realizedGLMap, commissionsMap map[string]float64) {
+	costBasisMap = make(map[string]float64)
+	realizedGLMap = make(map[string]float64)
+	commissionsMap = make(map[string]float64)
 
+	isOriginal := currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal
+
+	// Group all trades by posKey for FIFO matching (includes TRANSFER_IN, which
+	// represents received shares with a cost basis; FX trades are grouped under
+	// their own keys and silently ignored when building PositionValue entries).
 	tradesByKey := make(map[string][]models.Trade)
 	for _, t := range data.Trades {
 		k := posKey(t.Symbol, t.ListingExchange)
@@ -236,141 +241,98 @@ func (s *Service) computeCostBasis(data *models.FlexQueryData, currency string, 
 		sort.Slice(trades, func(i, j int) bool {
 			return trades[i].DateTime.Before(trades[j].DateTime)
 		})
+		openLots, matchedSells := fifo.Match(trades)
 
-		openLots, _ := fifo.Match(trades)
-
+		// ── Cost basis ──────────────────────────────────────────────────────
 		nativeCurrency := ""
 		if len(openLots) > 0 {
 			nativeCurrency = openLots[0].Curr
 		} else if len(trades) > 0 {
 			nativeCurrency = trades[0].Currency
 		}
-
 		if len(openLots) == 0 {
-			result[key] = 0
-			continue
-		}
-
-		var totalCost, totalQty float64
-		for _, l := range openLots {
-			var priceInCur float64
-			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
-				priceInCur = l.Price
-			} else if acctModel == models.AccountingModelSpot {
-				priceInCur, _ = s.FXService.ConvertSpot(l.Price, l.Curr, currency, cachedOnly)
-			} else {
-				priceInCur, _ = s.FXService.Convert(l.Price, l.Curr, currency, l.Date, cachedOnly)
-			}
-			totalCost += l.Qty * priceInCur
-			totalQty += l.Qty
-		}
-		if totalQty > 0 {
-			result[key] = totalCost / totalQty
+			costBasisMap[key] = 0
 		} else {
-			converted, _ := s.FXService.ConvertSpot(0, nativeCurrency, currency, cachedOnly)
-			result[key] = converted
+			var totalCost, totalQty float64
+			for _, l := range openLots {
+				var p float64
+				if isOriginal {
+					p = l.Price
+				} else if acctModel == models.AccountingModelSpot {
+					p, _ = s.FXService.ConvertSpot(l.Price, l.Curr, currency, cachedOnly)
+				} else {
+					p, _ = s.FXService.Convert(l.Price, l.Curr, currency, l.Date, cachedOnly)
+				}
+				totalCost += l.Qty * p
+				totalQty += l.Qty
+			}
+			if totalQty > 0 {
+				costBasisMap[key] = totalCost / totalQty
+			} else {
+				costBasisMap[key], _ = s.FXService.ConvertSpot(0, nativeCurrency, currency, cachedOnly)
+			}
 		}
-	}
 
-	// Also handle symbols that appear only in OpenPositions (no matching trades).
-	for _, op := range data.OpenPositions {
-		if _, seen := result[op.Symbol]; seen {
-			continue
-		}
-		if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
-			result[op.Symbol] = op.CostBasisPerShare
-		} else if acctModel == models.AccountingModelSpot {
-			converted, _ := s.FXService.ConvertSpot(op.CostBasisPerShare, op.Currency, currency, cachedOnly)
-			result[op.Symbol] = converted
-		}
-	}
-
-	return result
-}
-
-// computeRealizedGL computes total realized gain/loss per position in the given currency.
-func (s *Service) computeRealizedGL(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) map[string]float64 {
-	result := make(map[string]float64)
-	tradesByKey := make(map[string][]models.Trade)
-	for _, t := range data.Trades {
-		k := posKey(t.Symbol, t.ListingExchange)
-		tradesByKey[k] = append(tradesByKey[k], t)
-	}
-
-	for key, trades := range tradesByKey {
-		sort.Slice(trades, func(i, j int) bool {
-			return trades[i].DateTime.Before(trades[j].DateTime)
-		})
-
-		_, matchedSells := fifo.Match(trades)
-
-		var realizedGL float64
+		// ── Realized GL ─────────────────────────────────────────────────────
+		var gl float64
 		for _, m := range matchedSells {
 			var profit float64
-			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+			if isOriginal {
 				profit = m.Qty * (m.SellPrice - m.CostPrice)
 			} else if acctModel == models.AccountingModelSpot {
-				sellPriceSpot, _ := s.FXService.ConvertSpot(m.SellPrice, m.Curr, currency, cachedOnly)
-				costPriceSpot, _ := s.FXService.ConvertSpot(m.CostPrice, m.Curr, currency, cachedOnly)
-				profit = m.Qty * (sellPriceSpot - costPriceSpot)
+				sp, _ := s.FXService.ConvertSpot(m.SellPrice, m.Curr, currency, cachedOnly)
+				cp, _ := s.FXService.ConvertSpot(m.CostPrice, m.Curr, currency, cachedOnly)
+				profit = m.Qty * (sp - cp)
 			} else {
-				sellPriceHist, _ := s.FXService.Convert(m.SellPrice, m.Curr, currency, m.SellDate, cachedOnly)
-				costPriceHist, _ := s.FXService.Convert(m.CostPrice, m.Curr, currency, m.CostDate, cachedOnly)
-				profit = m.Qty * (sellPriceHist - costPriceHist)
+				sp, _ := s.FXService.Convert(m.SellPrice, m.Curr, currency, m.SellDate, cachedOnly)
+				cp, _ := s.FXService.Convert(m.CostPrice, m.Curr, currency, m.CostDate, cachedOnly)
+				profit = m.Qty * (sp - cp)
 			}
-			realizedGL += profit
-
+			gl += profit
 			if m.Comm != 0 {
-				if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
-					realizedGL += m.Comm
+				if isOriginal {
+					gl += m.Comm
 				} else if acctModel == models.AccountingModelSpot {
-					commSpot, _ := s.FXService.ConvertSpot(m.Comm, m.Curr, currency, cachedOnly)
-					realizedGL += commSpot
+					c, _ := s.FXService.ConvertSpot(m.Comm, m.Curr, currency, cachedOnly)
+					gl += c
 				} else {
-					commHist, _ := s.FXService.Convert(m.Comm, m.Curr, currency, m.SellDate, cachedOnly)
-					realizedGL += commHist
+					c, _ := s.FXService.Convert(m.Comm, m.Curr, currency, m.SellDate, cachedOnly)
+					gl += c
 				}
 			}
 		}
-		result[key] = realizedGL
-	}
+		realizedGLMap[key] = gl
 
-	return result
-}
-
-// computeCommissions sums all trade commissions per position in the given currency.
-func (s *Service) computeCommissions(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) map[string]float64 {
-	result := make(map[string]float64)
-
-	tradesByKey := make(map[string][]models.Trade)
-	for _, t := range data.Trades {
-		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
-			continue
-		}
-		k := posKey(t.Symbol, t.ListingExchange)
-		tradesByKey[k] = append(tradesByKey[k], t)
-	}
-
-	for key, trades := range tradesByKey {
-		var total float64
+		// ── Commissions (FX trades and transfers excluded) ───────────────────
 		for _, t := range trades {
-			if t.Commission == 0 {
+			if isFXTrade(t) || t.BuySell == "TRANSFER_IN" || t.Commission == 0 {
 				continue
 			}
 			var comm float64
-			if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
+			if isOriginal {
 				comm = t.Commission
 			} else if acctModel == models.AccountingModelSpot {
 				comm, _ = s.FXService.ConvertSpot(t.Commission, t.Currency, currency, cachedOnly)
 			} else {
 				comm, _ = s.FXService.Convert(t.Commission, t.Currency, currency, t.DateTime, cachedOnly)
 			}
-			total += comm
+			commissionsMap[key] += comm
 		}
-		result[key] = total
 	}
 
-	return result
+	// ── OpenPositions fallback for cost basis ────────────────────────────────
+	for _, op := range data.OpenPositions {
+		if _, seen := costBasisMap[op.Symbol]; seen {
+			continue
+		}
+		if isOriginal {
+			costBasisMap[op.Symbol] = op.CostBasisPerShare
+		} else if acctModel == models.AccountingModelSpot {
+			costBasisMap[op.Symbol], _ = s.FXService.ConvertSpot(op.CostBasisPerShare, op.Currency, currency, cachedOnly)
+		}
+	}
+
+	return
 }
 
 // GetTradesForSymbol returns the trades for a specific symbol+exchange in a
@@ -439,130 +401,61 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 	}, nil
 }
 
+
 // GetDailyValues returns the portfolio value for each day in [from, to].
-func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioHistoryResponse, error) {
-	// Build daily holdings via trade replay.
-	dailyHoldings := s.buildDailyHoldings(data, from, to)
-
-	// Pre-fetch prices for all symbols we'll need.
-	symbols := s.allSymbols(data)
-	// priceCache: posKey -> date_str -> adj-close price
-	priceCache := make(map[string]map[string]float64)
-	validDates := make(map[string]bool)
-	yMap := s.getYahooSymbolMap(data)
-
-	for _, pk := range symbols {
-		querySymbol := pk
-		// If the symbol has a '@' separator, split it to get the base symbol for fallback
-		baseSymbol := pk
-		if idx := strings.Index(pk, "@"); idx != -1 {
-			baseSymbol = pk[:idx]
-		}
-
-		if ys, ok := yMap[pk]; ok && ys != "" {
-			querySymbol = ys
-		} else {
-			// Fallback: if no exchange-specific mapping, try the base symbol
-			querySymbol = baseSymbol
-		}
-
-		prices, err := s.MarketProvider.GetHistory(querySymbol, from, to, cachedOnly)
-		if err != nil {
-			log.Printf("Warning: fetching %s historical data (mapped to %s): %v\n", pk, querySymbol, err)
-			prices = []models.PricePoint{}
-		}
-
-		pc := make(map[string]float64)
-		for _, p := range prices {
-			ds := p.Date.Format("2006-01-02")
-			validDates[ds] = true
-			// Prefer AdjClose (split-adjusted); fall back to Close if zero.
-			px := p.AdjClose
-			if px == 0 {
-				px = p.Close
-			}
-			pc[ds] = px
-		}
-
-		// Forward-fill missing days (weekends/holidays) so prices carry over.
-		var lastPrice float64
-		if len(prices) > 0 {
-			lp := prices[0].AdjClose
-			if lp == 0 {
-				lp = prices[0].Close
-			}
-			lastPrice = lp
-		}
-		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-			ds := d.Format("2006-01-02")
-			if p, ok := pc[ds]; ok {
-				lastPrice = p
-			} else if lastPrice != 0 {
-				pc[ds] = lastPrice
-			}
-		}
-
-		priceCache[pk] = pc
-	}
-
-	// Pre-fetch FX rate histories before the daily loop to avoid per-day fetches.
-	// Collect the unique native currencies we'll need to convert.
-	nativeCurrencies := make(map[string]bool)
-	for _, dayHoldings := range dailyHoldings {
-		for _, h := range dayHoldings {
-			if h.Currency != currency && h.Currency != "" {
-				nativeCurrencies[h.Currency] = true
-			}
-		}
-	}
+// Prices are loaded one symbol at a time so each symbol's slice is GC-eligible
+// before the next one loads, keeping peak memory proportional to a single
+// symbol's history rather than all symbols' histories combined.
+func (s *Service) GetDailyValues(
+	data *models.FlexQueryData,
+	from, to time.Time,
+	currency string,
+	acctModel models.AccountingModel,
+	cachedOnly bool,
+) (*models.PortfolioHistoryResponse, error) {
 
 	// Validate single currency when using original accounting model.
-	allCurrencies := make(map[string]bool)
-	for _, dayHoldings := range dailyHoldings {
-		for _, h := range dayHoldings {
-			if h.Currency != "" {
-				allCurrencies[h.Currency] = true
+	if acctModel == models.AccountingModelOriginal {
+		currencies := make(map[string]bool)
+		for _, t := range data.Trades {
+			if !isFXTrade(t) && t.BuySell != "TRANSFER_IN" && t.Currency != "" {
+				currencies[t.Currency] = true
 			}
 		}
+		if len(currencies) > 1 {
+			return nil, fmt.Errorf("cannot aggregate multi-currency portfolio using 'original' accounting model")
+		}
 	}
-	if acctModel == models.AccountingModelOriginal && len(allCurrencies) > 1 {
-		return nil, fmt.Errorf("cannot aggregate multi-currency portfolio using 'original' accounting model")
+
+	// One lightweight DB query to get the trading calendar for the range.
+	validDates, err := s.MarketProvider.TradingDates(from, to)
+	if err != nil {
+		return nil, fmt.Errorf("GetDailyValues: trading dates: %w", err)
 	}
-	// fxCache: "FROMTO" -> date_str -> rate
-	fxCache := make(map[string]map[string]float64)
+
+	// Pre-load FX histories as sorted slices (typically 0–2 currency pairs).
+	// Only needed for historical accounting mode; spot mode queries live rates per call.
+	fxData := make(map[string][]models.PricePoint) // pairKey → sorted []PricePoint
 	if acctModel == models.AccountingModelHistorical || acctModel == "" {
+		nativeCurrencies := make(map[string]bool)
+		for _, t := range data.Trades {
+			if !isFXTrade(t) && t.Currency != "" && t.Currency != currency {
+				nativeCurrencies[t.Currency] = true
+			}
+		}
 		for fromCur := range nativeCurrencies {
 			pairKey := fromCur + currency
 			fxSymbol := fmt.Sprintf("%s%s=X", fromCur, currency)
-			points, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
+			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
 			if err != nil {
-				// If FX pair fails, we'll fall back to spot; leave cache empty for this pair.
 				log.Printf("Warning: pre-fetching FX %s: %v\n", fxSymbol, err)
 				continue
 			}
-			pc := make(map[string]float64)
-			for _, p := range points {
-				pc[p.Date.Format("2006-01-02")] = p.Close
-			}
-			// Forward-fill FX rates.
-			var lastRate float64
-			if len(points) > 0 {
-				lastRate = points[0].Close
-			}
-			for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-				ds := d.Format("2006-01-02")
-				if r, ok := pc[ds]; ok {
-					lastRate = r
-				} else if lastRate != 0 {
-					pc[ds] = lastRate
-				}
-			}
-			fxCache[pairKey] = pc
+			fxData[pairKey] = pts // already sorted ASC by GetHistory
 		}
 	}
 
-	// Compute pending-cash balance changes from sale buckets so daily values correctly
-	// include unsettled sale proceeds throughout the bucket window.
+	// Pending-cash balance changes from sale buckets.
 	var balanceChanges []cashbucket.BalanceChange
 	if s.CashBucketExpiryDays > 0 {
 		var tradeFlows []models.Trade
@@ -572,17 +465,15 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 			}
 			tradeFlows = append(tradeFlows, t)
 		}
-		bucketConvertFn := func(amount float64, from string, date time.Time) (float64, error) {
-			if from == currency || acctModel == models.AccountingModelOriginal || s.FXService == nil {
+		bucketConvertFn := func(amount float64, cur string, date time.Time) (float64, error) {
+			if cur == currency || acctModel == models.AccountingModelOriginal || s.FXService == nil {
 				return amount, nil
 			}
 			if acctModel == models.AccountingModelSpot {
-				return s.FXService.ConvertSpot(amount, from, currency, cachedOnly)
+				return s.FXService.ConvertSpot(amount, cur, currency, cachedOnly)
 			}
-			return s.FXService.Convert(amount, from, currency, date, cachedOnly)
+			return s.FXService.Convert(amount, cur, currency, date, cachedOnly)
 		}
-		// asOf=to ensures all expirations within the requested range generate cash flows;
-		// BalanceChanges covers all events regardless.
 		br, err := cashbucket.Process(tradeFlows, nil, s.CashBucketExpiryDays, to, bucketConvertFn)
 		if err != nil {
 			return nil, fmt.Errorf("GetDailyValues bucket balance: %w", err)
@@ -590,79 +481,131 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		balanceChanges = br.BalanceChanges
 	}
 
-	// Running pending-cash total driven by balanceChanges (sorted by date).
-	// Applied day-by-day (including skipped weekends) so the correct amount is
-	// reflected on the next market day.
+	// Group and sort trades by posKey. FX trades and transfers are excluded —
+	// they don't contribute to equity position values.
+	yMap := s.getYahooSymbolMap(data)
+	tradesByKey := make(map[string][]models.Trade)
+	for _, t := range data.Trades {
+		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
+			continue
+		}
+		k := posKey(t.Symbol, t.ListingExchange)
+		tradesByKey[k] = append(tradesByKey[k], t)
+	}
+	for k := range tradesByKey {
+		sort.Slice(tradesByKey[k], func(i, j int) bool {
+			return tradesByKey[k][i].DateTime.Before(tradesByKey[k][j].DateTime)
+		})
+	}
+
+	// Column-major accumulation: one symbol at a time.
+	// dailyTotals[i] is the running portfolio value for validDates[i].
+	dailyTotals := make([]float64, len(validDates))
+	fromMidnight := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+
+	for k, trades := range tradesByKey {
+		// Resolve the Yahoo Finance query symbol.
+		querySymbol := k
+		if idx := strings.Index(k, "@"); idx != -1 {
+			querySymbol = k[:idx]
+		}
+		if ys, ok := yMap[k]; ok && ys != "" {
+			querySymbol = ys
+		}
+
+		prices, err := s.MarketProvider.GetHistory(querySymbol, from, to, cachedOnly)
+		if err != nil {
+			log.Printf("Warning: fetching %s historical data: %v\n", querySymbol, err)
+		}
+		// After this symbol's inner loop, prices is GC-eligible.
+
+		nativeCurrency := ""
+		for _, t := range trades {
+			if t.Currency != "" {
+				nativeCurrency = t.Currency
+				break
+			}
+		}
+
+		// Fast-forward trades that settled before the start of the requested range
+		// to establish the opening position.
+		qty := 0.0
+		ti := 0
+		for ti < len(trades) && trades[ti].DateTime.Before(fromMidnight) {
+			qty += trades[ti].Quantity
+			ti++
+		}
+
+		for i, d := range validDates {
+			// Apply all trades through the end of this trading day.
+			endOfDay := time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 999999999, d.Location())
+			for ti < len(trades) && !trades[ti].DateTime.After(endOfDay) {
+				qty += trades[ti].Quantity
+				ti++
+			}
+
+			if qty > -1e-5 && qty < 1e-5 {
+				continue
+			}
+			price := priceAt(prices, d)
+			if price == 0 {
+				continue
+			}
+			nativeVal := qty * price
+
+			switch acctModel {
+			case models.AccountingModelOriginal:
+				dailyTotals[i] += nativeVal
+			case models.AccountingModelSpot:
+				if nativeCurrency == currency || nativeCurrency == "" {
+					dailyTotals[i] += nativeVal
+				} else {
+					v, err := s.FXService.ConvertSpot(nativeVal, nativeCurrency, currency, cachedOnly)
+					if err != nil {
+						return nil, err
+					}
+					dailyTotals[i] += v
+				}
+			default: // historical — use pre-fetched fxData sorted slices
+				if nativeCurrency == currency || nativeCurrency == "" {
+					dailyTotals[i] += nativeVal
+				} else {
+					pairKey := nativeCurrency + currency
+					if pts, ok := fxData[pairKey]; ok {
+						if rate := fxRateAt(pts, d); rate != 0 {
+							dailyTotals[i] += nativeVal * rate
+							continue
+						}
+					}
+					// fxData miss — fall back to live DB query (should be rare).
+					v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d, cachedOnly)
+					if err != nil {
+						return nil, err
+					}
+					dailyTotals[i] += v
+				}
+			}
+		}
+		// prices slice is now eligible for GC before the next symbol loads.
+	}
+
+	// Apply pending cash and produce the final result slice.
 	bcIdx := 0
 	pendingTotal := 0.0
-
-	result := make([]models.DailyValue, 0)
-	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-		ds := d.Format("2006-01-02")
-
-		// Apply all balance changes for today or earlier (including pre-range events).
+	result := make([]models.DailyValue, 0, len(validDates))
+	for i, d := range validDates {
 		for bcIdx < len(balanceChanges) && !balanceChanges[bcIdx].Date.After(d) {
 			pendingTotal += balanceChanges[bcIdx].Delta
 			bcIdx++
 		}
-
-		// Omit weekends & bank holidays ONLY if we have some valid market dates.
-		// If validDates is empty (e.g. all symbols failed), we show all days.
-		if len(validDates) > 0 && !validDates[ds] {
-			continue
-		}
-
-		holdings := dailyHoldings[ds]
-		totalValue := 0.0
-
-		for _, h := range holdings {
-			k := posKey(h.Symbol, h.ListingExchange)
-			pc, ok := priceCache[k]
-			if !ok {
-				continue
-			}
-			price, ok := pc[ds]
-			if !ok {
-				continue
-			}
-			nativeValue := h.Quantity * price
-
-			switch acctModel {
-			case models.AccountingModelOriginal:
-				totalValue += nativeValue
-			case models.AccountingModelSpot:
-				converted, err := s.FXService.ConvertSpot(nativeValue, h.Currency, currency, cachedOnly)
-				if err != nil {
-					return nil, err
-				}
-				totalValue += converted
-			default: // historical — use pre-fetched fxCache
-				if h.Currency == currency || h.Currency == "" {
-					totalValue += nativeValue
-					continue
-				}
-				pairKey := h.Currency + currency
-				if rateMap, ok := fxCache[pairKey]; ok {
-					if rate, ok := rateMap[ds]; ok && rate != 0 {
-						totalValue += nativeValue * rate
-						continue
-					}
-				}
-				// fxCache miss — fall back to live DB query (should be rare).
-				converted, err := s.FXService.Convert(nativeValue, h.Currency, currency, d, cachedOnly)
-				if err != nil {
-					return nil, err
-				}
-				totalValue += converted
-			}
-		}
-
-		// Add pending cash from active sale buckets (floor at zero for float safety).
+		total := dailyTotals[i]
 		if pendingTotal > 0 {
-			totalValue += pendingTotal
+			total += pendingTotal
 		}
-
-		result = append(result, models.DailyValue{Date: ds, Value: totalValue})
+		result = append(result, models.DailyValue{
+			Date:  d.Format("2006-01-02"),
+			Value: total,
+		})
 	}
 
 	return &models.PortfolioHistoryResponse{
@@ -670,6 +613,41 @@ func (s *Service) GetDailyValues(data *models.FlexQueryData, from, to time.Time,
 		AccountingModel: string(acctModel),
 		Data:            result,
 	}, nil
+}
+
+// priceAt returns the last known AdjClose (fallback: Close) price on or before d
+// using binary search. prices must be sorted ascending by Date.
+func priceAt(prices []models.PricePoint, d time.Time) float64 {
+	if len(prices) == 0 {
+		return 0
+	}
+	// Find the first index whose Date is strictly after d, then step back one.
+	i := sort.Search(len(prices), func(j int) bool {
+		return prices[j].Date.After(d)
+	}) - 1
+	if i < 0 {
+		return 0
+	}
+	p := prices[i].AdjClose
+	if p == 0 {
+		p = prices[i].Close
+	}
+	return p
+}
+
+// fxRateAt returns the last known Close FX rate on or before d using binary search.
+// prices must be sorted ascending by Date.
+func fxRateAt(prices []models.PricePoint, d time.Time) float64 {
+	if len(prices) == 0 {
+		return 0
+	}
+	i := sort.Search(len(prices), func(j int) bool {
+		return prices[j].Date.After(d)
+	}) - 1
+	if i < 0 {
+		return 0
+	}
+	return prices[i].Close
 }
 
 // GetCashFlows returns external cash flows for IRR/TWR calculation, converted to the target currency.
@@ -775,67 +753,6 @@ func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time
 	return returns, startDates, endDates, nil
 }
 
-// buildDailyHoldings builds a map from date string to holdings on that date.
-func (s *Service) buildDailyHoldings(data *models.FlexQueryData, from, to time.Time) map[string][]models.Holding {
-	sortedTrades := make([]models.Trade, len(data.Trades))
-	copy(sortedTrades, data.Trades)
-	sort.Slice(sortedTrades, func(i, j int) bool {
-		return sortedTrades[i].DateTime.Before(sortedTrades[j].DateTime)
-	})
-
-	result := make(map[string][]models.Holding)
-	currentHoldings := make(map[string]*models.Holding)
-	tradeIdx := 0
-
-	// Fast-forward trades that occurred before the 'from' date
-	for tradeIdx < len(sortedTrades) {
-		t := sortedTrades[tradeIdx]
-		// Use midnight for 'from' comparison
-		fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
-		if t.DateTime.Before(fromDate) {
-			if !isFXTrade(t) && t.BuySell != "TRANSFER_IN" {
-				k := posKey(t.Symbol, t.ListingExchange)
-				if _, ok := currentHoldings[k]; !ok {
-					currentHoldings[k] = &models.Holding{Symbol: t.Symbol, Currency: t.Currency, ListingExchange: t.ListingExchange}
-				}
-				currentHoldings[k].Quantity += t.Quantity
-			}
-			tradeIdx++
-		} else {
-			break
-		}
-	}
-
-	// For each day in the requested range, apply any trades that occur on that day,
-	// then save a snapshot of the resulting holdings.
-	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-		endOfDay := time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 999999999, d.Location())
-
-		for tradeIdx < len(sortedTrades) && !sortedTrades[tradeIdx].DateTime.After(endOfDay) {
-			t := sortedTrades[tradeIdx]
-			if !isFXTrade(t) && t.BuySell != "TRANSFER_IN" {
-				k := posKey(t.Symbol, t.ListingExchange)
-				if _, ok := currentHoldings[k]; !ok {
-					currentHoldings[k] = &models.Holding{Symbol: t.Symbol, Currency: t.Currency, ListingExchange: t.ListingExchange}
-				}
-				currentHoldings[k].Quantity += t.Quantity
-			}
-			tradeIdx++
-		}
-
-		ds := d.Format("2006-01-02")
-		var snapshot []models.Holding
-		for _, h := range currentHoldings {
-			// Float precision check: skip very tiny remainders after selling out
-			if h.Quantity > 0.00001 || h.Quantity < -0.00001 {
-				snapshot = append(snapshot, *h)
-			}
-		}
-		result[ds] = snapshot
-	}
-
-	return result
-}
 
 // GetCumulativeTWR computes the day-by-day cumulative Time-Weighted Return series
 // over [from, to].  Each data point expresses the portfolio's growth factor (as a
@@ -985,28 +902,6 @@ func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Tim
 	}, nil
 }
 
-func (s *Service) allSymbols(data *models.FlexQueryData) []string {
-	symSet := make(map[string]bool)
-	for _, op := range data.OpenPositions {
-		if op.AssetCategory == "CASH" {
-			continue
-		}
-		// OpenPositions might not have exchange, so posKey returns just symbol
-		symSet[posKey(op.Symbol, "")] = true
-	}
-	for _, t := range data.Trades {
-		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
-			continue
-		}
-		symSet[posKey(t.Symbol, t.ListingExchange)] = true
-	}
-	var syms []string
-	for s := range symSet {
-		syms = append(syms, s)
-	}
-	sort.Strings(syms)
-	return syms
-}
 
 // computePendingCash returns the current aggregate value of all active (non-expired) cash buckets.
 func (s *Service) computePendingCash(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) (float64, error) {

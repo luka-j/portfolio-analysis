@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,23 @@ func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time, cache
 		}
 	}
 	return result, nil
+}
+
+func (m *mockMarketProvider) TradingDates(from, to time.Time) ([]time.Time, error) {
+	seen := make(map[time.Time]bool)
+	for _, pts := range m.prices {
+		for _, p := range pts {
+			if !p.Date.Before(from) && !p.Date.After(to) {
+				seen[p.Date] = true
+			}
+		}
+	}
+	dates := make([]time.Time, 0, len(seen))
+	for d := range seen {
+		dates = append(dates, d)
+	}
+	sort.Slice(dates, func(i, j int) bool { return dates[i].Before(dates[j]) })
+	return dates, nil
 }
 
 func (m *mockMarketProvider) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
