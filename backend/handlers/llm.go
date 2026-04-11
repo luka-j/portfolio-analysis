@@ -52,7 +52,7 @@ func NewLLMHandler(
 
 // IsAvailable handles GET /api/v1/llm/available
 func (h *LLMHandler) IsAvailable(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"available": h.LLM.APIKey != ""})
+	c.JSON(http.StatusOK, gin.H{"available": h.LLM.APIKey != "", "canned_model": h.LLM.DefaultModelKey})
 }
 
 // GetSummary handles GET /api/v1/llm/summary?period=1d

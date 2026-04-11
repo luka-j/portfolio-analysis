@@ -93,7 +93,7 @@ func buildServices(cfg *config.Config, database *gorm.DB) *services {
 		tax:          taxSvc,
 		fundamentals: fundamentalsSvc,
 		breakdown:    breakdownsvc.NewService(database),
-		llm:          llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, database, portfolioSvc),
+		llm:          llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, cfg.GeminiDefaultModel, database, portfolioSvc),
 	}
 }
 

@@ -425,8 +425,8 @@ export async function getPortfolioPriceHistory(
   );
 }
 
-export async function getLLMAvailable(): Promise<{ available: boolean }> {
-  return request<{ available: boolean }>('/llm/available');
+export async function getLLMAvailable(): Promise<{ available: boolean; canned_model?: 'flash' | 'pro' }> {
+  return request<{ available: boolean; canned_model?: 'flash' | 'pro' }>('/llm/available');
 }
 
 export async function getLLMSummary(period = '1d', forceRefresh = false): Promise<LLMSummaryResponse> {

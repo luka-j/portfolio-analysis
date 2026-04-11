@@ -46,22 +46,27 @@ type Service struct {
 	APIKey           string
 	FlashModel       string
 	ProModel         string
+	DefaultModelKey  string // "flash" | "pro" — model used for canned prompts not explicitly requesting a model
 	DB               *gorm.DB
 	PortfolioService *portfolio.Service
 	HTTPClient       *http.Client
 }
 
 // NewService creates a new LLM Service.
-func NewService(apiKey, flashModel, proModel string, db *gorm.DB, ps *portfolio.Service) *Service {
+func NewService(apiKey, flashModel, proModel, cannedModelKey string, db *gorm.DB, ps *portfolio.Service) *Service {
 	transport := &http.Transport{
 		IdleConnTimeout:     10 * time.Second,
 		MaxIdleConns:        20,
 		MaxIdleConnsPerHost: 5,
 	}
+	if cannedModelKey != "pro" {
+		cannedModelKey = "flash"
+	}
 	return &Service{
 		APIKey:           apiKey,
 		FlashModel:       flashModel,
 		ProModel:         proModel,
+		DefaultModelKey:   cannedModelKey,
 		DB:               db,
 		PortfolioService: ps,
 		HTTPClient:       &http.Client{Transport: transport},
@@ -354,7 +359,11 @@ func (s *Service) AnalyzePortfolio(
 		Parts: []*genai.Part{{Text: currentMessage}},
 	})
 
-	model := s.ResolveModel(modelOverride)
+	modelKey := modelOverride
+	if isCanned && modelKey != "flash" && modelKey != "pro" {
+		modelKey = s.DefaultModelKey
+	}
+	model := s.ResolveModel(modelKey)
 	log.Printf("DEBUG: AnalyzePortfolio [model=%s cannedType=%s historyTurns=%d includePortfolio=%v]",
 		model, cannedType, len(history), includePortfolio)
 

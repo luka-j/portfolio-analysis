@@ -19,9 +19,10 @@ type Config struct {
 	FundamentalsProviders string // FUNDAMENTALS_PROVIDERS, default "Yahoo"
 	BreakdownProviders    string // BREAKDOWN_PROVIDERS,    default "Yahoo"
 
-	GeminiAPIKey     string // GEMINI_API_KEY
-	GeminiFlashModel string // GEMINI_FLASH_MODEL, default "gemini-3.1-flash-lite-preview"
-	GeminiProModel   string // GEMINI_PRO_MODEL,   default "gemini-3.1-pro-preview"
+	GeminiAPIKey       string // GEMINI_API_KEY
+	GeminiFlashModel   string // GEMINI_FLASH_MODEL, default "gemini-3.1-flash-lite-preview"
+	GeminiProModel     string // GEMINI_PRO_MODEL,   default "gemini-3.1-pro-preview"
+	GeminiDefaultModel string // GEMINI_DEFAULT_MODEL, "flash" | "pro" — used for canned prompts not explicitly requesting a model; default "flash"
 
 	// CashBucketExpiryDays is the number of days sale proceeds are held in a
 	// temporary bucket before being counted as a real portfolio outflow. Set to
@@ -41,9 +42,10 @@ func Load() *Config {
 		FundamentalsProviders: getEnv("FUNDAMENTALS_PROVIDERS", "Yahoo"),
 		BreakdownProviders:    getEnv("BREAKDOWN_PROVIDERS", "Yahoo"),
 
-		GeminiAPIKey:     getEnv("GEMINI_API_KEY", ""),
-		GeminiFlashModel: getEnv("GEMINI_FLASH_MODEL", "gemini-3.1-flash-lite-preview"),
-		GeminiProModel:   getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
+		GeminiAPIKey:      getEnv("GEMINI_API_KEY", ""),
+		GeminiFlashModel:  getEnv("GEMINI_FLASH_MODEL", "gemini-3.1-flash-lite-preview"),
+		GeminiProModel:    getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
+		GeminiDefaultModel: getEnv("GEMINI_DEFAULT_MODEL", "flash"),
 
 		CashBucketExpiryDays: getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
 	}

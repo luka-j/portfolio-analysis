@@ -286,7 +286,7 @@ export default function LLMPage() {
   const isModified = weights.some((r, i) => liveWeights[i]?.symbol !== r.symbol || liveWeights[i]?.weight !== r.weight)
     || weights.length !== liveWeights.length
 
-  const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string, extraParams?: Partial<LLMChatRequest>) => {
+  const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string, extraParams?: Partial<LLMChatRequest>, usePageModel = false) => {
     if (!message && promptType === 'freeform') return
 
     const isCanned = promptType !== 'freeform'
@@ -301,7 +301,7 @@ export default function LLMPage() {
         prompt_type: promptType,
         message: promptType === 'freeform' ? message : '',
         currency: 'USD',
-        model,
+        ...(usePageModel || !isCanned ? { model } : {}),
         ...extraParams,
       }
       if (!isCanned) {
@@ -417,7 +417,7 @@ export default function LLMPage() {
           <p className="text-sm text-slate-400">Ask a question or select an analysis mode to get insights based on your portfolio positions.</p>
           <div className="flex flex-wrap gap-3 mt-2">
             <button
-              onClick={() => handleSend('', 'general_analysis', 'Analyze my current portfolio given current market conditions. What am I effectively betting on?')}
+              onClick={() => handleSend('', 'general_analysis', 'Analyze my current portfolio given current market conditions. What am I effectively betting on?', undefined, true)}
               disabled={cannedDisabled}
               title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
               className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-indigo-300/40 cursor-not-allowed' : 'text-indigo-300 hover:text-indigo-200'}`}
@@ -425,7 +425,7 @@ export default function LLMPage() {
               What Am I Betting On?
             </button>
             <button
-              onClick={() => handleSend('', 'best_worst_scenarios', 'Analyze my current portfolio. What are the best and worst realistic scenarios?')}
+              onClick={() => handleSend('', 'best_worst_scenarios', 'Analyze my current portfolio. What are the best and worst realistic scenarios?', undefined, true)}
               disabled={cannedDisabled}
               title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
               className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-emerald-400/40 cursor-not-allowed' : 'text-emerald-400 hover:text-emerald-300'}`}
@@ -433,7 +433,7 @@ export default function LLMPage() {
               Best & Worst Scenarios
             </button>
             <button
-              onClick={() => handleSend('', 'upcoming_events', 'What upcoming events (earnings, macroeconomic data, world events) might impact my portfolio?')}
+              onClick={() => handleSend('', 'upcoming_events', 'What upcoming events (earnings, macroeconomic data, world events) might impact my portfolio?', undefined, true)}
               disabled={cannedDisabled}
               title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
               className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-amber-400/40 cursor-not-allowed' : 'text-amber-400 hover:text-amber-300'}`}
@@ -441,7 +441,7 @@ export default function LLMPage() {
               Upcoming Events
             </button>
             <button
-              onClick={() => handleSend('', 'add_or_trim', 'Which of my holdings should I add to, and which should I trim?')}
+              onClick={() => handleSend('', 'add_or_trim', 'Which of my holdings should I add to, and which should I trim?', undefined, true)}
               disabled={cannedDisabled}
               title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
               className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-rose-400/40 cursor-not-allowed' : 'text-rose-400 hover:text-rose-300'}`}
