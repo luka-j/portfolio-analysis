@@ -161,6 +161,8 @@ export interface EtradeUploadResponse {
 }
 
 export interface TradeEntry {
+  id: string;              // UUID from Transaction.PublicID
+  entry_method?: string;   // "manual" | "flexquery" | "etrade_benefits" | "etrade_sales"
   date: string;
   side: string;
   quantity: number;
@@ -170,6 +172,18 @@ export interface TradeEntry {
   commission: number;
   proceeds: number;
   tax_cost_basis?: number;
+}
+
+export interface AddTransactionRequest {
+  transaction_type: 'buy' | 'sell' | 'espp_vest' | 'rsu_vest';
+  symbol: string;
+  currency: string;
+  date: string;       // YYYY-MM-DD
+  quantity: number;
+  price: number;
+  commission?: number;
+  tax_cost_basis?: number;
+  force?: boolean;
 }
 
 export interface TradesResponse {
@@ -425,5 +439,21 @@ export async function postLLMChat(req: LLMChatRequest): Promise<LLMChatResponse>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
+  });
+}
+
+// ---- Manual Transaction Entry ----
+
+export async function addTransaction(req: AddTransactionRequest): Promise<{ status: string; id: string }> {
+  return request<{ status: string; id: string }>('/portfolio/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteTransaction(id: string): Promise<void> {
+  await request<void>(`/portfolio/transactions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
   });
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,7 +100,7 @@ func (h *PortfolioHandler) UploadEtradeBenefits(c *gin.Context) {
 		return
 	}
 
-	h.saveEtradeTransactions(c, txns)
+	h.saveEtradeTransactions(c, txns, "etrade_benefits")
 }
 
 // UploadEtradeSales handles POST /api/v1/portfolio/upload/etrade/sales
@@ -124,10 +125,10 @@ func (h *PortfolioHandler) UploadEtradeSales(c *gin.Context) {
 		return
 	}
 
-	h.saveEtradeTransactions(c, txns)
+	h.saveEtradeTransactions(c, txns, "etrade_sales")
 }
 
-func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.Transaction) {
+func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.Transaction, entryMethod string) {
 	userHash := c.GetString(middleware.UserHashKey)
 
 	var user models.User
@@ -150,6 +151,7 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 			}
 		} else {
 			txn.UserID = user.ID
+			txn.EntryMethod = entryMethod
 			if err := h.Repo.DB.Create(&txn).Error; err == nil {
 				saved++
 			}
@@ -595,4 +597,165 @@ func (h *PortfolioHandler) MapSymbol(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "symbol mapped successfully"})
+}
+
+// addTransactionRequest is the JSON body for POST /api/v1/portfolio/transactions.
+type addTransactionRequest struct {
+	TransactionType string  `json:"transaction_type"` // "buy", "sell", "espp_vest", "rsu_vest"
+	Symbol          string  `json:"symbol"`
+	Currency        string  `json:"currency"`
+	Date            string  `json:"date"` // YYYY-MM-DD
+	Quantity        float64 `json:"quantity"`
+	Price           float64 `json:"price"`
+	Commission      float64 `json:"commission"`
+	TaxCostBasis    float64 `json:"tax_cost_basis"`
+	Force           bool    `json:"force"`
+}
+
+// AddTransaction handles POST /api/v1/portfolio/transactions.
+// It inserts a manually-entered trade and deduplicates against existing records
+// using a float-tolerance match on (type, symbol, date_time, quantity, price).
+func (h *PortfolioHandler) AddTransaction(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	var req addTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+
+	// Validate required fields.
+	req.Symbol = strings.TrimSpace(strings.ToUpper(req.Symbol))
+	if req.Symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+		return
+	}
+	if req.Currency == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency is required"})
+		return
+	}
+	if req.Quantity <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "quantity must be greater than 0"})
+		return
+	}
+	if req.Price <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "price must be greater than 0"})
+		return
+	}
+
+	dt, err := time.Parse("2006-01-02", req.Date)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "date must be in YYYY-MM-DD format"})
+		return
+	}
+
+	// Map transaction_type to DB fields.
+	var txnType, buySell string
+	var quantity, proceeds float64
+	var taxCostBasis *float64
+
+	switch req.TransactionType {
+	case "buy":
+		txnType = "Trade"
+		buySell = "BUY"
+		quantity = req.Quantity
+		proceeds = -(req.Quantity * req.Price)
+	case "sell":
+		txnType = "Trade"
+		buySell = "SELL"
+		quantity = -req.Quantity
+		proceeds = req.Quantity * req.Price
+	case "espp_vest":
+		if req.TaxCostBasis < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tax_cost_basis must be >= 0 for espp_vest"})
+			return
+		}
+		txnType = "ESPP_VEST"
+		buySell = "ESPP_VEST"
+		quantity = req.Quantity
+		proceeds = -(req.Quantity * req.Price)
+		v := req.TaxCostBasis
+		taxCostBasis = &v
+	case "rsu_vest":
+		txnType = "RSU_VEST"
+		buySell = "RSU_VEST"
+		quantity = req.Quantity
+		proceeds = -(req.Quantity * req.Price)
+		zero := 0.0
+		taxCostBasis = &zero
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "transaction_type must be one of: buy, sell, espp_vest, rsu_vest"})
+		return
+	}
+
+	var user models.User
+	if err := h.Repo.DB.Where(&models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "getting user: " + err.Error()})
+		return
+	}
+
+	// Deduplication check (same float-match pattern as saveEtradeTransactions).
+	if !req.Force {
+		var existing models.Transaction
+		err := h.Repo.DB.Where(
+			"user_id = ? AND type = ? AND symbol = ? AND date_time = ? AND quantity >= ? AND quantity <= ? AND price >= ? AND price <= ?",
+			user.ID, txnType, req.Symbol, dt,
+			quantity-1e-8, quantity+1e-8, req.Price-1e-8, req.Price+1e-8,
+		).First(&existing).Error
+		if err == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "duplicate", "id": existing.PublicID})
+			return
+		}
+	}
+
+	txn := models.Transaction{
+		UserID:        user.ID,
+		Type:          txnType,
+		Symbol:        req.Symbol,
+		Currency:      req.Currency,
+		DateTime:      dt,
+		Quantity:      quantity,
+		Price:         req.Price,
+		Proceeds:      proceeds,
+		Commission:    req.Commission,
+		BuySell:       buySell,
+		AssetCategory: "STK",
+		TaxCostBasis:  taxCostBasis,
+		EntryMethod:   "manual",
+	}
+	if err := h.Repo.DB.Create(&txn).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "saving transaction: " + err.Error()})
+		return
+	}
+
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+	c.JSON(http.StatusCreated, gin.H{"status": "created", "id": txn.PublicID})
+}
+
+// DeleteTransaction handles DELETE /api/v1/portfolio/transactions/:id.
+// The :id parameter is the UUID PublicID of the transaction.
+// Only transactions belonging to the authenticated user can be deleted.
+func (h *PortfolioHandler) DeleteTransaction(c *gin.Context) {
+	publicID := c.Param("id")
+	userHash := c.GetString(middleware.UserHashKey)
+
+	var user models.User
+	if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+
+	result := h.Repo.DB.Where("public_id = ? AND user_id = ?", publicID, user.ID).
+		Delete(&models.Transaction{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "transaction not found"})
+		return
+	}
+
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }

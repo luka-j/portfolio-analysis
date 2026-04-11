@@ -2,6 +2,9 @@ package models
 
 import (
 	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // User represents a user in the database.
@@ -33,6 +36,16 @@ type Transaction struct {
 	TaxCostBasis    *float64
 	Conid           string `gorm:"index"` // IB permanent contract ID; empty for eTrade/cash txns
 	ISIN            string `gorm:"index"` // ISIN from IB FlexQuery; empty when not provided
+	PublicID        string `gorm:"uniqueIndex"` // UUID; stable external ID used in API responses and DELETE endpoint
+	EntryMethod     string `gorm:"index"`               // "manual", "flexquery", "etrade_benefits", "etrade_sales"
+}
+
+// BeforeCreate generates a UUID PublicID for new Transaction rows if one is not already set.
+func (t *Transaction) BeforeCreate(_ *gorm.DB) error {
+	if t.PublicID == "" {
+		t.PublicID = uuid.New().String()
+	}
+	return nil
 }
 
 // MarketData represents cached end-of-day price data from Yahoo Finance.

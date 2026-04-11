@@ -87,6 +87,8 @@ func SetupRouter(
 	api.GET("/portfolio/trades", ph.GetTrades)
 	api.GET("/portfolio/price-history", ph.GetPriceHistory)
 	api.PUT("/portfolio/symbols/:symbol/mapping", ph.MapSymbol)
+	api.POST("/portfolio/transactions", ph.AddTransaction)
+	api.DELETE("/portfolio/transactions/:id", ph.DeleteTransaction)
 
 	// Market endpoints.
 	mh := handlers.NewMarketHandler(marketSvc, currencyGetter)

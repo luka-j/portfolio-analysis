@@ -377,6 +377,8 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 		}
 
 		entries = append(entries, models.TradeEntry{
+			ID:             t.PublicID,
+			EntryMethod:    t.EntryMethod,
 			Date:           t.DateTime.Format("2006-01-02"),
 			Side:           side,
 			Quantity:       qty,

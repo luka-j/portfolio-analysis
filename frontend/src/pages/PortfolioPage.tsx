@@ -5,8 +5,9 @@ import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import SymbolMappingModal from '../components/SymbolMappingModal'
+import AddTransactionModal from '../components/AddTransactionModal'
 import DateRangePicker from '../components/DateRangePicker'
-import { getPortfolioValue, getPortfolioTrades, getPortfolioPriceHistory, updateSymbolMapping, type PositionValue, type TradeEntry, type SymbolPriceHistory } from '../api'
+import { getPortfolioValue, getPortfolioTrades, getPortfolioPriceHistory, updateSymbolMapping, deleteTransaction, type PositionValue, type TradeEntry, type SymbolPriceHistory } from '../api'
 import { formatCurrency, formatNumber, formatDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
@@ -62,6 +63,7 @@ export default function PortfolioPage() {
   const [sortDir, setSortDir] = useState<'desc' | 'asc' | null>(null)
   const [priceHistory, setPriceHistory] = useState<Record<string, SymbolPriceHistory>>({})
   const [phLoading, setPhLoading] = useState(false)
+  const [showAddTransaction, setShowAddTransaction] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -586,7 +588,7 @@ export default function PortfolioPage() {
                     </div>
 
                     {isExpanded && (
-                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} isin={pos.isin} displayCurrency={currency} privacy={privacy} />
+                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} isin={pos.isin} displayCurrency={currency} privacy={privacy} onTradeDeleted={loadData} />
                     )}
                   </div>
                 )
@@ -672,35 +674,92 @@ export default function PortfolioPage() {
             />
           )}
         </div>
+
+        {/* Add Transaction FAB */}
+        <button
+          onClick={() => setShowAddTransaction(true)}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-2xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 hover:text-indigo-200 shadow-2xl backdrop-blur-sm transition-all text-sm font-semibold"
+        >
+          <span className="text-lg leading-none">+</span>
+          Add Transaction
+        </button>
+
+        {showAddTransaction && (
+          <AddTransactionModal
+            positions={positions}
+            onSuccess={loadData}
+            onClose={() => setShowAddTransaction(false)}
+          />
+        )}
     </PageLayout>
   )
 }
 
-function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy }: { symbol: string; exchange?: string; isin?: string; displayCurrency: string; privacy: boolean }) {
+function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy, onTradeDeleted }: { symbol: string; exchange?: string; isin?: string; displayCurrency: string; privacy: boolean; onTradeDeleted: () => void }) {
   const [trades, setTrades] = useState<TradeEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const fetchTrades = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await getPortfolioTrades(symbol, displayCurrency, exchange || '')
+      setTrades(res.trades || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load trades')
+    } finally {
+      setLoading(false)
+    }
+  }, [symbol, displayCurrency, exchange])
 
   useEffect(() => {
     let cancelled = false
-    const fetchTrades = async () => {
-      setLoading(true)
-      setError('')
-      try {
-        const res = await getPortfolioTrades(symbol, displayCurrency, exchange || '');
-        if (!cancelled) setTrades(res.trades || [])
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load trades')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    };
-    fetchTrades();
+    fetchTrades().catch(() => { if (!cancelled) setError('Failed to load trades') })
     return () => { cancelled = true }
-  }, [symbol, displayCurrency, exchange])
+  }, [fetchTrades])
+
+  async function handleDelete(id: string) {
+    setDeleting(true)
+    try {
+      await deleteTransaction(id)
+      setPendingDeleteId(null)
+      await fetchTrades()
+      onTradeDeleted()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const hasTaxCostBasis = trades.some(t => t.tax_cost_basis !== undefined && t.tax_cost_basis !== null)
-  const colsClass = hasTaxCostBasis ? 'grid-cols-7' : 'grid-cols-6'
+  // columns: Date | Mechanism | Source | Qty | NativePrice | Converted | [TaxBasis] | Commission | Delete
+  const colsClass = hasTaxCostBasis ? 'grid-cols-9' : 'grid-cols-8'
+
+  function entryMethodBadge(method: string | undefined) {
+    if (!method) return <span className="text-slate-700">—</span>
+    const styles: Record<string, string> = {
+      flexquery:       'bg-slate-500/10 text-slate-500 border-slate-500/20',
+      etrade_benefits: 'bg-slate-500/10 text-slate-500 border-slate-500/20',
+      etrade_sales:    'bg-slate-500/10 text-slate-500 border-slate-500/20',
+      manual:          'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+    }
+    const labels: Record<string, string> = {
+      flexquery:       'FlexQuery',
+      etrade_benefits: 'E*Trade',
+      etrade_sales:    'E*Trade',
+      manual:          'Manual',
+    }
+    const cls = styles[method] ?? 'bg-slate-500/10 text-slate-500 border-slate-500/20'
+    return (
+      <span className={`px-2 py-1 rounded-xl text-[9px] font-black uppercase tracking-[0.1em] border ${cls}`}>
+        {labels[method] ?? method}
+      </span>
+    )
+  }
 
   return (
     <div className="px-10 py-8 bg-[#0f1117]">
@@ -714,11 +773,13 @@ function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy }: { sym
         <div className={`grid ${colsClass} gap-4 px-8 py-4 text-[9px] font-black text-slate-600 uppercase tracking-widest border-b border-white/5 bg-white/2`}>
           <div>Execution Date</div>
           <div>Mechanism</div>
+          <div>Source</div>
           <div className="text-right">Quantity</div>
           <div className="text-right">Native Price</div>
           <div className="text-right">Converted</div>
           {hasTaxCostBasis && <div className="text-right">Tax Basis</div>}
           <div className="text-right">Commission</div>
+          <div />
         </div>
 
         {loading ? (
@@ -730,7 +791,7 @@ function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy }: { sym
         ) : (
           <div className="divide-y divide-white/5">
             {trades.map((trade, i) => (
-              <div key={i} className={`grid ${colsClass} gap-4 px-8 py-5 text-xs hover:bg-white/3 transition-colors items-center`}>
+              <div key={trade.id || i} className={`grid ${colsClass} gap-4 px-8 py-5 text-xs hover:bg-white/3 transition-colors items-center`}>
                 <div className="text-slate-400 font-bold tabular-nums">{trade.date}</div>
                 <div>
                   <span className={`px-4 py-1.5 rounded-2xl text-[9px] font-black uppercase tracking-[0.15em] border ${
@@ -743,6 +804,7 @@ function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy }: { sym
                     {trade.side}
                   </span>
                 </div>
+                <div>{entryMethodBadge(trade.entry_method)}</div>
                 <div className="text-right text-slate-200 font-black tabular-nums">{privacy ? '—' : formatNumber(trade.quantity, 0)}</div>
                 <div className="text-right text-slate-500 font-bold tabular-nums text-[11px]">{privacy ? '—' : formatNumber(trade.price)}</div>
                 <div className="text-right text-slate-200 font-black tabular-nums">{privacy ? '—' : formatNumber(trade.converted_price)}</div>
@@ -752,11 +814,55 @@ function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy }: { sym
                   </div>
                 )}
                 <div className="text-right text-slate-600 font-bold tabular-nums text-[11px]">{privacy ? '—' : formatNumber(Math.abs(trade.commission))}</div>
+                <div className="flex justify-end">
+                  {trade.id ? (
+                    <button
+                      onClick={() => setPendingDeleteId(trade.id)}
+                      className="text-slate-700 hover:text-red-400 transition-colors p-1 rounded"
+                      title="Delete transaction"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  ) : <span />}
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Delete confirmation dialog */}
+      {pendingDeleteId && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setPendingDeleteId(null)}
+        >
+          <div
+            className="bg-[#1a1d2e] border border-[#2a2e42] rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-slate-100 font-semibold mb-2">Delete transaction?</h3>
+            <p className="text-slate-400 text-sm mb-5">This cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setPendingDeleteId(null)}
+                className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(pendingDeleteId)}
+                disabled={deleting}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all disabled:opacity-50"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

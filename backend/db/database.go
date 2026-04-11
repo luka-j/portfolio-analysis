@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -66,6 +67,26 @@ func Init(dsn string) (*gorm.DB, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("migrating database: %w", err)
+	}
+
+	// Backfill PublicID for transaction rows created before UUID support was added.
+	// The column was added as nullable so AutoMigrate succeeds on existing tables.
+	// After backfilling, we set NOT NULL to enforce the constraint going forward.
+	var missingIDs []models.Transaction
+	if err := database.Where("public_id IS NULL OR public_id = ''").Find(&missingIDs).Error; err == nil {
+		for i := range missingIDs {
+			database.Model(&missingIDs[i]).Update("public_id", uuid.New().String())
+		}
+		if len(missingIDs) > 0 {
+			log.Printf("Backfilled PublicID for %d existing transaction rows", len(missingIDs))
+		}
+	}
+
+	// Apply NOT NULL constraint after the backfill so no rows are left with NULL.
+	// SQLite does not support ALTER COLUMN, so we skip it there (the BeforeCreate
+	// hook enforces non-empty values for all new rows regardless).
+	if dbLabel == "PostgreSQL" {
+		database.Exec(`ALTER TABLE transactions ALTER COLUMN public_id SET NOT NULL`)
 	}
 
 	return database, nil

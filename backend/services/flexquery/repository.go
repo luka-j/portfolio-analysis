@@ -85,6 +85,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			Proceeds:        t.Proceeds,
 			Commission:      t.Commission,
 			BuySell:         t.BuySell,
+			EntryMethod:     "flexquery",
 		}
 		if err := r.DB.Create(&txn).Error; err != nil {
 			return nil, fmt.Errorf("inserting trade: %w", err)
@@ -124,6 +125,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			DateTime:      ct.DateTime,
 			Amount:        ct.Amount,
 			Description:   ct.Description,
+			EntryMethod:   "flexquery",
 		}
 		if err := r.DB.Create(&txn).Error; err != nil {
 			return nil, fmt.Errorf("inserting cash txn: %w", err)
@@ -276,6 +278,8 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 				BuySell:         buySell,
 				TaxCostBasis:    txn.TaxCostBasis,
 				YahooSymbol:     txn.YahooSymbol,
+				PublicID:        txn.PublicID,
+				EntryMethod:     txn.EntryMethod,
 			})
 		} else {
 			data.CashTransactions = append(data.CashTransactions, models.CashTransaction{

@@ -30,6 +30,8 @@ type Trade struct {
 	BuySell         string    `json:"buy_sell"`
 	TaxCostBasis    *float64  `json:"tax_cost_basis,omitempty"`
 	YahooSymbol     string    `json:"yahoo_symbol,omitempty"`
+	PublicID        string    `json:"-"` // UUID; threaded through from the DB row for delete support
+	EntryMethod     string    `json:"-"` // "manual", "flexquery", "etrade_benefits", "etrade_sales"
 }
 
 // OpenPosition represents an open position from the FlexQuery report.
@@ -171,6 +173,8 @@ type PortfolioValueResponse struct {
 
 // TradeEntry is a frontend-friendly representation of a single trade.
 type TradeEntry struct {
+	ID             string   `json:"id"`                      // UUID from Transaction.PublicID
+	EntryMethod    string   `json:"entry_method,omitempty"`  // "manual", "flexquery", "etrade_benefits", "etrade_sales"
 	Date           string   `json:"date"`
 	Side           string   `json:"side"` // BUY or SELL
 	Quantity       float64  `json:"quantity"`

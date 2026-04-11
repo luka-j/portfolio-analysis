@@ -30,6 +30,7 @@ A self-hosted web application for analysing stock and ETF portfolios held at Int
 ### Data ingestion
 - **Interactive Brokers FlexQuery** XML upload (trades, transfers, dividends, cash transactions)
 - **E\*Trade** XLSX upload for RSU vests and ESPP purchases (`BenefitHistory.xlsx`) and sales (`G&L_Expanded.xlsx`)
+- **Manual entry** — individual transactions (Buy, Sell, ESPP vest, RSU vest) can be added directly from the portfolio page. Manual entries are deduplicated: if the exact same trade already exists a warning is shown, with an option to insert anyway. **Recommended workflow: import broker files first, then use manual entry only for transactions not covered by any import.** If you manually enter a trade and later import a broker file covering the same trade, both records will be kept (broker imports use a broker-assigned ID and bypass the duplicate check) — delete the manual entry using the trash-can icon in the transaction history to resolve. Every transaction, regardless of source, can be deleted individually from the trade history view.
 - Deduplication by IB trade/transaction ID — uploading the same report twice is safe
 - Incremental uploads: upload a new report and it merges with existing history
 
