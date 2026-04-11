@@ -451,7 +451,7 @@ func (s *Service) seedCurrency(symbol, currency string) {
 func (s *Service) ibAssetType(symbol string) string {
 	var cat string
 	s.DB.Model(&models.Transaction{}).
-		Where("symbol = ? AND asset_category != ''", symbol).
+		Where("(symbol = ? OR yahoo_symbol = ?) AND asset_category != ''", symbol, symbol).
 		Limit(1).
 		Pluck("asset_category", &cat)
 	switch cat {
