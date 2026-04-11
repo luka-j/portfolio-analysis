@@ -148,6 +148,9 @@ type ChatRequest struct {
 
 	// benchmark_analysis
 	BenchmarkSymbol string `json:"benchmark_symbol"`
+
+	// long_market_summary
+	Period string `json:"period"` // "1d" | "1w" | "1m"
 }
 
 // Chat handles POST /api/v1/llm/chat
@@ -270,6 +273,18 @@ func (h *LLMHandler) renderCannedPrompt(req ChatRequest, data *models.FlexQueryD
 	cp := llm.CannedPrompts[req.PromptType]
 
 	switch req.PromptType {
+
+	case "long_market_summary":
+		periodMap := map[string]string{
+			"1d": "the past day",
+			"1w": "the past week",
+			"1m": "the past month",
+		}
+		periodText, ok := periodMap[req.Period]
+		if !ok {
+			periodText = "the past day"
+		}
+		return cp.Render(map[string]string{"period": periodText}), nil
 
 	case "ticker_analysis":
 		return h.renderTickerAnalysis(&cp, req)

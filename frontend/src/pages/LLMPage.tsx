@@ -162,12 +162,12 @@ function WeightsModal({
 }
 
 const markdownComponents = {
-  h1: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-3 mb-1">{children}</p>,
-  h2: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-3 mb-1">{children}</p>,
-  h3: ({ children }: { children?: React.ReactNode }) => <p className="font-semibold text-white/90 mt-2 mb-1">{children}</p>,
-  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
-  ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
+  h1: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-5 mb-2">{children}</p>,
+  h2: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-5 mb-2">{children}</p>,
+  h3: ({ children }: { children?: React.ReactNode }) => <p className="font-semibold text-white/90 mt-5 mb-2">{children}</p>,
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-3 last:mb-0">{children}</p>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc list-inside mb-3 space-y-2">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal list-inside mb-3 space-y-2">{children}</ol>,
   li: ({ children }: { children?: React.ReactNode }) => <li className="ml-2">{children}</li>,
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="text-white font-semibold">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="text-indigo-200">{children}</em>,
@@ -192,7 +192,7 @@ function AssistantMessage({ content }: { content: string }) {
                 </svg>
                 AI Thinking Process
               </summary>
-              <div className="pl-3 mt-2 ml-1.5 border-l-2 border-white/10 text-slate-400 text-xs opacity-80 pb-2 cursor-auto">
+              <div className="pl-3 mt-2 ml-1.5 border-l-2 border-indigo-500/20 text-slate-400 text-xs opacity-80 pb-2 cursor-auto">
                 <ReactMarkdown components={markdownComponents}>
                   {innerContent}
                 </ReactMarkdown>
@@ -440,6 +440,14 @@ export default function LLMPage() {
             >
               Upcoming Events
             </button>
+            <button
+              onClick={() => handleSend('', 'add_or_trim', 'Which of my holdings should I add to, and which should I trim?')}
+              disabled={cannedDisabled}
+              title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
+              className={`transition-colors text-sm font-medium ${cannedDisabled ? 'text-rose-400/40 cursor-not-allowed' : 'text-rose-400 hover:text-rose-300'}`}
+            >
+              Add or Trim?
+            </button>
           </div>
         </div>
 
@@ -454,13 +462,15 @@ export default function LLMPage() {
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group relative`}>
               <div className="relative max-w-[85%]">
-                <div className={`px-5 py-3 text-sm leading-relaxed
-                  ${msg.role === 'user' ? 'text-indigo-300 font-medium whitespace-pre-wrap' : 'text-indigo-100/90'}`}>
-                  {msg.role === 'assistant'
-                    ? <AssistantMessage content={msg.content} />
-                    : msg.content
-                  }
-                </div>
+                {msg.role === 'user' ? (
+                  <div className="bg-indigo-500/8 rounded-2xl px-4 py-2.5 text-sm text-indigo-300 font-medium whitespace-pre-wrap leading-[1.8]">
+                    {msg.content}
+                  </div>
+                ) : (
+                  <div className="bg-white/[0.02] rounded-2xl px-5 py-4 text-sm leading-[1.8] text-indigo-100/90">
+                    <AssistantMessage content={msg.content} />
+                  </div>
+                )}
                 {msg.role === 'assistant' && msg.cached && i === messages.length - 1 && (
                   <button
                     onClick={() => handleRegenerate(i)}

@@ -231,6 +231,8 @@ export interface LLMChatRequest {
   risk_free_rate?: number;
   // benchmark_analysis
   benchmark_symbol?: string;
+  // long_market_summary
+  period?: string;
 }
 
 export interface LLMChatResponse {

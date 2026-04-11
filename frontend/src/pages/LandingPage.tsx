@@ -81,6 +81,11 @@ export default function LandingPage() {
           { role: 'user', content: `What happened in the market this ${periodLabel}?` },
           { role: 'assistant', content: llmSummary },
         ],
+        initialPrompt: {
+          promptType: 'long_market_summary',
+          displayMessage: `Give me a detailed breakdown of the ${periodLabel}.`,
+          extraParams: { period: llmPeriod },
+        },
       },
     })
   }

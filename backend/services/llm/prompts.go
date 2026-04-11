@@ -23,14 +23,37 @@ func (cp CannedPrompt) Render(vars map[string]string) string {
 }
 
 const defaultConstraints = `<constraints>
-- DO NOT provide overly specific personalized financial advice (e.g., never say "You should sell X").
+- DO NOT provide overly specific personalized financial advice (e.g., never say "You should sell X", unless explicitly prompted).
 - DO NOT invent or hallucinate news events. If you are unsure about recent news for a ticker, state that explicitly.
 - DO NOT speculate on exact future price targets, only on ranges and only when backed up with a multitude of sources, carefully citing them.
+- TICKER SYMBOLS ARE AUTHORITATIVE: every symbol and name in the portfolio data is exact and correct. Never silently correct, substitute, or confuse a ticker with a more commonly known one (e.g. "SPP1" is the Vanguard FTSE All-World EUR-hedged ETF — it is NOT a misspelling of the S&P 500 or any S&P 500 instrument). If a ticker is unfamiliar, look it up rather than assuming it refers to something more popular. If search results conflict with the name provided in the portfolio data, the portfolio data is the ground truth — do not let search results override or reinterpret the provided ticker-to-name mapping.
+- OMIT RATHER THAN FABRICATE: if you have no meaningful, well-grounded content for a section (e.g. no relevant recent news, no clear factor tilt, no identifiable risk), write "Nothing significant to report." for that section instead of filling it with vague or speculative filler. No information is better than low-quality information.
 </constraints>`
 
 // CannedPrompts is the registry of all predefined prompts.
 var CannedPrompts = map[string]CannedPrompt{
 	// market_summary is used exclusively by GET /llm/summary; not accessible via chat.
+	// long_market_summary is the chat-accessible expanded version triggered from the landing page.
+	"long_market_summary": {
+		Message: `Provide a comprehensive market briefing covering {period}.
+
+Use the Google Search tool to find relevant news, economic data releases, and company-specific developments. Use a <thinking> block to gather and synthesize your findings before writing the final briefing.
+
+Structure your response using exactly these markdown headers:
+### 🌍 Macro Environment
+Summarize the major macroeconomic developments over {period}: monetary policy signals, inflation or employment data, central bank decisions (Fed, ECB, BoJ, etc.), and how major global indices (S&P 500, STOXX 600, Nikkei, etc.) responded. Focus on the why behind the moves, not just the what. If the VIX moved meaningfully over the period, note its direction and what it signals about risk appetite.
+### 📊 Portfolio Impact
+Explain how the macro backdrop specifically affected the portfolio's major holdings and sectors over {period}. Cite specific tickers, sector-level moves, and any notable FX dynamics that influenced returns.
+### 🔬 Company-Specific Spotlight
+Highlight major news events directly involving portfolio constituents over {period}: significant earnings releases and guidance updates, analyst upgrades or downgrades with material changes in price targets, and notable insider buying or selling. Only include developments with a meaningful price or sentiment impact — omit routine noise.
+### 🌊 Sentiment & Flows
+Describe the prevailing market sentiment over {period}: direction of the Fear & Greed index or comparable sentiment gauges, notable put/call ratio or options skew shifts, and any significant fund flow data (sectors or geographies seeing meaningful inflows or outflows). Qualify any figures as approximate and note if data is unavailable rather than estimating.
+### 💱 Currency & Commodity Pulse
+Summarize notable moves in major FX pairs (EUR/USD, USD/JPY, and any pairs directly relevant to the portfolio's geographic exposure) and key commodities (oil, gold, copper as a growth proxy) over {period}. Where relevant, connect these moves to the portfolio's hedged or unhedged positions.`,
+		SystemInstruction: "You are an expert, professional financial analyst writing a comprehensive market briefing. Ground every claim in real, verifiable data from your search results. Prioritize depth and accuracy over brevity.",
+		ChatAccessible:    true,
+		Cacheable:         false,
+	},
 	"market_summary": {
 		Message: `Provide a brief market summary formatted as two short bullet points covering {period}:
 - **Macro:** Focus on macroeconomic factors that had the biggest impact on the broader market (mention major global indices if relevant).
@@ -39,6 +62,22 @@ var CannedPrompts = map[string]CannedPrompt{
 Keep each bullet point under 30 words.`,
 		SystemInstruction: "You are an expert, professional financial analyst. Provide concise, impactful summaries. Use short information-filled sentences. Avoid overly long compound sentences. Respect the length requirement.",
 		ChatAccessible:    false,
+	},
+	"add_or_trim": {
+		Message: `You are helping me decide where to allocate new money and where to reduce existing positions within my current portfolio. Do NOT suggest adding any new securities — only work with what I already hold.
+
+Use the Google Search tool to find current news, recent earnings, analyst sentiment, and valuation context for my holdings. Use a <thinking> block, and begin it by listing every ticker from the portfolio data alongside its full name exactly as provided — do not paraphrase or infer names. Use this list as your reference throughout; if a search result describes a security whose name does not match the provided name for that ticker, discard it and search more specifically. Then evaluate each position's upside and downside case, and identify any that are already overrepresented relative to their risk/reward.
+
+Then structure your response using exactly these markdown headers:
+### ✅ Add Weight To
+Pick exactly three holdings from my portfolio with the most compelling case for putting more money in right now. For each, write 2–4 sentences covering: the core upside catalyst, why it complements the rest of the portfolio (diversification, factor tilt, or thematic fit), and any key risk to monitor. Lead each entry with the ticker in bold.
+### ✂️ Trim or Avoid
+Pick exactly three holdings from my portfolio where the case for adding more money is weakest — either due to a credible downside story, stretched valuation, or because the position is already overrepresented relative to the rest of the portfolio. For each, write 2–4 sentences covering: the core concern, what conditions would make this thesis wrong (i.e. when you'd change your mind), and whether this is a full exit candidate or just a "don't add" signal. Lead each entry with the ticker in bold.
+
+A holding may appear in both lists if it represents a high-conviction asymmetric bet — compelling upside but with an equally credible downside that warrants caution before sizing up.`,
+		SystemInstruction: "You are an expert equity analyst helping a client make capital allocation decisions within their existing portfolio. Ground your recommendations in current, real-world data from your search results. Be direct and opinionated — avoid hedging every sentence.",
+		ChatAccessible:    true,
+		Cacheable:         false,
 	},
 	"general_analysis": {
 		Message: `Analyze my current portfolio given current market conditions. What am I effectively betting on?
@@ -50,6 +89,10 @@ Then, structure your response using exactly these markdown headers:
 Briefly summarize the overarching market regime (e.g., inflationary, rate-cutting cycle, tech-led growth) and how this portfolio aligns with it.
 ### 📊 Sector & Geographic Concentration
 Identify where my money is truly concentrated (do not just list percentages; Group them by common themes like "AI infrastructure" or regional exposures like "US Tech versus European Industrials").
+### 🧮 Fama-French Factor Tilts
+Provide a qualitative, one-paragraph assessment of this portfolio's likely factor tilts using the Fama-French five-factor framework (Market, Size, Value/Growth, Profitability, Investment). 
+Do not attempt precise calculations — instead reason from the holdings' known characteristics (e.g. mega-cap growth tech = strong negative HML, strong positive RMW; broad market ETFs = near-zero SMB). 
+Conclude with one sentence on whether the combined tilt profile is deliberate or incidental.
 ### 🎯 Implicit Bets
 Based on my concentration, what specific future events, market shifts, or currency dynamics am I effectively betting heavily on to happen? What am I most vulnerable to (e.g. exposed to a weakening USD)?
 ### 🔍 Blind Spots & Under-allocations
@@ -68,14 +111,16 @@ Describe a highly favorable, yet realistic sequence of events over the next 6-12
 ### ⛈️ Worst Case Scenario
 Describe a realistic stress scenario (e.g., specific regulatory shifts, supply chain shocks, currency headwinds, or rate changes) that would cause this portfolio to suffer heavy drawdowns. What is the structural weakness?
 ### 📡 Key Indicators to Watch
-List 2-3 specific, measurable macroeconomic or fundamental data points I should monitor closely to see which of the two scenarios is actively unfolding (e.g., upcoming inflation data, central bank meetings like the Fed or ECB, or key sector earnings).`,
+List 2-3 specific, measurable macroeconomic or fundamental data points I should monitor closely to see which of the two scenarios is actively unfolding (e.g., upcoming inflation data, central bank meetings like the Fed or ECB, or key sector earnings).
+### 📜 Historical Precedents
+Identify 2-3 specific historical periods (e.g., the 2000 dot-com bust, 2008 GFC, 2020 COVID crash, 2022 rate-hike cycle) where a portfolio with a similar geographic, sector, and asset-type composition faced comparable market conditions. For each period, briefly describe how such a portfolio would likely have performed — both during the drawdown and the subsequent recovery — and what the key driver of that outcome was.`,
 		ChatAccessible: true,
 		Cacheable:      true,
 	},
 	"ticker_analysis": {
 		Message: `You are analyzing the asset: {label}.
 
-First, use the Google Search tool to find the most recent financial news, earnings reports, and current sentiment analysis for this specific ticker. Use a <thinking> block to synthesize your findings and verify you have up-to-date context.
+First, use a <thinking> block and open it by stating the ticker symbol and its full name exactly as provided above — this is your ground truth. Then use the Google Search tool to find the most recent financial news, earnings reports, and current sentiment analysis, searching specifically for that ticker symbol and name. If a search result describes a different security, discard it and refine your search. Synthesize only findings that unambiguously match the provided ticker and name.
 
 Then, analyze the asset through four specific lenses:
 1. **Catalysts:** (Recent earnings, regulatory filings, product launches, or macro shifts impacts).
