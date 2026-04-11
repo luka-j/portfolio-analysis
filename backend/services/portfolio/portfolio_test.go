@@ -48,7 +48,7 @@ func (m *mockMarketProvider) TradingDates(from, to time.Time) ([]time.Time, erro
 	return dates, nil
 }
 
-func (m *mockMarketProvider) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
 	return m.current, nil
 }
 
@@ -101,7 +101,7 @@ func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {
 
 	// 2. Initialize Service with mock provider
 	// We use Original accounting model to reliably bypass FX lookups.
-	svc := NewService(mockProvider, nil, nil, 0)
+	svc := NewService(mockProvider, nil, 0)
 
 	returns, startDates, endDates, err := svc.GetDailyReturns(data, friday, monday, "USD", models.AccountingModelOriginal)
 	if err != nil {
@@ -173,7 +173,7 @@ func TestGetDailyValues_PendingCashIncludedAfterSale(t *testing.T) {
 	}
 
 	// expiryDays=30 — bucket is still active on day5.
-	svc := NewService(mockProvider, nil, nil, 30)
+	svc := NewService(mockProvider, nil, 30)
 	hist, err := svc.GetDailyValues(data, day0, day5, "USD", models.AccountingModelOriginal, false)
 	require.NoError(t, err)
 
@@ -210,7 +210,7 @@ func TestGetCumulativeTWR_SaleWithActiveBucketIsFlat(t *testing.T) {
 		},
 	}
 
-	svc := NewService(mockProvider, nil, nil, 30)
+	svc := NewService(mockProvider, nil, 30)
 	hist, err := svc.GetCumulativeTWR(data, day0, day5, "USD", models.AccountingModelOriginal, false)
 	require.NoError(t, err)
 
@@ -248,7 +248,7 @@ func TestGetCumulativeTWR_BucketExpiryIsNeutral(t *testing.T) {
 		prices: map[string][]models.PricePoint{"TEST": prices},
 	}
 
-	svc := NewService(mockProvider, nil, nil, 30)
+	svc := NewService(mockProvider, nil, 30)
 	hist, err := svc.GetCumulativeTWR(data, day0, day35, "USD", models.AccountingModelOriginal, false)
 	require.NoError(t, err)
 
@@ -314,7 +314,7 @@ func TestGetDailyReturns_DatesOffsetSkip(t *testing.T) {
 		},
 	}
 
-	svc := NewService(mockProvider, nil, nil, 0)
+	svc := NewService(mockProvider, nil, 0)
 
 	returns, startDates, endDates, err := svc.GetDailyReturns(data, day1, day4, "USD", models.AccountingModelOriginal)
 	if err != nil {

@@ -483,21 +483,21 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 		firstBySymbol[r.Symbol] = r.AdjClose
 	}
 
-	// "Last" price per symbol: live current price when `to` is today, otherwise
-	// the latest close on or before `to`.
+	// "Last" price per symbol: use the unified GetLatestPrice when `to` is today,
+	// otherwise fall back to the latest historical close on or before `to`.
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	toIsToday := !to.Before(today) && to.Before(today.AddDate(0, 0, 1))
 
 	lastBySymbol := make(map[string]float64, len(yahooSymbols))
-	if toIsToday && h.PortfolioService.CurrentPriceProvider != nil {
+	if toIsToday {
 		for _, ys := range yahooSymbols {
-			if p, err := h.PortfolioService.CurrentPriceProvider.GetCurrentPrice(ys, false); err == nil && p != 0 {
+			if p, err := h.PortfolioService.MarketProvider.GetLatestPrice(ys, false); err == nil && p > 0 {
 				lastBySymbol[ys] = p
 			}
 		}
 	}
-	// Fall back to latest historical close ≤ to for any symbol without a live price.
+	// For symbols without a live price (or when to != today), use latest historical close.
 	var needHistLast []string
 	for _, ys := range yahooSymbols {
 		if lastBySymbol[ys] == 0 {

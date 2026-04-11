@@ -121,7 +121,7 @@ func (m *mockMarketProvider) TradingDates(from, to time.Time) ([]time.Time, erro
 	return dates, nil
 }
 
-func (m *mockMarketProvider) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
 	points, ok := m.prices[symbol]
 	if !ok || len(points) == 0 {
 		return 0, fmt.Errorf("no mock data for symbol %s", symbol)
@@ -157,7 +157,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	mockMarket := newMockMarketProvider()
 	fxSvc := fx.NewService(mockMarket, nil) // CNB is nil for this test
 	repo := flexquery.NewRepository(db)
-	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, nil, 0)
+	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, 0)
 
 	taxSvc := tax.NewService(fxSvc)
 
@@ -461,7 +461,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 
 	fxSvc := fx.NewService(m, nil)
 	repo := flexquery.NewRepository(db)
-	portfolioSvc := portfolio.NewService(m, fxSvc, nil, 0)
+	portfolioSvc := portfolio.NewService(m, fxSvc, 0)
 
 	taxSvc := tax.NewService(fxSvc)
 	allF := map[string]fundamentals.FundamentalsProvider{}
@@ -768,7 +768,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 
 	fxSvc := fx.NewService(mockMarket, nil)
 	repo := flexquery.NewRepository(db)
-	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, nil, 0)
+	portfolioSvc := portfolio.NewService(mockMarket, fxSvc, 0)
 
 	taxSvc := tax.NewService(fxSvc)
 

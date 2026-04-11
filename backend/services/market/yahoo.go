@@ -28,12 +28,9 @@ type Provider interface {
 	// Used by the portfolio service to skip non-trading days without forward-filling
 	// price data across every calendar day.
 	TradingDates(from, to time.Time) ([]time.Time, error)
-}
-
-// CurrentPriceProvider returns a live or recently-cached market price for a symbol.
-// If the stored price is older than 5 minutes a fresh fetch is attempted.
-type CurrentPriceProvider interface {
-	GetCurrentPrice(symbol string, cachedOnly bool) (float64, error)
+	// GetLatestPrice returns the most recent price for symbol, trying a live/intraday
+	// fetch first and falling back to the latest historical close.
+	GetLatestPrice(symbol string, cachedOnly bool) (float64, error)
 }
 
 // CurrencyGetter can report the native trading currency of a symbol.
@@ -142,10 +139,10 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 			end = now
 		}
 
-		// Trailing edge: use a 2-day leeway (covers weekends: Fri close → Mon open).
-		// The leading edge uses 5 days for IPO/listing gaps, but the trailing edge
-		// only needs to handle normal non-trading days.
-		if lastDate.Before(end.AddDate(0, 0, -2)) {
+		// Trailing edge: optimistically fetch whenever the cache doesn't cover the
+		// requested end date. If end falls on a weekend/holiday Yahoo will simply
+		// return no new data, which is harmless — we keep what's already cached.
+		if lastDate.Before(end) {
 			missingRanges = append(missingRanges, [2]time.Time{lastDate.AddDate(0, 0, 1), end})
 		}
 	}
@@ -157,16 +154,21 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 			lastErr = err
 			log.Printf("Warning: fetching %s history [%s..%s]: %v",
 				symbol, rng[0].Format("2006-01-02"), rng[1].Format("2006-01-02"), err)
-			// Insert a dummy marker at the start of the failing range to prevent future queries.
-			// "No data returned" means Yahoo doesn't know the ticker or date (e.g. pre-IPO).
-			if err.Error() == fmt.Sprintf("no data returned for symbol %s", symbol) ||
-				err.Error() == "yahoo finance error: No data found, symbol may be delisted" ||
-				err.Error() == fmt.Sprintf("yahoo returned HTTP 404 for %s", symbol) {
-				if saveErr := s.saveCache(symbol, []models.PricePoint{
-					{Date: rng[0], Volume: -1},
-					{Date: rng[1], Volume: -1},
-				}); saveErr != nil {
-					log.Printf("Warning: saving negative cache for %s: %v", symbol, saveErr)
+			// Write negative-cache markers for genuinely unknown/delisted symbols so
+			// we don't re-query the same hopeless range on every request.
+			// Only do this when we have no prior data for this symbol — if we already
+			// have cached history, a failing trailing-edge fetch is likely transient
+			// (weekend, holiday, market not yet closed) and should not be cached.
+			if !hasCache {
+				if err.Error() == fmt.Sprintf("no data returned for symbol %s", symbol) ||
+					err.Error() == "yahoo finance error: No data found, symbol may be delisted" ||
+					err.Error() == fmt.Sprintf("yahoo returned HTTP 404 for %s", symbol) {
+					if saveErr := s.saveCache(symbol, []models.PricePoint{
+						{Date: rng[0], Volume: -1},
+						{Date: rng[1], Volume: -1},
+					}); saveErr != nil {
+						log.Printf("Warning: saving negative cache for %s: %v", symbol, saveErr)
+					}
 				}
 			}
 			continue
@@ -180,16 +182,9 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 			if saveErr := s.saveCache(symbol, points); saveErr != nil {
 				log.Printf("Warning: saving %d price points for %s: %v", len(points), symbol, saveErr)
 			}
-		} else {
-			log.Printf("Warning: Yahoo returned success but empty data for %s [%s..%s]",
-				symbol, rng[0].Format("2006-01-02"), rng[1].Format("2006-01-02"))
-			if saveErr := s.saveCache(symbol, []models.PricePoint{
-				{Date: rng[0], Volume: -1},
-				{Date: rng[1], Volume: -1},
-			}); saveErr != nil {
-				log.Printf("Warning: saving empty-data cache for %s: %v", symbol, saveErr)
-			}
 		}
+		// Empty successful response (no trading days in range) — skip silently.
+		// This is normal for trailing-edge fetches that land on weekends/holidays.
 	}
 
 	cachedData, err := s.loadCache(symbol, fromDate, toDate)
@@ -464,6 +459,40 @@ func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (f
 	}
 
 	return price, nil
+}
+
+// GetLatestPrice returns the most recent price for symbol by trying the live
+// intraday price first (via GetCurrentPrice) and falling back to the latest
+// historical close from the last 5 days.
+func (s *YahooFinanceService) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+	p, err := s.GetCurrentPrice(symbol, cachedOnly)
+	if err == nil && p > 0 {
+		return p, nil
+	}
+
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	lookback := today.AddDate(0, 0, -5)
+
+	prices, histErr := s.GetHistory(symbol, lookback, today, cachedOnly)
+	if histErr == nil && len(prices) > 0 {
+		last := prices[len(prices)-1]
+		if last.AdjClose != 0 {
+			return last.AdjClose, nil
+		}
+		if last.Close != 0 {
+			return last.Close, nil
+		}
+	}
+
+	// Return the original current-price error if history also failed.
+	if err != nil {
+		return 0, err
+	}
+	if histErr != nil {
+		return 0, histErr
+	}
+	return 0, fmt.Errorf("no price data for %s", symbol)
 }
 
 func (s *YahooFinanceService) fetchFromYahoo(symbol string, from, to time.Time) ([]models.PricePoint, error) {

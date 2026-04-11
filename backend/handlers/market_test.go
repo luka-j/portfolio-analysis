@@ -129,6 +129,18 @@ func (m *mockHandlerMarketProvider) TradingDates(from, to time.Time) ([]time.Tim
 	return dates, nil
 }
 
+func (m *mockHandlerMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+	pts, ok := m.prices[symbol]
+	if !ok || len(pts) == 0 {
+		return 0, fmt.Errorf("no mock data for %s", symbol)
+	}
+	last := pts[len(pts)-1]
+	if last.AdjClose != 0 {
+		return last.AdjClose, nil
+	}
+	return last.Close, nil
+}
+
 func newTestHandler() (*MarketHandler, *mockHandlerMarketProvider) {
 	mock := &mockHandlerMarketProvider{
 		prices: make(map[string][]models.PricePoint),

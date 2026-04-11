@@ -31,6 +31,14 @@ func (m *mockMarket) TradingDates(from, to time.Time) ([]time.Time, error) {
 	return nil, nil
 }
 
+func (m *mockMarket) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+	rate, ok := m.rates[symbol]
+	if !ok {
+		return 0, nil
+	}
+	return rate, nil
+}
+
 func setupTaxService() *Service {
 	market := &mockMarket{
 		rates: map[string]float64{

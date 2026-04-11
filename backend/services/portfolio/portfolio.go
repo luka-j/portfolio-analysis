@@ -18,14 +18,13 @@ import (
 // Service reconstructs and values portfolios from FlexQuery data.
 type Service struct {
 	MarketProvider       market.Provider
-	CurrentPriceProvider market.CurrentPriceProvider
 	FXService            *fx.Service
 	CashBucketExpiryDays int
 }
 
 // NewService creates a new portfolio service.
-func NewService(mp market.Provider, fxSvc *fx.Service, cpp market.CurrentPriceProvider, cashBucketExpiryDays int) *Service {
-	return &Service{MarketProvider: mp, CurrentPriceProvider: cpp, FXService: fxSvc, CashBucketExpiryDays: cashBucketExpiryDays}
+func NewService(mp market.Provider, fxSvc *fx.Service, cashBucketExpiryDays int) *Service {
+	return &Service{MarketProvider: mp, FXService: fxSvc, CashBucketExpiryDays: cashBucketExpiryDays}
 }
 
 // isFXTrade delegates to the centralized check in models.
@@ -106,7 +105,6 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 	holdings := s.GetCurrentHoldings(data)
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	lookback := today.AddDate(0, 0, -5)
 
 	costBasisMap, realizedGLMap, commissionsMap := s.computeCurrentValueMaps(data, currency, acctModel, cachedOnly)
 
@@ -121,34 +119,15 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 			querySymbol = ys
 		}
 
-		latestPrice := 0.0
-		var currentPriceErr, histErr error
-		if s.CurrentPriceProvider != nil {
-			p, err := s.CurrentPriceProvider.GetCurrentPrice(querySymbol, cachedOnly)
-			if err != nil {
-				log.Printf("Warning: fetching current price for %s (mapped to %s): %v; falling back to history", h.Symbol, querySymbol, err)
-				currentPriceErr = err
-			} else {
-				latestPrice = p
-			}
-		}
-		if latestPrice == 0 {
-			prices, err := s.MarketProvider.GetHistory(querySymbol, lookback, today, cachedOnly)
-			if err != nil {
-				log.Printf("Warning: fetching price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
-				histErr = err
-			} else if len(prices) > 0 {
-				latestPrice = prices[len(prices)-1].AdjClose
-				if latestPrice == 0 {
-					latestPrice = prices[len(prices)-1].Close
-				}
-			}
+		latestPrice, err := s.MarketProvider.GetLatestPrice(querySymbol, cachedOnly)
+		if err != nil {
+			log.Printf("Warning: fetching latest price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
 		}
 
 		// Determine price status on a best-effort basis.
 		var priceStatus string
 		if latestPrice == 0 {
-			if histErr != nil || currentPriceErr != nil {
+			if err != nil {
 				priceStatus = "fetch_failed"
 			} else if checker, ok := s.MarketProvider.(market.PriceStatusChecker); ok && checker.HasCachedData(querySymbol) {
 				priceStatus = "stale"
@@ -159,18 +138,18 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 		nativeValue := h.Quantity * latestPrice
 
 		var convertedPrice, convertedValue float64
-		var err error
 		if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
 			convertedPrice = latestPrice
 			convertedValue = nativeValue
 		} else {
-			convertedPrice, err = s.FXService.ConvertSpot(latestPrice, h.Currency, currency, cachedOnly)
-			if err != nil {
-				return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, currency, err)
+			var fxErr error
+			convertedPrice, fxErr = s.FXService.ConvertSpot(latestPrice, h.Currency, currency, cachedOnly)
+			if fxErr != nil {
+				return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, currency, fxErr)
 			}
-			convertedValue, err = s.FXService.ConvertSpot(nativeValue, h.Currency, currency, cachedOnly)
-			if err != nil {
-				return nil, fmt.Errorf("converting value %s to %s: %w", h.Currency, currency, err)
+			convertedValue, fxErr = s.FXService.ConvertSpot(nativeValue, h.Currency, currency, cachedOnly)
+			if fxErr != nil {
+				return nil, fmt.Errorf("converting value %s to %s: %w", h.Currency, currency, fxErr)
 			}
 		}
 		totalValue += convertedValue
