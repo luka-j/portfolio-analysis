@@ -586,7 +586,7 @@ export default function PortfolioPage() {
                     </div>
 
                     {isExpanded && (
-                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} displayCurrency={currency} privacy={privacy} />
+                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} isin={pos.isin} displayCurrency={currency} privacy={privacy} />
                     )}
                   </div>
                 )
@@ -676,7 +676,7 @@ export default function PortfolioPage() {
   )
 }
 
-function TradeDetail({ symbol, exchange, displayCurrency, privacy }: { symbol: string; exchange?: string; displayCurrency: string; privacy: boolean }) {
+function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy }: { symbol: string; exchange?: string; isin?: string; displayCurrency: string; privacy: boolean }) {
   const [trades, setTrades] = useState<TradeEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -704,8 +704,11 @@ function TradeDetail({ symbol, exchange, displayCurrency, privacy }: { symbol: s
 
   return (
     <div className="px-10 py-8 bg-[#0f1117]">
-      <div className="flex items-center mb-5 px-5">
+      <div className="flex items-center gap-4 mb-5 px-5">
         <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em]">Transaction History — {symbol}</p>
+        {isin && (
+          <span className="text-[9px] font-bold text-slate-600 tracking-widest uppercase bg-white/3 border border-white/5 px-2.5 py-1 rounded-xl">{isin}</span>
+        )}
       </div>
       <div className="bg-[#1a1d2e]/40 border border-white/5 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-3xl ring-1 ring-white/5">
         <div className={`grid ${colsClass} gap-4 px-8 py-4 text-[9px] font-black text-slate-600 uppercase tracking-widest border-b border-white/5 bg-white/2`}>

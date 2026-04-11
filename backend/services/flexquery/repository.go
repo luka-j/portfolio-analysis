@@ -75,6 +75,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			TransactionID:   t.TransactionID,
 			Conid:           t.Conid,
 			Symbol:          t.Symbol,
+			ISIN:            t.ISIN,
 			AssetCategory:   t.AssetCategory,
 			Currency:        t.Currency,
 			ListingExchange: t.ListingExchange,
@@ -138,19 +139,25 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 
 // backfillConid updates an existing duplicate transaction's conid (and symbol)
 // when the incoming trade carries a conid that the stored row is missing.
+// Also backfills ISIN when the stored row has none.
 // This lets a re-upload of a FlexQuery retroactively enrich old rows that were
-// imported before conid support was added.
+// imported before conid/ISIN support was added.
 func backfillConid(db *gorm.DB, existing *models.Transaction, incoming models.Trade) {
-	if incoming.Conid == "" || existing.Conid == incoming.Conid {
-		return
+	updates := map[string]interface{}{}
+	if incoming.Conid != "" && existing.Conid != incoming.Conid {
+		updates["conid"] = incoming.Conid
+		if existing.Conid == "" {
+			// First time we see a conid for this trade — also refresh the symbol
+			// in case IBKR renamed the ticker since the original import.
+			updates["symbol"] = incoming.Symbol
+		}
 	}
-	updates := map[string]interface{}{"conid": incoming.Conid}
-	if existing.Conid == "" {
-		// First time we see a conid for this trade — also refresh the symbol
-		// in case IBKR renamed the ticker since the original import.
-		updates["symbol"] = incoming.Symbol
+	if incoming.ISIN != "" && existing.ISIN == "" {
+		updates["isin"] = incoming.ISIN
 	}
-	db.Model(existing).Updates(updates)
+	if len(updates) > 0 {
+		db.Model(existing).Updates(updates)
+	}
 }
 
 // LoadSaved loads all historical transactions from the DB for a user.

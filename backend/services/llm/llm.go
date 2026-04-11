@@ -31,6 +31,7 @@ type CustomWeight struct {
 type PortfolioContextItem struct {
 	Symbol    string  `json:"symbol"`
 	Name      string  `json:"name,omitempty"`
+	ISIN      string  `json:"isin,omitempty"`
 	WeightPct float64 `json:"weight_pct"`
 }
 
@@ -80,20 +81,36 @@ func (s *Service) ResolveModel(override string) string {
 	return s.ProModel
 }
 
-// lookupNames batch-queries asset_fundamentals for the given symbols and returns a symbol→name map.
-func (s *Service) lookupNames(symbols []string) map[string]string {
-	names := make(map[string]string, len(symbols))
+// fundamentalsEntry holds the name and ISIN for a symbol.
+type fundamentalsEntry struct {
+	Name string
+	ISIN string
+}
+
+// lookupFundamentals batch-queries asset_fundamentals for the given symbols and returns a symbol→entry map.
+func (s *Service) lookupFundamentals(symbols []string) map[string]fundamentalsEntry {
+	result := make(map[string]fundamentalsEntry, len(symbols))
 	if s.DB == nil || len(symbols) == 0 {
-		return names
+		return result
 	}
 	var rows []models.AssetFundamental
-	if err := s.DB.Select("symbol, name").Where("symbol IN ?", symbols).Find(&rows).Error; err != nil {
-		log.Printf("WARN: llm name lookup failed: %v", err)
-		return names
+	if err := s.DB.Select("symbol, name, isin").Where("symbol IN ?", symbols).Find(&rows).Error; err != nil {
+		log.Printf("WARN: llm fundamentals lookup failed: %v", err)
+		return result
 	}
 	for _, r := range rows {
-		if r.Name != "" {
-			names[r.Symbol] = r.Name
+		result[r.Symbol] = fundamentalsEntry{Name: r.Name, ISIN: r.ISIN}
+	}
+	return result
+}
+
+// lookupNames batch-queries asset_fundamentals for the given symbols and returns a symbol→name map.
+func (s *Service) lookupNames(symbols []string) map[string]string {
+	fd := s.lookupFundamentals(symbols)
+	names := make(map[string]string, len(fd))
+	for sym, e := range fd {
+		if e.Name != "" {
+			names[sym] = e.Name
 		}
 	}
 	return names
@@ -117,16 +134,18 @@ func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, 
 			symbols = append(symbols, pos.Symbol)
 		}
 	}
-	names := s.lookupNames(symbols)
+	fd := s.lookupFundamentals(symbols)
 
 	var items []PortfolioContextItem
 	for _, pos := range result.Positions {
 		if pos.Value == 0 {
 			continue
 		}
+		e := fd[pos.Symbol]
 		items = append(items, PortfolioContextItem{
 			Symbol:    pos.Symbol,
-			Name:      names[pos.Symbol],
+			Name:      e.Name,
+			ISIN:      e.ISIN,
 			WeightPct: math.Round((pos.Value/result.Value)*1000) / 10,
 		})
 	}
@@ -149,13 +168,15 @@ func (s *Service) buildPortfolioJSONFromCustom(weights []CustomWeight) string {
 	for i, w := range weights {
 		symbols[i] = w.Symbol
 	}
-	names := s.lookupNames(symbols)
+	fd := s.lookupFundamentals(symbols)
 
 	var items []PortfolioContextItem
 	for _, w := range weights {
+		e := fd[w.Symbol]
 		items = append(items, PortfolioContextItem{
 			Symbol:    w.Symbol,
-			Name:      names[w.Symbol],
+			Name:      e.Name,
+			ISIN:      e.ISIN,
 			WeightPct: math.Round(w.Weight*10) / 10,
 		})
 	}

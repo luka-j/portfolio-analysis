@@ -50,6 +50,7 @@ type xmlTrade struct {
 	BuySell         string `xml:"buySell,attr"`
 	TradeID         string `xml:"tradeID,attr"`  // IB unique identifier
 	Conid           string `xml:"conid,attr"`    // IB permanent contract ID
+	ISIN            string `xml:"isin,attr"`     // ISIN when provided by IB
 }
 
 type xmlTransfers struct {
@@ -68,6 +69,7 @@ type xmlTransfer struct {
 	PositionAmount  string `xml:"positionAmount,attr"`
 	Direction       string `xml:"direction,attr"`
 	Conid           string `xml:"conid,attr"` // IB permanent contract ID
+	ISIN            string `xml:"isin,attr"`  // ISIN when provided by IB
 }
 
 type xmlOpenPositions struct {
@@ -126,6 +128,7 @@ func (p *Parser) Parse(r io.Reader) (*models.FlexQueryData, error) {
 			TransactionID:   t.TradeID,
 			Conid:           t.Conid,
 			Symbol:          t.Symbol,
+			ISIN:            t.ISIN,
 			AssetCategory:   resolveAssetCategory(t.AssetCategory, t.SubCategory),
 			Currency:        t.Currency,
 			ListingExchange: t.ListingExchange,
@@ -168,6 +171,7 @@ func (p *Parser) Parse(r io.Reader) (*models.FlexQueryData, error) {
 		data.Trades = append(data.Trades, models.Trade{
 			Conid:           tr.Conid,
 			Symbol:          tr.Symbol,
+			ISIN:            tr.ISIN,
 			AssetCategory:   resolveAssetCategory(tr.AssetCategory, tr.SubCategory),
 			Currency:        tr.Currency,
 			ListingExchange: tr.ListingExchange,

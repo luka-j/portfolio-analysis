@@ -32,6 +32,7 @@ type Transaction struct {
 	AssetCategory   string
 	TaxCostBasis    *float64
 	Conid           string `gorm:"index"` // IB permanent contract ID; empty for eTrade/cash txns
+	ISIN            string `gorm:"index"` // ISIN from IB FlexQuery; empty when not provided
 }
 
 // MarketData represents cached end-of-day price data from Yahoo Finance.
@@ -53,6 +54,8 @@ type MarketData struct {
 type AssetFundamental struct {
 	ID          uint   `gorm:"primaryKey"`
 	Symbol      string `gorm:"uniqueIndex;not null"` // effective ticker (e.g. AAPL, VWCE.DE)
+	Conid       string `gorm:"index"`                // IB permanent contract ID; empty for non-IB securities
+	ISIN        string `gorm:"index"`                // ISIN from IB FlexQuery; empty when not provided
 	Name        string
 	AssetType   string `gorm:"index"` // "Stock", "ETF", "Bond ETF", "Commodity", "Unknown"
 	Country     string `gorm:"index"`

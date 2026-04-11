@@ -318,6 +318,12 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 			return
 		}
 
+		// Always seed conid and ISIN from IB transactions — idempotent, and must run even
+		// for already-classified symbols so that re-uploaded reports backfill these fields.
+		conid := s.ibConid(sym)
+		s.seedConid(sym, conid)
+		s.seedISIN(conid, s.ibISINForConid(conid))
+
 		// Skip if already definitively classified by IB itself.
 		// If the type was set by an external source, let IB re-confirm —
 		// external sources can misclassify (e.g. quoteType maps MUTUALFUND → ETF).
@@ -374,6 +380,55 @@ func (s *Service) ibCurrency(symbol string) string {
 		Limit(1).
 		Pluck("currency", &cur)
 	return cur
+}
+
+// ibConid returns the IB contract ID for symbol from the transactions table.
+func (s *Service) ibConid(symbol string) string {
+	var conid string
+	s.DB.Model(&models.Transaction{}).
+		Where("(symbol = ? OR yahoo_symbol = ?) AND conid != ''", symbol, symbol).
+		Limit(1).
+		Pluck("conid", &conid)
+	return conid
+}
+
+// ibISINForConid returns the ISIN for the given conid from the transactions table.
+func (s *Service) ibISINForConid(conid string) string {
+	if conid == "" {
+		return ""
+	}
+	var isin string
+	s.DB.Model(&models.Transaction{}).
+		Where("conid = ? AND isin != ''", conid).
+		Limit(1).
+		Pluck("isin", &isin)
+	return isin
+}
+
+// seedConid writes conid into an existing asset_fundamentals row for symbol,
+// only when the row exists and has no conid set yet.
+func (s *Service) seedConid(symbol, conid string) {
+	if conid == "" {
+		return
+	}
+	if err := s.DB.Model(&models.AssetFundamental{}).
+		Where("symbol = ? AND (conid IS NULL OR conid = '')", symbol).
+		Update("conid", conid).Error; err != nil {
+		log.Printf("fundamentals: seedConid %s: %v", symbol, err)
+	}
+}
+
+// seedISIN writes ISIN into an existing asset_fundamentals row identified by conid.
+// Using conid as the key guarantees the correct row even when the symbol has been renamed.
+func (s *Service) seedISIN(conid, isin string) {
+	if conid == "" || isin == "" {
+		return
+	}
+	if err := s.DB.Model(&models.AssetFundamental{}).
+		Where("conid = ? AND (isin IS NULL OR isin = '')", conid).
+		Update("isin", isin).Error; err != nil {
+		log.Printf("fundamentals: seedISIN (conid=%s): %v", conid, err)
+	}
 }
 
 // seedCurrency writes currency into an existing asset_fundamentals row for symbol,

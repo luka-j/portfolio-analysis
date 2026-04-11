@@ -18,6 +18,7 @@ type Trade struct {
 	TransactionID   string    `json:"transaction_id,omitempty"` // IB's native tradeID
 	Conid           string    `json:"conid,omitempty"`          // IB permanent contract ID
 	Symbol          string    `json:"symbol"`
+	ISIN            string    `json:"isin,omitempty"` // ISIN from IB FlexQuery
 	AssetCategory   string    `json:"asset_category"`
 	Currency        string    `json:"currency"`
 	ListingExchange string    `json:"listing_exchange,omitempty"`
@@ -152,6 +153,7 @@ type PositionValue struct {
 
 	BondDuration *float64 `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
 	Name         string   `json:"name,omitempty"`          // security long name from asset_fundamentals
+	ISIN         string   `json:"isin,omitempty"`          // ISIN from IB FlexQuery via asset_fundamentals
 	AssetType    string   `json:"asset_type,omitempty"`    // "Stock", "ETF", "Bond ETF", "Commodity", "Unknown"
 	PriceStatus  string   `json:"price_status,omitempty"`  // "" (ok) | "no_data" | "stale" | "fetch_failed"
 }

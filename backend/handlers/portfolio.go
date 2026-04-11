@@ -220,12 +220,15 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 			eff = pos.Symbol
 		}
 		var fund models.AssetFundamental
-		if err := h.Repo.DB.Select("asset_type, duration, name").Where("symbol = ?", eff).First(&fund).Error; err == nil {
+		if err := h.Repo.DB.Select("asset_type, duration, name, isin").Where("symbol = ?", eff).First(&fund).Error; err == nil {
 			if fund.AssetType == "Bond ETF" && fund.Duration != nil {
 				result.Positions[i].BondDuration = fund.Duration
 			}
 			if fund.Name != "" {
 				result.Positions[i].Name = fund.Name
+			}
+			if fund.ISIN != "" {
+				result.Positions[i].ISIN = fund.ISIN
 			}
 			if fund.AssetType != "" {
 				result.Positions[i].AssetType = fund.AssetType
