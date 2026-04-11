@@ -116,6 +116,7 @@ export default function LandingPage() {
         setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
         setHasTransactions(res.has_transactions)
         setValueRefreshing(false) // fresh arrived, clear stale indicator
+        setLoading(false) // unblock hero immediately once fresh data arrives
       }
     }
 

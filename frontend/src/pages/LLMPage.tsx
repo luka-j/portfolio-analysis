@@ -46,11 +46,15 @@ export default function LLMPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Fetch live portfolio weights on mount (single USD call; weights are currency-agnostic percentages)
+  // Fetch live portfolio weights on mount
   useEffect(() => {
     setWeightsLoading(true)
-    getPortfolioValue('USD', 'spot')
-      .then(usd => {
+    Promise.all([
+      getPortfolioValue('USD', 'spot'),
+      getPortfolioValue('CZK', 'spot'),
+      getPortfolioValue('EUR', 'spot'),
+    ])
+      .then(([usd, czk, eur]) => {
         if (usd.value === 0) return
         const rows: WeightRow[] = usd.positions
           .filter(p => p.value > 0)
@@ -58,7 +62,7 @@ export default function LLMPage() {
           .sort((a, b) => b.weight - a.weight)
         setLiveWeights(rows)
         setWeights(rows)
-        setPortfolioTotals({ USD: usd.value, CZK: 0, EUR: 0 })
+        setPortfolioTotals({ USD: usd.value, CZK: czk.value, EUR: eur.value })
       })
       .catch(() => {})
       .finally(() => setWeightsLoading(false))
@@ -96,7 +100,7 @@ export default function LLMPage() {
     if (!message && promptType === 'freeform') return
 
     const isCanned = promptType !== 'freeform'
-    const priorMessages = messages // capture before state update â€” becomes history
+    const priorMessages = messages // capture before state update — becomes history
     if (isCanned || includePortfolio) setPortfolioShared(true)
     setMessages(prev => [...prev, { role: 'user', content: displayMessage || message, originalRequest: { message, promptType, displayMessage, extraParams } }])
     setInput('')
