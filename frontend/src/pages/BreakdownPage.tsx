@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import PageLayout from '../components/PageLayout'
 import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
+import ErrorAlert from '../components/ErrorAlert'
 import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } from '../api'
 import { CURRENCIES } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
@@ -165,7 +166,7 @@ function formatCurrencyValue(value: number, currency: string): string {
 
 export default function BreakdownPage() {
   const { privacy } = usePrivacy()
-  const [currency, setCurrency] = usePersistentState('breakdown_currency', 'USD')
+  const [currency, setCurrency] = usePersistentState<string>('app_currency', 'CZK')
   const [sections, setSections] = useState<BreakdownSection[]>([])
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -222,11 +223,7 @@ export default function BreakdownPage() {
 
         {loading && <Spinner label="Loading breakdowns…" className="py-40" />}
 
-        {error && !loading && (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-3xl px-10 py-6 text-red-400 text-xs font-black uppercase tracking-widest text-center shadow-2xl">
-            {error}
-          </div>
-        )}
+        {error && !loading && <ErrorAlert message={error} className="mb-8" />}
 
         {!loading && !error && sections.length === 0 && (
           <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>

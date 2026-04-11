@@ -32,6 +32,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (resp.status === 401) {
     clearToken();
+    window.dispatchEvent(new CustomEvent('portfolio:unauthorized'));
     throw new Error('Unauthorized');
   }
 
@@ -111,7 +112,7 @@ export interface MarketHistoryResponse {
 export interface StatsResponse {
   currency: string;
   accounting_model: string;
-  statistics: Record<string, unknown>;
+  statistics: Record<string, number>;
 }
 
 export interface BenchmarkResult {

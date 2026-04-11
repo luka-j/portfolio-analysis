@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { addTransaction, type AddTransactionRequest, type PositionValue } from '../api'
 import AutocompleteInput, { type AutocompleteOption } from './AutocompleteInput'
 import DatePicker from './DatePicker'
@@ -29,6 +29,13 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
   const [error, setError] = useState('')
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = '' // Restore on unmount
+    }
+  }, [])
 
   const positionSymbols = positions.map(p => p.symbol)
   const matchedPosition = positions.find(p => p.symbol === symbol.toUpperCase())
@@ -99,7 +106,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
       onClick={onClose}
     >
       <div
-        className="bg-[#1a1d2e] border border-[#2a2e42] rounded-2xl p-6 w-full max-w-md shadow-2xl"
+        className="bg-[#13151f]/95 border border-white/8 rounded-2xl p-6 w-full max-w-md shadow-2xl backdrop-blur-xl ring-1 ring-white/5 max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <h2 className="text-slate-100 font-semibold mb-4">Add Transaction</h2>
@@ -222,7 +229,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
           )}
 
           {/* Total */}
-          {total > 0 && (
+          {total > 0 && (txType === 'buy' || txType === 'sell') && (
             <div className="bg-[#0f1117] border border-[#2a2e42]/50 rounded-xl px-4 py-2.5 flex justify-between items-center">
               <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Total</span>
               <span className="text-slate-300 font-bold text-sm tabular-nums">

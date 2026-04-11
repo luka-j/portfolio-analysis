@@ -1,10 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
+import { Navigate } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import Spinner from '../components/Spinner'
 import SegmentedControl from '../components/SegmentedControl'
+import ErrorAlert from '../components/ErrorAlert'
 import { getTaxReport } from '../api'
 import type { TaxReportResponse, TaxTransaction } from '../api'
 import { escapeCSVField } from '../utils/format'
+import { usePrivacy } from '../utils/PrivacyContext'
 
 type FxMethod = 'historical' | 'universal'
 
@@ -14,6 +17,8 @@ const FX_OPTIONS = [
 ] as const
 
 export default function TaxPage() {
+  const { privacy } = usePrivacy()
+
   const [year, setYear] = useState<number>(new Date().getFullYear() - 1)
   const [fxMethod, setFxMethod] = useState<FxMethod>('historical')
   const [currencies, setCurrencies] = useState<string[]>([])
@@ -133,6 +138,8 @@ export default function TaxPage() {
 
   const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i)
 
+  if (privacy) return <Navigate to="/" replace />
+
   return (
     <PageLayout mainClassName="pt-8">
 
@@ -214,11 +221,9 @@ export default function TaxPage() {
         )}
 
         {loading ? (
-          <Spinner label="Processing gain/loss matrix…" className="py-40" />
+          <Spinner label="Calculating tax report…" className="py-40" />
         ) : error ? (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-3xl px-10 py-6 text-red-400 text-xs font-black uppercase tracking-widest text-center shadow-2xl">
-            {error}
-          </div>
+          <ErrorAlert message={error} className="mb-8" />
         ) : report ? (
           <div className="flex flex-col gap-16 w-full max-w-6xl pb-12">
 

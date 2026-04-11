@@ -6,11 +6,12 @@ import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import DateRangePicker from '../components/DateRangePicker'
+import ErrorAlert from '../components/ErrorAlert'
 import {
   getPortfolioStats, getPortfolioReturns, getMarketHistory, comparePortfolio, getStandaloneMetrics,
   type StatsResponse, type DailyValue, type BenchmarkResult, type StandaloneResult,
 } from '../api'
-import { formatDate, CURRENCIES } from '../utils/format'
+import { formatDate, CURRENCIES, getFromDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 
 const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
@@ -55,16 +56,10 @@ const COMPARE_TOOLTIPS: Record<string, string> = {
 }
 
 
-function getFromDate(months: number): string {
-  if (months === 0) return '2000-01-01'
-  const d = new Date(); d.setMonth(d.getMonth() - months)
-  return formatDate(d)
-}
-
 
 export default function AnalysisPage() {
   const navigate = useNavigate()
-  const [currency, setCurrency]   = usePersistentState('analysis_currency', 'CZK')
+  const [currency, setCurrency]   = usePersistentState<string>('app_currency', 'CZK')
   const [period, setPeriod]       = usePersistentState('analysis_period', 0)
   const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('analysis_acctModel', 'historical')
   const [customFrom, setCustomFrom] = useState(() => getFromDate(12))
@@ -318,11 +313,7 @@ export default function AnalysisPage() {
             </div>
           )}
 
-          {error && (
-            <div className="w-full mb-10 px-8 py-4 rounded-xl bg-red-500/10 text-red-400 text-sm font-medium border border-red-500/20 text-center">
-              {error}
-            </div>
-          )}
+          {error && <ErrorAlert message={error} className="mb-10" />}
 
           {/* Stats */}
           <div className="w-full mb-16">
@@ -511,9 +502,7 @@ export default function AnalysisPage() {
             {standaloneResults.length > 0 && (
               <div className="overflow-x-auto w-full mb-12">
                 <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Standalone Metrics</p>
-                {standaloneError && (
-                  <p className="mb-3 px-4 py-3 rounded-xl bg-red-500/10 text-red-400 text-sm border border-red-500/20">{standaloneError}</p>
-                )}
+                {standaloneError && <ErrorAlert message={standaloneError} className="mb-3" />}
                 <table className="w-full min-w-160 text-sm">
                   <thead>
                     <tr className="border-b border-[#2a2e42]/60">

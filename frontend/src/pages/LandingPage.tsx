@@ -10,7 +10,7 @@ import {
   getLLMSummary,
   type DailyValue,
 } from '../api'
-import { formatCurrencyCompact, formatDate, CURRENCIES } from '../utils/format'
+import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFromDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
 
@@ -21,24 +21,11 @@ const PERIODS = [
   { label: 'All', months: 0 },
 ]
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  CZK: 'Kč',
-  USD: '$',
-  EUR: '€',
-}
-
-function getFromDate(months: number): string {
-  if (months === 0) return '2000-01-01'
-  const d = new Date()
-  d.setMonth(d.getMonth() - months)
-  return formatDate(d)
-}
 
 
 export default function LandingPage() {
   const { privacy, togglePrivacy } = usePrivacy()
-  const [currencyIdx, setCurrencyIdx] = usePersistentState('landing_currencyIdx', 0)
-  const currency = CURRENCIES[currencyIdx]
+  const [currency, setCurrency] = usePersistentState<string>('app_currency', 'CZK')
   const [period, setPeriod] = usePersistentState('landing_period', 0)
   const [chartMode, setChartMode] = usePersistentState<'value' | 'twr' | 'mwr'>('landing_chartMode', 'value')
   const [portfolioValues, setPortfolioValues] = useState<Record<string, number>>({})
@@ -46,7 +33,7 @@ export default function LandingPage() {
   const [history, setHistory] = useState<DailyValue[]>([])
   const [twrHistory, setTwrHistory] = useState<DailyValue[]>([])
   const [mwrHistory, setMwrHistory] = useState<DailyValue[]>([])
-  const [stats, setStats] = useState<Record<string, unknown> | null>(null)
+  const [stats, setStats] = useState<Record<string, number> | null>(null)
   const [loading, setLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(false)
   // valueRefreshing: cached value shown, fresh fetch still in flight
@@ -69,9 +56,19 @@ export default function LandingPage() {
 
   const loadGenRef = useRef(0)
 
+  // Auto-dismiss the upload status message after 4 seconds.
+  useEffect(() => {
+    if (!uploadMsg) return
+    const t = setTimeout(() => setUploadMsg(''), 4000)
+    return () => clearTimeout(t)
+  }, [uploadMsg])
+
   const navigate = useNavigate()
 
-  const cycleCurrency = () => setCurrencyIdx(i => (i + 1) % CURRENCIES.length)
+  const cycleCurrency = () => setCurrency(c => {
+    const idx = (CURRENCIES as readonly string[]).indexOf(c)
+    return CURRENCIES[(idx + 1) % CURRENCIES.length]
+  })
 
   const digIntoThis = () => {
     const periodLabel = llmPeriod === '1d' ? 'past day' : llmPeriod === '1w' ? 'past week' : 'past month'
@@ -230,74 +227,35 @@ export default function LandingPage() {
     return () => { cancelled = true }
   }, [llmPeriod, uploadCount, llmForceRefresh, shouldShowLlm])
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const isFirstUpload = hasTransactions === false
-    setUploading(true)
-    setUploadMsg('')
-    try {
-      const res = await uploadFlexQuery(file)
-      setUploadMsg(`Uploaded: ${res.positions_count} positions, ${res.trades_count} trades`)
-      setUploadCount(c => c + 1)
-      if (isFirstUpload) {
-        navigate('/portfolio', { state: { firstUpload: true } })
-      } else {
-        await loadData()
+  type UploadFn = (file: File) => Promise<{ positions_count?: number; trades_count?: number; parsed_count?: number; saved_count?: number }>
+  const createUploadHandler = (uploadFn: UploadFn, label: (r: Awaited<ReturnType<UploadFn>>) => string) =>
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      const isFirstUpload = hasTransactions === false
+      setUploading(true)
+      setUploadMsg('')
+      try {
+        const res = await uploadFn(file)
+        setUploadMsg(label(res))
+        setUploadCount(c => c + 1)
+        if (isFirstUpload) {
+          navigate('/portfolio', { state: { firstUpload: true } })
+        } else {
+          await loadData()
+        }
+      } catch (err) {
+        setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
+      } finally {
+        setUploading(false)
+        e.target.value = ''
       }
-    } catch (err) {
-      setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-      e.target.value = ''
     }
-  }
 
-  const handleEtradeBenefitsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const isFirstUpload = hasTransactions === false
-    setUploading(true)
-    setUploadMsg('')
-    try {
-      const res = await uploadEtradeBenefits(file)
-      setUploadMsg(`Benefits Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
-      setUploadCount(c => c + 1)
-      if (isFirstUpload) {
-        navigate('/portfolio', { state: { firstUpload: true } })
-      } else {
-        await loadData()
-      }
-    } catch (err) {
-      setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-      e.target.value = ''
-    }
-  }
+  const handleUpload = createUploadHandler(uploadFlexQuery, r => `Uploaded: ${r.positions_count} positions, ${r.trades_count} trades`)
+  const handleEtradeBenefitsUpload = createUploadHandler(uploadEtradeBenefits, r => `Benefits uploaded: ${r.parsed_count} parsed, ${r.saved_count} saved`)
+  const handleEtradeSalesUpload = createUploadHandler(uploadEtradeSales, r => `Sales uploaded: ${r.parsed_count} parsed, ${r.saved_count} saved`)
 
-  const handleEtradeSalesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const isFirstUpload = hasTransactions === false
-    setUploading(true)
-    setUploadMsg('')
-    try {
-      const res = await uploadEtradeSales(file)
-      setUploadMsg(`Sales Uploaded: ${res.parsed_count} parsed, ${res.saved_count} saved`)
-      setUploadCount(c => c + 1)
-      if (isFirstUpload) {
-        navigate('/portfolio', { state: { firstUpload: true } })
-      } else {
-        await loadData()
-      }
-    } catch (err) {
-      setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
-    } finally {
-      setUploading(false)
-      e.target.value = ''
-    }
-  }
 
   const chartData = (() => {
     if (chartMode === 'value') {
@@ -312,8 +270,8 @@ export default function LandingPage() {
     return []
   })()
 
-  const mwr = typeof stats?.mwr === 'number' ? (stats.mwr as number) * 100 : null
-  const twr = typeof stats?.twr === 'number' ? (stats.twr as number) * 100 : null
+  const mwr = typeof stats?.mwr === 'number' ? stats.mwr * 100 : null
+  const twr = typeof stats?.twr === 'number' ? stats.twr * 100 : null
 
   return (
     <div className="min-h-screen md:h-screen bg-[#0f1117] flex flex-col overflow-x-hidden md:overflow-hidden">
@@ -509,7 +467,7 @@ export default function LandingPage() {
             {uploading && (
               <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
                 <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                Processing DataMatrix…
+                Processing upload…
               </div>
             )}
             {uploadMsg && (
@@ -534,9 +492,9 @@ export default function LandingPage() {
               <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
             )}
             {chartLoading ? (
-              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Initializing history…</div>
+              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Loading chart…</div>
             ) : chartData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px]">Matrix data unavailable</div>
+              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px]">No data available</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
@@ -638,7 +596,7 @@ export default function LandingPage() {
             />
           )}
           <div
-            className="absolute bottom-4 right-8 flex flex-col items-end gap-2 z-20"
+            className={`absolute bottom-4 right-8 flex flex-col items-end gap-2 z-20 ${uploadExpanded ? 'pointer-events-auto' : 'pointer-events-none'}`}
             onMouseLeave={() => setUploadExpanded(false)}
           >
             {/* Expanded options */}
@@ -680,7 +638,7 @@ export default function LandingPage() {
             <button
               onMouseEnter={() => setUploadExpanded(true)}
               onClick={() => setUploadExpanded(o => !o)}
-              className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 shadow-lg ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 shadow-lg pointer-events-auto ${uploadExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             </button>
@@ -691,7 +649,7 @@ export default function LandingPage() {
             {uploading && (
               <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
                 <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                Processing DataMatrix…
+                Processing upload…
               </div>
             )}
             {uploadMsg && (

@@ -35,4 +35,44 @@ export function formatDate(d: Date): string {
 }
 
 export const CURRENCIES = ['CZK', 'USD', 'EUR'] as const
+
+/** Currency symbol map for quick display. */
+export const CURRENCY_SYMBOLS: Record<string, string> = {
+  CZK: 'Kč',
+  USD: '$',
+  EUR: '€',
+}
+
+/**
+ * Returns the ISO start date for a rolling period.
+ * months=0 means "all time" — returns a far-past sentinel date.
+ */
+export function getFromDate(months: number): string {
+  if (months === 0) return '2000-01-01'
+  const d = new Date()
+  d.setMonth(d.getMonth() - months)
+  return formatDate(d)
+}
+
+/** Shared Recharts Tooltip contentStyle — apply to every chart's <Tooltip contentStyle={…} />. */
+export const RECHARTS_TOOLTIP_STYLE: Record<string, unknown> = {
+  backgroundColor: 'rgba(26,29,46,0.98)',
+  border: '1px solid rgba(99,102,241,0.3)',
+  borderRadius: '24px',
+  fontSize: '11px',
+  color: '#e2e8f0',
+  backdropFilter: 'blur(32px)',
+  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+}
+
+/** Shared Recharts Tooltip labelStyle. */
+export const RECHARTS_LABEL_STYLE: Record<string, unknown> = {
+  color: '#6366f1',
+  marginBottom: '6px',
+  fontSize: '9px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.25em',
+  fontWeight: '900',
+  opacity: 0.8,
+}
 export const CURRENCIES_WITH_ORIGINAL = ['CZK', 'USD', 'EUR', 'Original'] as const

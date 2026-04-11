@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   Area,
   ComposedChart,
@@ -211,13 +211,8 @@ function ChartTooltip(props: TooltipExtra) {
 
 // ---- Trade dot renderer ----
 
-interface DotProps {
-  cx?: number
-  cy?: number
-  payload?: EnrichedPoint
-}
-
-function renderTradeDot(props: DotProps): React.ReactElement | null {
+// Recharts passes cx/cy/payload to custom dot renderers; we extend with our own payload shape.
+function renderTradeDot(props: { cx?: number; cy?: number; payload?: EnrichedPoint }): React.ReactElement | null {
   const { cx, cy, payload } = props
   if (!payload?.tradeType || cx == null || cy == null) return null
   const fill = payload.tradeType === 'buy' ? '#34d399' : '#f87171'
@@ -235,6 +230,20 @@ function renderTradeDot(props: DotProps): React.ReactElement | null {
 }
 
 // ---- Main component ----
+
+type FetchState = { loading: boolean; error: string; data: SecurityChartPoint[] }
+type FetchAction =
+  | { type: 'start' }
+  | { type: 'success'; data: SecurityChartPoint[] }
+  | { type: 'error'; message: string }
+
+function fetchReducer(state: FetchState, action: FetchAction): FetchState {
+  switch (action.type) {
+    case 'start':   return { loading: true,  error: '',              data: state.data }
+    case 'success': return { loading: false, error: '',              data: action.data }
+    case 'error':   return { loading: false, error: action.message,  data: [] }
+  }
+}
 
 interface Props {
   symbol: string
@@ -254,9 +263,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
   const [maDays, setMaDays] = useState(30)
   const [maDaysInput, setMaDaysInput] = useState('30')
   const [maEnabled, setMaEnabled] = useState(true)
-  const [chartData, setChartData] = useState<SecurityChartPoint[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [fetchState, dispatch] = useReducer(fetchReducer, { loading: true, error: '', data: [] })
 
   // Close the picker when clicking outside it.
   useEffect(() => {
@@ -274,15 +281,13 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
   useEffect(() => {
     if (!from) return
     const controller = new AbortController()
-    setLoading(true)
-    setError('')
+    dispatch({ type: 'start' })
     const to = todayStr()
     getSecurityChart(symbol, from, to, maDays, controller.signal, displayCurrency, acctModel)
-      .then(res => setChartData(res.data))
+      .then(res => dispatch({ type: 'success', data: res.data }))
       .catch(err => {
-        if (err.name !== 'AbortError') setError(err.message ?? 'Failed to load price data')
+        if (err.name !== 'AbortError') dispatch({ type: 'error', message: err.message ?? 'Failed to load price data' })
       })
-      .finally(() => setLoading(false))
     return () => controller.abort()
   }, [symbol, from, maDays, displayCurrency, acctModel])
 
@@ -322,8 +327,8 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
   // may not have a matching candle; in those cases we forward the dot to the next date
   // that actually appears in the chart.
   const resolvedTradeMap = useMemo(() => {
-    if (chartData.length === 0) return new Map<string, TradeMeta>()
-    const chartDates = chartData.map(p => p.date) // already sorted ascending
+    if (fetchState.data.length === 0) return new Map<string, TradeMeta>()
+    const chartDates = fetchState.data.map(p => p.date) // already sorted ascending
     const chartDateSet = new Set(chartDates)
     const resolved = new Map<string, TradeMeta>()
 
@@ -345,12 +350,12 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
     })
 
     return resolved
-  }, [chartData, tradeSideMap])
+  }, [fetchState.data, tradeSideMap])
 
   // Merge trade info into chart points for the tooltip and dot renderer.
   const enrichedData = useMemo<EnrichedPoint[]>(
     () =>
-      chartData.map(p => {
+      fetchState.data.map(p => {
         const meta = resolvedTradeMap.get(p.date)
         return {
           ...p,
@@ -359,7 +364,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
           tradeAction: meta?.action ?? null,
         }
       }),
-    [chartData, resolvedTradeMap],
+    [fetchState.data, resolvedTradeMap],
   )
 
   const gradientId = `secGrad-${symbol.replace(/[^a-zA-Z0-9]/g, '_')}`
@@ -446,11 +451,11 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
       </div>
 
       {/* Chart area */}
-      {loading ? (
+      {fetchState.loading ? (
         <Spinner className="h-80" />
-      ) : error ? (
+      ) : fetchState.error ? (
         <div className="h-80 flex items-center justify-center text-red-400 text-[10px] font-black uppercase tracking-widest">
-          {error}
+          {fetchState.error}
         </div>
       ) : enrichedData.length === 0 ? (
         <div className="h-80 flex items-center justify-center text-slate-700 text-[10px] font-black uppercase tracking-[0.3em]">
@@ -500,7 +505,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
               stroke="#6366f1"
               strokeWidth={1.5}
               fill={`url(#${gradientId})`}
-              dot={renderTradeDot as never}
+              dot={renderTradeDot}
               activeDot={{ r: 4, fill: '#6366f1', strokeWidth: 0 }}
               animationDuration={800}
             />
