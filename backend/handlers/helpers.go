@@ -176,6 +176,7 @@ func computePortfolioMetrics(
 	currency string,
 	acctModel models.AccountingModel,
 	riskFreeRate float64,
+	cachedOnly bool,
 ) (*portfolioMetricsResult, error) {
 	// Constrain from to portfolio inception.
 	earliest, _ := DateRangeFromData(data)
@@ -186,11 +187,11 @@ func computePortfolioMetrics(
 	res := &portfolioMetricsResult{}
 
 	// Daily values for TWR/MWR.
-	hist, err := ps.GetDailyValues(data, from, to, currency, acctModel, false)
+	hist, err := ps.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
 	if err != nil {
 		return nil, fmt.Errorf("computing daily values: %w", err)
 	}
-	cashFlows, err := ps.GetCashFlows(data, currency, acctModel, false, to)
+	cashFlows, err := ps.GetCashFlows(data, currency, acctModel, cachedOnly, to)
 	if err != nil {
 		return nil, fmt.Errorf("computing cash flows: %w", err)
 	}
@@ -235,7 +236,7 @@ func computePortfolioMetrics(
 	}
 
 	// Daily returns for standalone metrics.
-	portfolioReturns, startDates, endDates, err := ps.GetDailyReturns(data, from, to, currency, acctModel)
+	portfolioReturns, startDates, endDates, err := ps.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
 	if err != nil {
 		return nil, fmt.Errorf("computing portfolio returns: %w", err)
 	}

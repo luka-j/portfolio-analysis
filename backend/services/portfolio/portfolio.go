@@ -5,6 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"portfolio-analysis/models"
@@ -484,8 +485,14 @@ func (s *Service) GetDailyValues(
 	dailyTotals := make([]float64, len(validDates))
 	fromMidnight := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
 
-	for k, trades := range tradesByKey {
-		// Resolve the Yahoo Finance query symbol.
+	type symbolFetch struct {
+		k           string
+		querySymbol string
+		prices      []models.PricePoint
+		err         error
+	}
+	fetches := make([]*symbolFetch, 0, len(tradesByKey))
+	for k := range tradesByKey {
 		querySymbol := k
 		if idx := strings.Index(k, "@"); idx != -1 {
 			querySymbol = k[:idx]
@@ -493,11 +500,28 @@ func (s *Service) GetDailyValues(
 		if ys, ok := yMap[k]; ok && ys != "" {
 			querySymbol = ys
 		}
+		fetches = append(fetches, &symbolFetch{k: k, querySymbol: querySymbol})
+	}
 
-		prices, err := s.MarketProvider.GetHistory(querySymbol, from, to, cachedOnly)
-		if err != nil {
-			log.Printf("Warning: fetching %s historical data: %v\n", querySymbol, err)
+	var wg sync.WaitGroup
+	for _, f := range fetches {
+		wg.Add(1)
+		go func(req *symbolFetch) {
+			defer wg.Done()
+			req.prices, req.err = s.MarketProvider.GetHistory(req.querySymbol, from, to, cachedOnly)
+		}(f)
+	}
+	wg.Wait()
+
+	for _, f := range fetches {
+		k := f.k
+		trades := tradesByKey[k]
+		querySymbol := f.querySymbol
+
+		if f.err != nil {
+			log.Printf("Warning: fetching %s historical data: %v\n", querySymbol, f.err)
 		}
+		prices := f.prices
 		// After this symbol's inner loop, prices is GC-eligible.
 
 		nativeCurrency := ""
@@ -688,13 +712,13 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 // GetDailyReturns returns cash-flow-adjusted daily portfolio return series for statistics.
 // Cash flows (deposits/withdrawals) are removed from each day's return so that the series
 // reflects pure market performance, comparable to a benchmark's price return series.
-func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) ([]float64, []string, []string, error) {
-	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, false) // statistics usually want fresh data
+func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) ([]float64, []string, []string, error) {
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, cachedOnly) 
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel, false, to)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly, to)
 	if err != nil {
 		return nil, nil, nil, err
 	}

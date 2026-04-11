@@ -310,10 +310,10 @@ export async function getMarketHistory(
 }
 
 export async function getPortfolioStats(
-  from: string, to: string, currency: string, accountingModel = 'historical'
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false
 ): Promise<StatsResponse> {
   return request<StatsResponse>(
-    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}`
+    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`
   );
 }
 
@@ -328,11 +328,12 @@ export async function comparePortfolio(
 
 export async function getStandaloneMetrics(
   symbols: string, currency: string, from: string, to: string,
-  accountingModel = 'historical', riskFreeRate = 0.05
+  accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false
 ): Promise<StandaloneResponse> {
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : ''
+  const cachedParam = cachedOnly ? '&cachedOnly=true' : ''
   return request<StandaloneResponse>(
-    `/portfolio/standalone?currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${symParam}`
+    `/portfolio/standalone?currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${symParam}${cachedParam}`
   );
 }
 

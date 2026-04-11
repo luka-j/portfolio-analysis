@@ -152,7 +152,7 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 		points, err := s.fetchFromYahoo(symbol, rng[0], rng[1])
 		if err != nil {
 			lastErr = err
-			log.Printf("Warning: fetching %s history [%s..%s]: %v",
+			log.Printf("Fetching %s history [%s..%s]: %v",
 				symbol, rng[0].Format("2006-01-02"), rng[1].Format("2006-01-02"), err)
 			// Write negative-cache markers for genuinely unknown/delisted symbols so
 			// we don't re-query the same hopeless range on every request.

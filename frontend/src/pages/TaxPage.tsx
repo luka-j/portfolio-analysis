@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import Spinner from '../components/Spinner'
 import SegmentedControl from '../components/SegmentedControl'
+import SelectInput from '../components/SelectInput'
 import ErrorAlert from '../components/ErrorAlert'
 import { getTaxReport } from '../api'
 import type { TaxReportResponse, TaxTransaction } from '../api'
@@ -150,15 +151,15 @@ export default function TaxPage() {
           </p>
 
           <div className="flex items-end gap-6 mt-6 flex-wrap justify-center">
-            <div className="flex items-center gap-3 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-2xl p-1.5 shadow-xl ring-1 ring-white/5">
-              <label className="pl-4 text-sm text-slate-500">Year</label>
-              <select
-                value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
-                className="bg-transparent text-slate-100 font-medium text-sm py-2 pr-5 pl-1 focus:outline-none cursor-pointer hover:text-indigo-400 transition-colors"
-              >
-                {years.map(y => <option key={y} value={y} className="bg-[#1a1d2e]">{y}</option>)}
-              </select>
+            <div className="flex flex-col items-center gap-2 w-32">
+              <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Year</span>
+              <div className="w-full">
+                <SelectInput
+                  options={years.map(String)}
+                  value={String(year)}
+                  onChange={(v) => setYear(Number(v))}
+                />
+              </div>
             </div>
 
             <SegmentedControl
@@ -292,7 +293,7 @@ export default function TaxPage() {
                                 <div className="text-xs font-black text-slate-400 tabular-nums">{costBasisPerShare.toFixed(2)} {tx.currency}</div>
                                 <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
                               </>
-                            : <div className="text-xs font-black text-slate-700">—</div>
+                            : <div className="text-xs font-black text-slate-700 tabular-nums">0</div>
                           }
                         </td>
                         <td className="py-2.5 px-4 text-right font-black tabular-nums text-emerald-400">
@@ -371,7 +372,7 @@ export default function TaxPage() {
                         <td className="py-2.5 px-4 text-right">
                           {(tx.buy_commission ?? 0) > 0.0001
                             ? <div className="text-xs font-black text-slate-500 tabular-nums">−{tx.buy_commission!.toFixed(2)} {tx.currency}</div>
-                            : <div className="text-xs font-black text-slate-700">—</div>
+                            : <div className="text-xs font-black text-slate-700 tabular-nums">0</div>
                           }
                           {(tx.sell_commission ?? 0) > 0.0001
                             ? <div className="text-xs font-black text-slate-500 tabular-nums mt-0.5">−{tx.sell_commission!.toFixed(2)} {tx.currency}</div>

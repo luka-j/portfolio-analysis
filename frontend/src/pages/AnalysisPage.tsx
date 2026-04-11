@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import PageLayout from '../components/PageLayout'
@@ -74,11 +74,15 @@ export default function AnalysisPage() {
   const [riskFreeRate, setRiskFreeRate]           = usePersistentState('analysis_riskFreeRate', 0.025)
   const [riskFreeRateInput, setRiskFreeRateInput] = usePersistentState('analysis_riskFreeRateInput', '2.50')
   const [loading, setLoading]           = useState(true)
+  const [refreshing, setRefreshing]     = useState(false)
   const [compareLoading, setCompareLoading] = useState(false)
   const [standaloneLoading, setStandaloneLoading] = useState(false)
+  const [standaloneRefreshing, setStandaloneRefreshing] = useState(false)
   const [error, setError]               = useState('')
   const [compareError, setCompareError] = useState('')
   const [standaloneError, setStandaloneError] = useState('')
+
+  const loadGenRef = useRef(0)
 
   const from = period === -1 ? customFrom : getFromDate(period)
   const to   = period === -1 ? customTo   : formatDate(new Date())
@@ -87,20 +91,55 @@ export default function AnalysisPage() {
   const effectiveFrom = period === 0 ? (portfolioHistory[0]?.date ?? from) : from
 
   const loadData = useCallback(async () => {
+    loadGenRef.current += 1
+    const gen = loadGenRef.current
     setLoading(true)
+    setRefreshing(false)
     setError('')
-    try {
-      const [st, hist] = await Promise.all([
-        getPortfolioStats(from, to, currency, acctModel),
-        getPortfolioReturns(from, to, currency, acctModel),
-      ])
-      setStats(st)
-      setPortfolioHistory(hist.data ?? [])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load')
-    } finally {
-      setLoading(false)
+
+    let freshStats = false
+    let freshHist = false
+
+    const checkCachedDone = () => {
+      if (gen === loadGenRef.current && !freshStats && !freshHist) {
+        setLoading(false)
+        setRefreshing(true)
+      }
     }
+
+    // 1. Cached calls
+    getPortfolioStats(from, to, currency, acctModel, true).then(st => {
+      if (gen === loadGenRef.current && !freshStats && Object.keys(st.statistics).length > 0) {
+        setStats(st)
+        checkCachedDone()
+      }
+    }).catch(() => {})
+
+    getPortfolioReturns(from, to, currency, acctModel, 'twr', true).then(hist => {
+      if (gen === loadGenRef.current && !freshHist && hist.data.length > 0) {
+        setPortfolioHistory(hist.data ?? [])
+        checkCachedDone()
+      }
+    }).catch(() => {})
+
+    // 2. Fresh calls
+    Promise.all([
+      getPortfolioStats(from, to, currency, acctModel, false).then(st => {
+        freshStats = true
+        if (gen === loadGenRef.current) setStats(st)
+      }),
+      getPortfolioReturns(from, to, currency, acctModel, 'twr', false).then(hist => {
+        freshHist = true
+        if (gen === loadGenRef.current) setPortfolioHistory(hist.data ?? [])
+      })
+    ]).catch(err => {
+      if (gen === loadGenRef.current) setError(err instanceof Error ? err.message : 'Failed to load')
+    }).finally(() => {
+      if (gen === loadGenRef.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    })
   }, [currency, acctModel, from, to])
 
   useEffect(() => { loadData() }, [loadData])
@@ -108,16 +147,36 @@ export default function AnalysisPage() {
   // Load standalone metrics for portfolio (and symbols if any are active).
   // Fires on initial load and whenever currency/date/model/riskFreeRate change.
   const loadStandalone = useCallback(async (symbols = '') => {
+    const gen = loadGenRef.current
     setStandaloneLoading(true)
+    setStandaloneRefreshing(false)
     setStandaloneError('')
-    try {
-      const res = await getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate)
-      setStandaloneResults(res.results)
-    } catch (err) {
-      setStandaloneError(err instanceof Error ? err.message : 'Standalone metrics failed')
-    } finally {
-      setStandaloneLoading(false)
-    }
+
+    let freshArrived = false
+
+    // 1. Cached
+    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, true).then(res => {
+      if (gen === loadGenRef.current && !freshArrived && res.results.length > 0) {
+        setStandaloneResults(res.results)
+        setStandaloneLoading(false)
+        setStandaloneRefreshing(true)
+      }
+    }).catch(() => {})
+
+    // 2. Fresh
+    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, false).then(res => {
+      if (gen === loadGenRef.current) {
+        freshArrived = true
+        setStandaloneResults(res.results)
+      }
+    }).catch(err => {
+      if (gen === loadGenRef.current) setStandaloneError(err instanceof Error ? err.message : 'Standalone metrics failed')
+    }).finally(() => {
+      if (gen === loadGenRef.current) {
+        setStandaloneLoading(false)
+        setStandaloneRefreshing(false)
+      }
+    })
   }, [currency, effectiveFrom, to, acctModel, riskFreeRate])
 
   useEffect(() => {
@@ -316,7 +375,10 @@ export default function AnalysisPage() {
           {error && <ErrorAlert message={error} className="mb-10" />}
 
           {/* Stats */}
-          <div className="w-full mb-16">
+          <div className="w-full mb-16 relative">
+            {refreshing && (
+                <div className="absolute top-0 right-4 w-4 h-4 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin" />
+            )}
             <div className="flex items-center justify-center gap-3 mb-8">
               <h2 className="text-xl font-semibold text-slate-100">Risk & Return Metrics</h2>
               {stats && portfolioStandalone && (
@@ -500,7 +562,10 @@ export default function AnalysisPage() {
 
             {/* Standalone metrics table — portfolio + benchmark symbols */}
             {standaloneResults.length > 0 && (
-              <div className="overflow-x-auto w-full mb-12">
+              <div className="overflow-x-auto w-full mb-12 relative">
+                {standaloneRefreshing && (
+                    <div className="absolute top-0 right-4 w-4 h-4 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin" />
+                )}
                 <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Standalone Metrics</p>
                 {standaloneError && <ErrorAlert message={standaloneError} className="mb-3" />}
                 <table className="w-full min-w-160 text-sm">
