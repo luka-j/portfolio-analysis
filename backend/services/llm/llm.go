@@ -66,7 +66,7 @@ func NewService(apiKey, flashModel, proModel, cannedModelKey string, db *gorm.DB
 		APIKey:           apiKey,
 		FlashModel:       flashModel,
 		ProModel:         proModel,
-		DefaultModelKey:   cannedModelKey,
+		DefaultModelKey:  cannedModelKey,
 		DB:               db,
 		PortfolioService: ps,
 		HTTPClient:       &http.Client{Transport: transport},
@@ -206,7 +206,7 @@ func (s *Service) callGemini(ctx context.Context, model, callType string, conten
 		return "", fmt.Errorf("creating genai client: %w", err)
 	}
 
-	log.Printf("DEBUG: callGemini [model=%s callType=%s turns=%d]", model, callType, len(contents))
+	log.Printf("callGemini [model=%s callType=%s turns=%d]", model, callType, len(contents))
 	start := time.Now()
 	resp, err := client.Models.GenerateContent(ctx, model, contents, cfg)
 	elapsed := time.Since(start)

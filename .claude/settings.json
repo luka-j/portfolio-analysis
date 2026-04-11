@@ -29,7 +29,9 @@
       "Bash(grep -E \"\\\\.\\(go\\)$\")",
       "Bash(wc -l /d/projects/gofolio-analysis/frontend/src/components/*.tsx)",
       "Bash(ls d:/projects/gofolio-analysis/*.md)",
-      "Bash(grep -A 5 \"weekend\\\\|WEEKEND\\\\|Monday\\\\|Friday\" /d/projects/gofolio-analysis/backend/services/market/*.go)"
+      "Bash(grep -A 5 \"weekend\\\\|WEEKEND\\\\|Monday\\\\|Friday\" /d/projects/gofolio-analysis/backend/services/market/*.go)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/release.yml'\\)\\); yaml.safe_load\\(open\\('.github/workflows/build.yml'\\)\\); print\\('Both YAML files valid'\\)\")"
     ]
   }
 }
