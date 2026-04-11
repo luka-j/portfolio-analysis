@@ -101,19 +101,92 @@ jobs:
         with:
           files: dist/portfolio-analysis-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
 
-  # ─── Build and push multi-platform Docker image to GHCR ─────────────────────
+  # ─── Build per-platform Docker images in parallel ────────────────────────────
   docker:
-    name: Build and push Docker image
+    name: Docker ${{ matrix.platform }}
+    needs: frontend
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Allow frontend/dist in Docker context
+        run: sed -i '/^frontend\/dist\//d' .dockerignore
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: SKIP_FRONTEND=true
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,"name=ghcr.io/${{ github.repository }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ─── Merge per-platform digests into a multi-arch manifest ──────────────────
+  docker-merge:
+    name: Docker manifest
+    needs: docker
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          pattern: digests-*
+          path: /tmp/digests
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -137,13 +210,9 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ inputs.docker_tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create and push manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
