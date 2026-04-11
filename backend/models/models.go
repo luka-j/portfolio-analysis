@@ -152,6 +152,7 @@ type PositionValue struct {
 
 	BondDuration *float64 `json:"bond_duration,omitempty"` // bond ETF: effective duration in years
 	Name         string   `json:"name,omitempty"`          // security long name from asset_fundamentals
+	AssetType    string   `json:"asset_type,omitempty"`    // "Stock", "ETF", "Bond ETF", "Commodity", "Unknown"
 	PriceStatus  string   `json:"price_status,omitempty"`  // "" (ok) | "no_data" | "stale" | "fetch_failed"
 }
 

@@ -227,6 +227,9 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 			if fund.Name != "" {
 				result.Positions[i].Name = fund.Name
 			}
+			if fund.AssetType != "" {
+				result.Positions[i].AssetType = fund.AssetType
+			}
 		}
 	}
 

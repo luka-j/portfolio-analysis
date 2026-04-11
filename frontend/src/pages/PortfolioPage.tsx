@@ -426,7 +426,12 @@ export default function PortfolioPage() {
                             </HoverTooltip>
                           </div>
                         ) : (
-                          <div className="hidden md:flex w-10 h-10 rounded-2xl bg-linear-to-br from-indigo-500/10 to-purple-500/10 items-center justify-center text-xs font-bold text-indigo-300 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
+                          <div className={`hidden md:flex w-10 h-10 rounded-2xl items-center justify-center text-xs font-bold border shrink-0 shadow-lg ring-1 ring-white/5 ${
+                            pos.asset_type === 'Bond ETF'  ? 'bg-linear-to-br from-amber-500/10 to-yellow-500/10 text-amber-300/80 border-amber-500/10' :
+                            pos.asset_type === 'ETF'       ? 'bg-linear-to-br from-teal-500/10 to-cyan-500/10 text-teal-300/80 border-teal-500/10' :
+                            pos.asset_type === 'Commodity' ? 'bg-linear-to-br from-orange-500/10 to-amber-500/10 text-orange-300/80 border-orange-500/10' :
+                                                             'bg-linear-to-br from-indigo-500/10 to-violet-500/10 text-indigo-300/80 border-indigo-500/10'
+                          }`}>
                             {pos.symbol.slice(0, 2)}
                           </div>
                         )}
@@ -478,6 +483,19 @@ export default function PortfolioPage() {
                             </div>
                           </div>
                           <div className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-1 opacity-80">
+                            {pos.asset_type && pos.asset_type !== 'Unknown' && (
+                              <>
+                                <span className={`font-semibold tracking-wide ${
+                                  pos.asset_type === 'Bond ETF'  ? 'text-amber-500/70' :
+                                  pos.asset_type === 'ETF'       ? 'text-teal-500/70' :
+                                  pos.asset_type === 'Commodity' ? 'text-orange-500/70' :
+                                                                   'text-indigo-500/70'
+                                }`}>
+                                  {pos.asset_type === 'Bond ETF' ? 'Bond ETF' : pos.asset_type === 'ETF' ? 'ETF' : pos.asset_type === 'Commodity' ? 'Cmdty' : 'Stock'}
+                                </span>
+                                <span className="w-1 h-1 rounded-full bg-slate-800" />
+                              </>
+                            )}
                             <span>{pos.native_currency}</span>
                             {pos.listing_exchange && (
                               <>
