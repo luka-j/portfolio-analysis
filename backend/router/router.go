@@ -91,8 +91,9 @@ func SetupRouter(
 	api.DELETE("/portfolio/transactions/:id", ph.DeleteTransaction)
 
 	// Market endpoints.
-	mh := handlers.NewMarketHandler(marketSvc, currencyGetter)
+	mh := handlers.NewMarketHandler(marketSvc, currencyGetter, database)
 	api.GET("/market/history", mh.GetHistory)
+	api.GET("/market/security-chart", mh.GetSecurityChart)
 
 	// Stats endpoints.
 	sh := handlers.NewStatsHandler(repo, portfolioSvc, marketSvc, fxSvc, currencyGetter)

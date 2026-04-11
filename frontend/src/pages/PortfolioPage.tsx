@@ -8,6 +8,7 @@ import SymbolMappingModal from '../components/SymbolMappingModal'
 import AddTransactionModal from '../components/AddTransactionModal'
 import DateRangePicker from '../components/DateRangePicker'
 import { getPortfolioValue, getPortfolioTrades, getPortfolioPriceHistory, updateSymbolMapping, deleteTransaction, type PositionValue, type TradeEntry, type SymbolPriceHistory } from '../api'
+import { SecurityPriceChart } from '../components/SecurityPriceChart'
 import { formatCurrency, formatNumber, formatDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
@@ -480,7 +481,7 @@ export default function PortfolioPage() {
                                     <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
                                   </svg>
                                 </button>
-                                <HoverTooltip direction="down" className="w-max whitespace-nowrap">AI market analysis</HoverTooltip>
+                                <HoverTooltip direction="down" className="w-max whitespace-nowrap">LLM market analysis</HoverTooltip>
                               </div>
                             </div>
                           </div>
@@ -588,7 +589,7 @@ export default function PortfolioPage() {
                     </div>
 
                     {isExpanded && (
-                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} isin={pos.isin} displayCurrency={currency} privacy={privacy} onTradeDeleted={loadData} />
+                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} isin={pos.isin} name={pos.name} displayCurrency={currency} acctModel={acctModel} privacy={privacy} onTradeDeleted={loadData} />
                     )}
                   </div>
                 )
@@ -695,7 +696,7 @@ export default function PortfolioPage() {
   )
 }
 
-function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy, onTradeDeleted }: { symbol: string; exchange?: string; isin?: string; displayCurrency: string; privacy: boolean; onTradeDeleted: () => void }) {
+function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acctModel, privacy, onTradeDeleted }: { symbol: string; exchange?: string; isin?: string; name?: string; displayCurrency: string; acctModel: 'historical' | 'spot'; privacy: boolean; onTradeDeleted: () => void }) {
   const [trades, setTrades] = useState<TradeEntry[]>([])
   const [resolvedDisplayCurrency, setResolvedDisplayCurrency] = useState('')
   const [loading, setLoading] = useState(true)
@@ -770,12 +771,17 @@ function TradeDetail({ symbol, exchange, isin, displayCurrency, privacy, onTrade
 
   return (
     <div className="px-6 py-5 bg-[#0f1117]">
-      <div className="flex items-center gap-4 mb-3 px-3">
-        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em]">Transaction History — {symbol}</p>
+      <div className="flex items-baseline gap-3 mb-4 px-3">
+        {name && <span className="text-sm font-bold text-slate-300">{name}</span>}
+        <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{symbol}</span>
         {isin && (
-          <span className="text-[9px] font-bold text-slate-600 tracking-widest uppercase bg-white/3 border border-white/5 px-2.5 py-1 rounded-xl">{isin}</span>
+          <span className="self-center text-[9px] font-bold text-slate-600 tracking-widest uppercase bg-white/3 border border-white/5 px-2.5 py-1 rounded-xl">{isin}</span>
         )}
       </div>
+      <div className="mb-4">
+        <SecurityPriceChart symbol={symbol} trades={trades} privacy={privacy} displayCurrency={displayCurrency} acctModel={acctModel} />
+      </div>
+      <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em] mb-2 px-3">Transaction History</p>
       <div className="bg-[#1a1d2e]/40 border border-white/5 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-3xl ring-1 ring-white/5">
         <div className={`flex items-center border-b border-white/5 bg-white/2`}>
           <div className={`grid ${colsClass} gap-4 flex-1 px-5 py-2.5 text-[9px] font-black text-slate-600 uppercase tracking-widest`}>

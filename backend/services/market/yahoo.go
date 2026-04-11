@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -141,7 +142,10 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 			end = now
 		}
 
-		if lastDate.Before(end.AddDate(0, 0, -5)) {
+		// Trailing edge: use a 2-day leeway (covers weekends: Fri close → Mon open).
+		// The leading edge uses 5 days for IPO/listing gaps, but the trailing edge
+		// only needs to handle normal non-trading days.
+		if lastDate.Before(end.AddDate(0, 0, -2)) {
 			missingRanges = append(missingRanges, [2]time.Time{lastDate.AddDate(0, 0, 1), end})
 		}
 	}
@@ -151,15 +155,19 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 		points, err := s.fetchFromYahoo(symbol, rng[0], rng[1])
 		if err != nil {
 			lastErr = err
+			log.Printf("Warning: fetching %s history [%s..%s]: %v",
+				symbol, rng[0].Format("2006-01-02"), rng[1].Format("2006-01-02"), err)
 			// Insert a dummy marker at the start of the failing range to prevent future queries.
 			// "No data returned" means Yahoo doesn't know the ticker or date (e.g. pre-IPO).
 			if err.Error() == fmt.Sprintf("no data returned for symbol %s", symbol) ||
 				err.Error() == "yahoo finance error: No data found, symbol may be delisted" ||
 				err.Error() == fmt.Sprintf("yahoo returned HTTP 404 for %s", symbol) {
-				_ = s.saveCache(symbol, []models.PricePoint{
+				if saveErr := s.saveCache(symbol, []models.PricePoint{
 					{Date: rng[0], Volume: -1},
 					{Date: rng[1], Volume: -1},
-				})
+				}); saveErr != nil {
+					log.Printf("Warning: saving negative cache for %s: %v", symbol, saveErr)
+				}
 			}
 			continue
 		}
@@ -169,13 +177,18 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 			if points[0].Date.After(rng[0].AddDate(0, 0, 5)) {
 				points = append(points, models.PricePoint{Date: rng[0], Volume: -1})
 			}
-			_ = s.saveCache(symbol, points)
+			if saveErr := s.saveCache(symbol, points); saveErr != nil {
+				log.Printf("Warning: saving %d price points for %s: %v", len(points), symbol, saveErr)
+			}
 		} else {
-			// Yahoo returned success but empty array
-			_ = s.saveCache(symbol, []models.PricePoint{
+			log.Printf("Warning: Yahoo returned success but empty data for %s [%s..%s]",
+				symbol, rng[0].Format("2006-01-02"), rng[1].Format("2006-01-02"))
+			if saveErr := s.saveCache(symbol, []models.PricePoint{
 				{Date: rng[0], Volume: -1},
 				{Date: rng[1], Volume: -1},
-			})
+			}); saveErr != nil {
+				log.Printf("Warning: saving empty-data cache for %s: %v", symbol, saveErr)
+			}
 		}
 	}
 

@@ -457,3 +457,40 @@ export async function deleteTransaction(id: string): Promise<void> {
     method: 'DELETE',
   });
 }
+
+// ---- Security Price Chart ----
+
+export interface SecurityChartPoint {
+  date: string;       // "YYYY-MM-DD"
+  close: number;
+  ma: number | null;  // null until the MA window fills
+}
+
+export interface SecurityChartResponse {
+  symbol: string;
+  from: string;
+  to: string;
+  ma_days: number;
+  data: SecurityChartPoint[];
+}
+
+export async function getSecurityChart(
+  symbol: string,
+  from: string,    // YYYY-MM-DD, computed by the frontend from the period selector
+  to: string,      // YYYY-MM-DD, today
+  maDays: number,
+  signal?: AbortSignal,
+  currency?: string,       // omit or 'Original' → native currency (no conversion)
+  accountingModel?: string,
+): Promise<SecurityChartResponse> {
+  // Only send currency when a real conversion is wanted; omitting it (or sending
+  // 'Original') tells the backend to return prices in the security's native currency.
+  const currencyParam =
+    currency && currency !== 'Original'
+      ? `&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel ?? 'historical'}`
+      : ''
+  return request<SecurityChartResponse>(
+    `/market/security-chart?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&ma_days=${maDays}${currencyParam}`,
+    { signal },
+  );
+}
