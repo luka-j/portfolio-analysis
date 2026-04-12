@@ -317,7 +317,7 @@ export default function LandingPage() {
   const twr = typeof stats?.twr === 'number' ? stats.twr * 100 : null
 
   return (
-    <div className="min-h-screen md:h-screen bg-[#0f1117] flex flex-col overflow-x-hidden md:overflow-hidden">
+    <div className="min-h-screen md:h-screen bg-bg flex flex-col overflow-x-hidden md:overflow-hidden">
       <NavBar />
 
       {/* Hero section centered */}
@@ -338,7 +338,7 @@ export default function LandingPage() {
           )}
           <div className="relative group">
             <button
-              className={`p-1.5 rounded-lg transition-all duration-200 active:scale-95 ${privacy ? 'text-red-400/80 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-700 hover:text-slate-400 hover:bg-white/[0.07]'}`}
+              className={`p-1.5 rounded-lg transition-all duration-200 active:scale-95 ${privacy ? 'text-red-400/80 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-500 hover:text-slate-400 hover:bg-white/[0.07]'}`}
               onClick={togglePrivacy}
             >
               {privacy ? (
@@ -364,7 +364,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-8">
             {twr !== null && (
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-[10px] md:text-xs text-slate-600">TWR</span>
+                <span className="text-[10px] md:text-xs text-slate-500">TWR</span>
                 <span className={`text-sm md:text-base font-semibold tabular-nums ${twr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {twr >= 0 ? '+' : ''}{twr.toFixed(2)}%
                 </span>
@@ -372,7 +372,7 @@ export default function LandingPage() {
             )}
             {mwr !== null && (
               <div className="flex flex-col items-center gap-0.5">
-                <span className="text-[10px] md:text-xs text-slate-600">MWR</span>
+                <span className="text-[10px] md:text-xs text-slate-500">MWR</span>
                 <span className={`text-sm md:text-base font-semibold tabular-nums ${mwr >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {mwr >= 0 ? '+' : ''}{mwr.toFixed(2)}%
                 </span>
@@ -461,7 +461,7 @@ export default function LandingPage() {
 
         {/* Mode selector — hidden when no trades */}
         {hasTransactions !== false && (
-          <div className="pointer-events-auto flex items-center gap-1 mt-4 bg-[#1a1d2e] rounded-2xl p-1 border border-white/6">
+          <div className="pointer-events-auto flex items-center gap-1 mt-4 bg-surface rounded-2xl p-1 border border-white/6">
             {(['value', 'twr', 'mwr'] as const).map(mode => (
               <button
                 key={mode}
@@ -482,7 +482,7 @@ export default function LandingPage() {
       {hasTransactions === false ? (
         /* ── Empty state: no trades uploaded yet ── */
         <div className="relative flex-1 flex flex-col items-center justify-center gap-8 px-4 md:px-8 mb-6">
-          <p className="text-slate-700 text-[10px] font-black uppercase tracking-[0.3em]">Upload your portfolio data to get started</p>
+          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">Upload your portfolio data to get started</p>
           <div className="flex flex-col sm:flex-row gap-4 w-full max-w-2xl">
             {([
               { label: 'IBKR FlexQuery',   desc: 'Interactive Brokers XML report', accept: '.xml',  onChange: handleUpload,               cardCls: 'border-indigo-500/20 bg-indigo-500/5 hover:bg-indigo-500/10',  iconCls: 'bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500/20',  titleCls: 'text-indigo-400'  },
@@ -498,7 +498,7 @@ export default function LandingPage() {
                 </div>
                 <div className="flex flex-col items-center gap-1 text-center">
                   <span className={`text-xs font-black uppercase tracking-[0.15em] ${titleCls}`}>{label}</span>
-                  <span className="text-[10px] text-slate-600 font-medium">{desc}</span>
+                  <span className="text-[10px] text-slate-500 font-medium">{desc}</span>
                 </div>
                 <input type="file" accept={accept} onChange={onChange} className="hidden" disabled={uploading} />
               </label>
@@ -508,7 +508,7 @@ export default function LandingPage() {
           {/* Status messages */}
           <div className="static md:absolute md:bottom-4 md:left-8">
             {uploading && (
-              <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
+              <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-surface/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
                 <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                 Processing upload…
               </div>
@@ -535,9 +535,9 @@ export default function LandingPage() {
               <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
             )}
             {chartLoading ? (
-              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Loading chart…</div>
+              <div className="h-full flex items-center justify-center text-slate-500 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Loading chart…</div>
             ) : chartData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-800 font-black uppercase tracking-[0.3em] text-[10px]">No data available</div>
+              <div className="h-full flex items-center justify-center text-slate-500 font-black uppercase tracking-[0.3em] text-[10px]">No data available</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
@@ -606,7 +606,7 @@ export default function LandingPage() {
                 className={`w-10 h-10 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 flex items-center justify-center shadow-lg ${
                   period === p.months
                     ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-indigo-600/20'
-                    : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-surface/40 border border-white/5'
                 }`}
               >
                 {p.label}
@@ -623,7 +623,7 @@ export default function LandingPage() {
                 className={`px-4 py-2 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 shadow-lg ${
                   period === p.months
                     ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-indigo-600/20'
-                    : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-surface/40 border border-white/5'
                 }`}
               >
                 {p.label}
@@ -690,7 +690,7 @@ export default function LandingPage() {
           {/* Status messages — bottom left */}
           <div className="absolute bottom-4 left-8">
             {uploading && (
-              <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-[#1a1d2e]/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
+              <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-surface/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
                 <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                 Processing upload…
               </div>

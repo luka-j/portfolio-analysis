@@ -1,6 +1,14 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
+@theme {
+  --color-bg: #0f1117;
+  --color-surface: #1a1d2e;
+  --color-surface-hover: #232740;
+  --color-panel: #13151f; /* Mobile dropdowns, tooltips */
+  --color-border-dim: #2a2e42;
+}
+
 :root {
   --color-primary: #6366f1;
   --color-primary-hover: #4f46e5;
@@ -58,20 +66,20 @@ a {
 
 /* Glass effect utility */
 .glass {
-  background: rgba(255,255,255,0.05);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.05);
 }
 
 .glass:hover {
-  background: rgba(255,255,255,0.08);
-  border-color: rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.08);
 }
 
 .glass.active {
-  background: rgba(99,102,241,0.15);
-  border-color: rgba(99,102,241,0.3);
+  background: rgba(99,102,241,0.1);
+  border-color: rgba(99,102,241,0.2);
 }
 
 /* Nav link underline animation */
@@ -86,7 +94,7 @@ a {
   left: 0;
   width: 0;
   height: 2px;
-  background: linear-gradient(90deg, #6366f1, #a78bfa);
+  background: var(--color-primary);
   border-radius: 1px;
   transition: width 0.2s ease;
 }

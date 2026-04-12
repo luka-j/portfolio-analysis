@@ -70,7 +70,7 @@ export default function SelectInput({ options, value, onChange }: Props) {
           setOpen(o => !o)
           setActiveIndex(options.indexOf(value))
         }}
-        className="w-full bg-[#0f1117] border border-[#2a2e42] rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors flex items-center justify-between gap-2"
+        className="w-full bg-bg border border-border-dim rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors flex items-center justify-between gap-2"
       >
         <span className="font-mono">{value}</span>
         <svg
@@ -85,7 +85,7 @@ export default function SelectInput({ options, value, onChange }: Props) {
       {open && (
         <ul
           ref={listRef}
-          className="absolute z-60 mt-1 w-full bg-[#1a1d2e] border border-[#2a2e42] rounded-xl shadow-2xl overflow-y-auto"
+          className="absolute z-60 mt-1 w-full bg-surface border border-border-dim rounded-xl shadow-2xl overflow-y-auto"
           style={{ maxHeight: '14rem' }}
           onMouseDown={e => e.preventDefault()}
         >

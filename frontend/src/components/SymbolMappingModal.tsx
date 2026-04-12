@@ -21,7 +21,7 @@ export default function SymbolMappingModal({ symbol, currentYahooSymbol, onConfi
       onClick={onClose}
     >
       <div
-        className="bg-[#13151f]/95 border border-white/8 rounded-2xl p-6 w-full max-w-sm shadow-2xl backdrop-blur-xl ring-1 ring-white/5"
+        className="bg-panel/95 border border-white/8 rounded-2xl p-6 w-full max-w-sm shadow-2xl backdrop-blur-xl ring-1 ring-white/5"
         onClick={e => e.stopPropagation()}
       >
         <h2 className="text-slate-100 font-semibold mb-1">Map Yahoo Finance Symbol</h2>
@@ -31,7 +31,7 @@ export default function SymbolMappingModal({ symbol, currentYahooSymbol, onConfi
         <form onSubmit={handleSubmit}>
           <input
             autoFocus
-            className="w-full bg-[#0f1117] border border-white/8 rounded-xl px-4 py-2.5 text-slate-100 font-mono text-sm focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 mb-4 transition-all"
+            className="w-full bg-bg border border-white/8 rounded-xl px-4 py-2.5 text-slate-100 font-mono text-sm focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 mb-4 transition-all"
             value={value}
             onChange={e => setValue(e.target.value)}
             placeholder="e.g. AAPL"

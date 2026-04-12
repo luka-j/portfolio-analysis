@@ -58,7 +58,7 @@ export default function NavBar() {
           </NavLink>
           {privacy ? (
             <div className="relative group flex items-center">
-              <span className="text-slate-600 cursor-not-allowed text-sm font-medium">Tax</span>
+              <span className="text-slate-500 cursor-not-allowed text-sm font-medium">Tax</span>
               <HoverTooltip direction="down" className="w-42">
                 Not available in private mode.
               </HoverTooltip>
@@ -75,7 +75,7 @@ export default function NavBar() {
           ) : (
             <div className="relative group flex items-center">
               <span
-                className="text-slate-600 cursor-not-allowed text-sm font-medium transition-colors duration-200"
+                className="text-slate-500 cursor-not-allowed text-sm font-medium transition-colors duration-200"
               >
                 LLM
               </span>
@@ -140,7 +140,7 @@ export default function NavBar() {
 
       {/* Mobile drawer panel */}
       {mobileOpen && (
-        <div className="md:hidden absolute top-full left-0 right-0 z-40 mt-1 mx-4 rounded-2xl bg-[#13151f] border border-white/8 shadow-2xl backdrop-blur-2xl overflow-hidden">
+        <div className="md:hidden absolute top-full left-0 right-0 z-40 mt-1 mx-4 rounded-2xl bg-panel border border-white/8 shadow-2xl backdrop-blur-2xl overflow-hidden">
           <nav className="flex flex-col divide-y divide-white/5">
             <NavLink to="/" end onClick={closeMobile} className={({ isActive }) => `px-5 py-3.5 text-sm font-medium ${isActive ? 'text-white bg-indigo-500/10' : 'text-slate-300 hover:bg-white/5'}`}>
               Dashboard
@@ -155,7 +155,7 @@ export default function NavBar() {
               Breakdown
             </NavLink>
             {privacy ? (
-              <span className="px-5 py-3.5 text-sm font-medium text-slate-600 cursor-not-allowed">
+              <span className="px-5 py-3.5 text-sm font-medium text-slate-500 cursor-not-allowed">
                 Tax <span className="text-[10px] font-normal">(unavailable in private mode)</span>
               </span>
             ) : (
@@ -168,7 +168,7 @@ export default function NavBar() {
                 LLM
               </NavLink>
             ) : (
-              <span className="px-5 py-3.5 text-sm font-medium text-slate-600 cursor-not-allowed">
+              <span className="px-5 py-3.5 text-sm font-medium text-slate-500 cursor-not-allowed">
                 LLM <span className="text-[10px] font-normal">(configure GEMINI_API_KEY)</span>
               </span>
             )}

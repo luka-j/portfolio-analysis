@@ -152,7 +152,7 @@ export default function TaxPage() {
 
           <div className="flex items-end gap-6 mt-6 flex-wrap justify-center">
             <div className="flex flex-col items-center gap-2 w-32">
-              <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Year</span>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Year</span>
               <div className="w-full">
                 <SelectInput
                   options={years.map(String)}
@@ -177,10 +177,10 @@ export default function TaxPage() {
             <p className="text-xs text-slate-500 mb-4 text-center">
               Enter a single CZK exchange rate for each currency used in the {year} report.
             </p>
-            <div className="w-full bg-[#1a1d2e]/40 border border-white/5 rounded-2xl overflow-hidden mb-4">
+            <div className="w-full bg-surface/40 border border-white/5 rounded-2xl overflow-hidden mb-4">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
+                  <tr className="text-slate-500 text-[9px] font-black uppercase tracking-[0.2em] border-b border-border-dim/40">
                     <th className="text-left py-2.5 px-4">Currency</th>
                     <th className="text-right py-2.5 px-4">Rate (1 unit → CZK)</th>
                   </tr>
@@ -190,7 +190,7 @@ export default function TaxPage() {
                     <tr key={c}>
                       <td className="py-2.5 px-4 font-bold text-slate-300 uppercase tracking-tight">{c}</td>
                       <td className="py-2.5 px-4 text-right">
-                        <div className="inline-flex items-center bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
+                        <div className="inline-flex items-center bg-surface rounded-2xl p-1.5 border border-border-dim/50 shadow-xl shadow-black/20">
                           <input
                             type="number"
                             min="0"
@@ -236,15 +236,15 @@ export default function TaxPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 w-full">
-                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                <div className="bg-surface/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
                   <p className="text-xs text-slate-500 mb-2">Total Cost</p>
                   <p className="text-xl font-semibold tabular-nums text-rose-400">{report.employment_income.total_cost_czk.toLocaleString('cs-CZ')} CZK</p>
                 </div>
-                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                <div className="bg-surface/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
                   <p className="text-xs text-slate-500 mb-2">Total Benefit</p>
                   <p className="text-xl font-semibold tabular-nums text-emerald-400">{report.employment_income.total_benefit_czk.toLocaleString('cs-CZ')} CZK</p>
                 </div>
-                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                <div className="bg-surface/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
                   <p className="text-xs text-slate-500 mb-2">Net Taxable</p>
                   <p className="text-xl font-semibold tabular-nums text-white">{(report.employment_income.total_benefit_czk - report.employment_income.total_cost_czk).toLocaleString('cs-CZ')} CZK</p>
                 </div>
@@ -262,7 +262,7 @@ export default function TaxPage() {
               <div className="overflow-x-auto w-full">
                 <table className="w-full min-w-160 text-sm">
                   <thead>
-                    <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
+                    <tr className="text-slate-500 text-[9px] font-black uppercase tracking-[0.2em] border-b border-border-dim/40">
                       <th className="text-left py-2.5 px-4">Event</th>
                       <th className="text-left py-2.5 px-4">Security</th>
                       <th className="text-left py-2.5 px-4">Date</th>
@@ -285,15 +285,15 @@ export default function TaxPage() {
                         <td className="py-2.5 px-4 text-slate-400 font-bold text-right tabular-nums">{tx.quantity}</td>
                         <td className="py-2.5 px-4 text-right">
                           <div className="text-xs font-black text-slate-300 tabular-nums">{tx.native_price.toFixed(2)} {tx.currency}</div>
-                          <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
+                          <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
                         </td>
                         <td className="py-2.5 px-4 text-right">
                           {costBasisPerShare > 0.001
                             ? <>
                                 <div className="text-xs font-black text-slate-400 tabular-nums">{costBasisPerShare.toFixed(2)} {tx.currency}</div>
-                                <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
+                                <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
                               </>
-                            : <div className="text-xs font-black text-slate-700 tabular-nums">0</div>
+                            : <div className="text-xs font-black text-slate-500 tabular-nums">0</div>
                           }
                         </td>
                         <td className="py-2.5 px-4 text-right font-black tabular-nums text-emerald-400">
@@ -314,15 +314,15 @@ export default function TaxPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 w-full">
-                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                <div className="bg-surface/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
                   <p className="text-xs text-slate-500 mb-2">Cost Basis</p>
                   <p className="text-xl font-semibold tabular-nums text-rose-400">{report.investment_income.total_cost_czk.toLocaleString('cs-CZ')} CZK</p>
                 </div>
-                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                <div className="bg-surface/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
                   <p className="text-xs text-slate-500 mb-2">Proceeds</p>
                   <p className="text-xl font-semibold tabular-nums text-emerald-400">{report.investment_income.total_benefit_czk.toLocaleString('cs-CZ')} CZK</p>
                 </div>
-                <div className="bg-[#1a1d2e]/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
+                <div className="bg-surface/40 rounded-2xl px-6 py-4 flex flex-col items-center text-center border border-white/5">
                   <p className="text-xs text-slate-500 mb-2">Net Gain</p>
                   <p className="text-xl font-semibold tabular-nums text-white">{(report.investment_income.total_benefit_czk - report.investment_income.total_cost_czk).toLocaleString('cs-CZ')} CZK</p>
                 </div>
@@ -340,7 +340,7 @@ export default function TaxPage() {
               <div className="overflow-x-auto w-full">
                 <table className="w-full min-w-3xl text-sm">
                   <thead>
-                    <tr className="text-slate-600 text-[9px] font-black uppercase tracking-[0.2em] border-b border-[#2a2e42]/40">
+                    <tr className="text-slate-500 text-[9px] font-black uppercase tracking-[0.2em] border-b border-border-dim/40">
                       <th className="text-left py-2.5 px-4">Security</th>
                       <th className="text-left py-2.5 px-4">Buy Date</th>
                       <th className="text-left py-2.5 px-4">Sell Date</th>
@@ -363,16 +363,16 @@ export default function TaxPage() {
                         <td className="py-2.5 px-4 text-slate-400 font-bold text-right tabular-nums">{tx.quantity.toLocaleString('cs-CZ')}</td>
                         <td className="py-2.5 px-4 text-right">
                           <div className="text-xs font-black text-slate-400 tabular-nums">{buyPriceNative.toFixed(2)} {tx.currency}</div>
-                          <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.buy_rate?.toFixed(3) ?? '—'}</div>
+                          <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-0.5">@ {tx.buy_rate?.toFixed(3) ?? '—'}</div>
                         </td>
                         <td className="py-2.5 px-4 text-right">
                           <div className="text-xs font-black text-slate-300 tabular-nums">{tx.native_price.toFixed(2)} {tx.currency}</div>
-                          <div className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
+                          <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-0.5">@ {tx.exchange_rate.toFixed(3)}</div>
                         </td>
                         <td className="py-2.5 px-4 text-right">
                           {(tx.buy_commission ?? 0) > 0.0001
                             ? <div className="text-xs font-black text-slate-500 tabular-nums">−{tx.buy_commission!.toFixed(2)} {tx.currency}</div>
-                            : <div className="text-xs font-black text-slate-700 tabular-nums">0</div>
+                            : <div className="text-xs font-black text-slate-500 tabular-nums">0</div>
                           }
                           {(tx.sell_commission ?? 0) > 0.0001
                             ? <div className="text-xs font-black text-slate-500 tabular-nums mt-0.5">−{tx.sell_commission!.toFixed(2)} {tx.currency}</div>

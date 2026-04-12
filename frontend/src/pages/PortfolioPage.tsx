@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
@@ -310,13 +310,13 @@ export default function PortfolioPage() {
         {loading ? (
           <Spinner label="Loading…" className="py-24" />
         ) : positions.length === 0 ? (
-          <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
+          <div className="text-center py-24 text-slate-500 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
         ) : (
           <div className="w-full selection:bg-indigo-500/20 overflow-x-auto">
           <div className="min-w-[960px]">
             {/* Table header */}
             <div
-              className="grid gap-4 px-8 py-5 text-xs font-semibold text-slate-500 border-b border-[#2a2e42]/40"
+              className="grid gap-4 px-8 py-5 text-xs font-semibold text-slate-500 border-b border-border-dim/40"
               style={{ gridTemplateColumns: tableGridCols }}
             >
               {(['symbol', 'qty', 'price', 'value', 'pct', 'change', 'unrealized', 'realized_comm'] as const).map((col) => {
@@ -369,8 +369,9 @@ export default function PortfolioPage() {
                       >
                         {/* Symbol cell */}
                         <div className="col-span-1 flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-2xl bg-linear-to-br from-amber-500/10 to-yellow-500/10 flex items-center justify-center text-xs font-bold text-amber-400 border border-white/5 shrink-0 shadow-lg ring-1 ring-white/5">
-                            $
+                          <div className="relative group w-8 h-8 shrink-0 rounded-xl bg-surface flex items-center justify-center border border-border-dim/50 shadow-sm cursor-help">
+                            <span className="text-emerald-400 text-sm font-bold">$</span>
+                            <HoverTooltip direction="down" align="left" className="w-max whitespace-nowrap">Cash</HoverTooltip>
                           </div>
                           <div className="min-w-0">
                             <div className="font-semibold flex items-center gap-2 text-slate-100 text-sm tracking-tight">
@@ -387,8 +388,8 @@ export default function PortfolioPage() {
                           </div>
                         </div>
 
-                        <div className="col-span-1 text-right text-sm text-slate-600 tabular-nums">—</div>
-                        <div className="col-span-2 text-right text-sm text-slate-600 tabular-nums">—</div>
+                        <div className="col-span-1 text-right text-sm text-slate-500 tabular-nums">—</div>
+                        <div className="col-span-2 text-right text-sm text-slate-500 tabular-nums">—</div>
 
                         <div className="col-span-2 text-right text-sm font-semibold text-slate-100 tabular-nums">
                           {privacy ? '—' : formatCurrency(value, currency, pos.native_currency)}
@@ -401,9 +402,9 @@ export default function PortfolioPage() {
                             <span className="text-xs font-medium text-slate-400 tabular-nums w-10 text-right">{pct.toFixed(1)}%</span>
                           </div>
                         </div>
-                        <div className="col-span-2 text-right text-slate-600 opacity-40">—</div>
-                        <div className="col-span-2 text-right text-slate-600 opacity-40">—</div>
-                        <div className="col-span-2 text-right text-slate-600 opacity-40">—</div>
+                        <div className="col-span-2 text-right text-slate-500 opacity-40">—</div>
+                        <div className="col-span-2 text-right text-slate-500 opacity-40">—</div>
+                        <div className="col-span-2 text-right text-slate-500 opacity-40">—</div>
                         <div className="col-span-1" />
                       </div>
                     </div>
@@ -413,15 +414,15 @@ export default function PortfolioPage() {
                 return (
                   <div key={posKey}>
                     <div
-                      className={`grid gap-4 px-8 py-4 items-center cursor-pointer transition-all duration-300 ${isExpanded ? 'bg-[#1a1d2e] ring-1 ring-white/5 shadow-2xl z-10' : 'hover:bg-white/2'}`}
+                      className={`grid gap-4 px-8 py-4 items-center cursor-pointer transition-all duration-300 ${isExpanded ? 'bg-surface ring-1 ring-white/5 shadow-2xl z-10' : 'hover:bg-white/2'}`}
                       style={{ display: 'grid', gridTemplateColumns: tableGridCols }}
                       onClick={() => toggleExpand(pos.symbol, pos.listing_exchange)}
                     >
                       {/* Symbol cell */}
                       <div className="col-span-1 flex items-center gap-4">
                         {pos.price_status ? (
-                          <div className="relative group w-10 h-10 rounded-2xl bg-linear-to-br from-red-500/10 to-orange-500/10 flex items-center justify-center border border-red-500/20 shrink-0 shadow-lg ring-1 ring-red-500/10 cursor-help">
-                            <svg className="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                          <div className="relative group w-8 h-8 shrink-0 rounded-xl bg-surface flex items-center justify-center border border-red-500/20 shadow-sm">
+                            <svg className="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
                               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                               <line x1="12" y1="9" x2="12" y2="13"/>
                               <line x1="12" y1="17" x2="12.01" y2="17"/>
@@ -433,13 +434,16 @@ export default function PortfolioPage() {
                             </HoverTooltip>
                           </div>
                         ) : (
-                          <div className={`hidden md:flex w-10 h-10 rounded-2xl items-center justify-center text-xs font-bold border shrink-0 shadow-lg ring-1 ring-white/5 ${
-                            pos.asset_type === 'Bond ETF'  ? 'bg-linear-to-br from-amber-500/10 to-yellow-500/10 text-amber-300/80 border-amber-500/10' :
-                            pos.asset_type === 'ETF'       ? 'bg-linear-to-br from-teal-500/10 to-cyan-500/10 text-teal-300/80 border-teal-500/10' :
-                            pos.asset_type === 'Commodity' ? 'bg-linear-to-br from-orange-500/10 to-amber-500/10 text-orange-300/80 border-orange-500/10' :
-                                                             'bg-linear-to-br from-indigo-500/10 to-violet-500/10 text-indigo-300/80 border-indigo-500/10'
-                          }`}>
-                            {pos.symbol.slice(0, 2)}
+                          <div className="relative group hidden md:flex w-8 h-8 shrink-0 rounded-xl bg-surface items-center justify-center border border-border-dim/50 shadow-sm cursor-help">
+                            <div className={`w-2 h-2 rounded-full ${
+                              pos.asset_type === 'Bond ETF'  ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]' :
+                              pos.asset_type === 'ETF'       ? 'bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.8)]' :
+                              pos.asset_type === 'Commodity' ? 'bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.8)]' :
+                                                               'bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.8)]'
+                            }`} />
+                            <HoverTooltip direction="down" align="left" className="w-max whitespace-nowrap">
+                              {pos.asset_type === 'Bond ETF' ? 'Bond ETF' : pos.asset_type === 'ETF' ? 'ETF' : pos.asset_type === 'Commodity' ? 'Commodity' : 'Stock'}
+                            </HoverTooltip>
                           </div>
                         )}
                         <div className="min-w-0">
@@ -447,7 +451,7 @@ export default function PortfolioPage() {
                             <span className={pos.name ? 'relative group/name cursor-default' : undefined}>
                               {pos.symbol}
                               {pos.name && (
-                                <span className="absolute bottom-full left-0 mb-2 w-max max-w-56 px-3 py-2 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/name:opacity-100 transition-opacity z-50 shadow-2xl whitespace-normal font-normal tracking-normal">
+                                <span className="absolute bottom-full left-0 mb-2 w-max max-w-56 px-3 py-2 bg-panel border border-border-dim/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/name:opacity-100 transition-opacity z-50 shadow-2xl whitespace-normal font-normal tracking-normal">
                                   {pos.name}
                                 </span>
                               )}
@@ -466,7 +470,7 @@ export default function PortfolioPage() {
                               <div className="relative group">
                                 <button
                                   onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}
-                                  className="text-slate-700 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
+                                  className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
                                 >
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -490,26 +494,15 @@ export default function PortfolioPage() {
                             </div>
                           </div>
                           <div className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-1 opacity-80">
-                            {pos.asset_type && pos.asset_type !== 'Unknown' && (
+                            {pos.listing_exchange && (
                               <>
-                                <span className={`font-semibold tracking-wide ${
-                                  pos.asset_type === 'Bond ETF'  ? 'text-amber-500/70' :
-                                  pos.asset_type === 'ETF'       ? 'text-teal-500/70' :
-                                  pos.asset_type === 'Commodity' ? 'text-orange-500/70' :
-                                                                   'text-indigo-500/70'
-                                }`}>
-                                  {pos.asset_type === 'Bond ETF' ? 'Bond ETF' : pos.asset_type === 'ETF' ? 'ETF' : pos.asset_type === 'Commodity' ? 'Cmdty' : 'Stock'}
+                                <span className="font-semibold tracking-wide text-slate-500">
+                                  {pos.listing_exchange}
                                 </span>
                                 <span className="w-1 h-1 rounded-full bg-slate-800" />
                               </>
                             )}
                             <span>{pos.native_currency}</span>
-                            {pos.listing_exchange && (
-                              <>
-                                <span className="w-1 h-1 rounded-full bg-slate-800" />
-                                <span>{pos.listing_exchange}</span>
-                              </>
-                            )}
                           </div>
                         </div>
                       </div>
@@ -520,7 +513,7 @@ export default function PortfolioPage() {
                       <div className="col-span-2 text-right">
                         <div className="text-sm font-medium text-slate-300 tabular-nums">{formatNumber(pos.price || 0)} {currency === 'Original' ? pos.native_currency : currency}</div>
                         {!privacy && (pos.cost_basis || 0) > 0 && (
-                          <div className="text-[10px] text-slate-600 mt-0.5">avg. cost {formatNumber(pos.cost_basis)}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">avg. cost {formatNumber(pos.cost_basis)}</div>
                         )}
                       </div>
 
@@ -552,12 +545,12 @@ export default function PortfolioPage() {
                               </HoverTooltip>
                             )}
                           </>
-                        ) : <span className="text-slate-600 opacity-40">—</span>}
+                        ) : <span className="text-slate-500 opacity-40">—</span>}
                       </div>
 
 <div className="col-span-2 text-right">
                         {privacy ? (
-                          <span className="text-slate-600 font-medium">—</span>
+                          <span className="text-slate-500 font-medium">—</span>
                         ) : unrealizedGL !== null ? (
                           <div className="flex flex-col items-end">
                             <span className={`text-sm font-medium tabular-nums ${unrealizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -567,25 +560,25 @@ export default function PortfolioPage() {
                               {(unrealizedPct ?? 0) >= 0 ? '+' : ''}{(unrealizedPct ?? 0).toFixed(2)}%
                             </div>
                           </div>
-                        ) : <span className="text-slate-600 font-medium opacity-40">—</span>}
+                        ) : <span className="text-slate-500 font-medium opacity-40">—</span>}
                       </div>
                       <div className="col-span-2 text-right">
                         {privacy ? (
-                          <span className="text-slate-600 opacity-40">—</span>
+                          <span className="text-slate-500 opacity-40">—</span>
                         ) : (realizedGLNative !== 0 || commission !== 0) ? (
                           <div className="flex flex-col items-end">
                             {realizedGLNative !== 0 ? (
                               <span className={`text-sm font-medium tabular-nums ${realizedGLNative >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                 {realizedGLNative >= 0 ? '+' : ''}{formatNumber(realizedGLNative)}
                               </span>
-                            ) : <span className="text-sm text-slate-600 opacity-40">—</span>}
+                            ) : <span className="text-sm text-slate-500 opacity-40">—</span>}
                             {commission !== 0 && (
                               <div className="text-xs text-amber-500/80 font-medium tabular-nums mt-0.5">
                                 {formatNumber(commission)} comm.
                               </div>
                             )}
                           </div>
-                        ) : <span className="text-slate-600 opacity-40">—</span>}
+                        ) : <span className="text-slate-500 opacity-40">—</span>}
                       </div>
                       <div className="col-span-1 text-right">
                         <span className={`text-slate-500 text-xs transition-transform duration-300 inline-block ${isExpanded ? 'rotate-180 text-indigo-400' : ''}`}>▼</span>
@@ -602,7 +595,7 @@ export default function PortfolioPage() {
 
             {/* Total row */}
             <div
-              className="grid gap-4 px-8 py-8 mt-12 border-t-2 border-[#2a2e42]/60 bg-linear-to-r from-indigo-500/4 to-purple-500/4 items-center rounded-3xl ring-1 ring-white/5 shadow-2xl"
+              className="grid gap-4 px-8 py-8 mt-12 border-t-2 border-border-dim/60 bg-surface items-center rounded-3xl ring-1 ring-white/5 shadow-2xl"
               style={{ gridTemplateColumns: tableGridCols }}
             >
               <div className="col-span-4 flex items-center">
@@ -614,54 +607,54 @@ export default function PortfolioPage() {
                 </div>
               </div>
               <div className="col-span-2 text-right">
-                <span className="text-xs font-black text-slate-600 tracking-widest tabular-nums">100.0%</span>
+                <span className="text-xs font-black text-slate-500 tracking-widest tabular-nums">100.0%</span>
               </div>
               {/* Weighted change % */}
               <div className="col-span-2 text-right">
                 {privacy ? (
-                  <span className="text-slate-800 opacity-40">—</span>
+                  <span className="text-slate-500 opacity-40">—</span>
                 ) : weightedChangePct != null ? (
                   <span className={`text-sm font-black tabular-nums ${weightedChangePct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {weightedChangePct >= 0 ? '+' : ''}{weightedChangePct.toFixed(2)}%
                   </span>
                 ) : (
-                  <span className="text-slate-800 opacity-40">—</span>
+                  <span className="text-slate-500 opacity-40">—</span>
                 )}
               </div>
               <div className="col-span-2 text-right">
                 {privacy ? (
-                  <span className="text-slate-800 opacity-40">—</span>
+                  <span className="text-slate-500 opacity-40">—</span>
                 ) : currency === 'Original' ? (
-                  <span className="text-[10px] text-slate-700 uppercase font-black tracking-widest">N/A</span>
+                  <span className="text-[10px] text-slate-500 uppercase font-black tracking-widest">N/A</span>
                 ) : totals.hasUnrealized ? (
                   <span className={`text-sm font-black tabular-nums ${totals.unrealizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {totals.unrealizedGL >= 0 ? '+' : ''}{formatNumber(totals.unrealizedGL)}
                   </span>
-                ) : <span className="text-slate-800 opacity-40">—</span>}
+                ) : <span className="text-slate-500 opacity-40">—</span>}
               </div>
               <div className="col-span-2 text-right">
                 {privacy ? (
-                  <span className="text-slate-800 opacity-40">—</span>
+                  <span className="text-slate-500 opacity-40">—</span>
                 ) : (totals.realizedGL !== 0 || totals.commission !== 0) ? (
                   <div className="flex flex-col items-end">
                     {totals.realizedGL !== 0 ? (
                       <span className={`text-sm font-black tabular-nums ${totals.realizedGL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {totals.realizedGL >= 0 ? '+' : ''}{formatNumber(totals.realizedGL)}
                       </span>
-                    ) : <span className="text-sm text-slate-800 opacity-40">—</span>}
+                    ) : <span className="text-sm text-slate-500 opacity-40">—</span>}
                     {totals.commission !== 0 && (
                       <div className="text-xs font-black text-amber-500/80 tabular-nums mt-0.5">
                         {formatNumber(totals.commission)} comm.
                       </div>
                     )}
                   </div>
-                ) : <span className="text-slate-800 opacity-40">—</span>}
+                ) : <span className="text-slate-500 opacity-40">—</span>}
               </div>
               <div className="col-span-1" />
             </div>
 
             {/* Period label */}
-            <div className="text-center mt-4 text-[10px] text-slate-700 font-medium tracking-widest uppercase">
+            <div className="text-center mt-4 text-[10px] text-slate-500 font-medium tracking-widest uppercase">
               Change % and Avg. Price over {periodFrom} — {periodTo}
             </div>
           </div>

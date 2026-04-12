@@ -47,7 +47,7 @@ export default function LoginPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="bg-[#1a1d2e] rounded-2xl p-8 border border-[#2a2e42] shadow-xl">
+        <form onSubmit={handleSubmit} className="bg-surface rounded-2xl p-8 border border-border-dim shadow-xl">
           <label htmlFor="token" className="block text-sm font-medium text-slate-300 mb-2">
             Access Token
           </label>
@@ -57,7 +57,7 @@ export default function LoginPage() {
             value={token}
             onChange={(e) => setTokenValue(e.target.value)}
             placeholder="Enter your user token"
-            className="w-full px-4 py-3 bg-[#0f1117] border border-[#2a2e42] rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+            className="w-full px-4 py-3 bg-bg border border-border-dim rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
             autoFocus
           />
 

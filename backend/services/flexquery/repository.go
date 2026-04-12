@@ -52,7 +52,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			err := r.DB.Where("user_id = ? AND transaction_id = ?", user.ID, t.TransactionID).
 				First(&existing).Error
 			if err == nil {
-				backfillConid(r.DB, &existing, t)
+				backfillMissingTradeData(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped (id=%s): %s", t.TransactionID, t.Symbol)
 				continue
 			}
@@ -63,7 +63,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 				user.ID, "Trade", t.Symbol, t.DateTime, t.Quantity-1e-8, t.Quantity+1e-8, t.Price-1e-8, t.Price+1e-8,
 			).First(&existing).Error
 			if err == nil {
-				backfillConid(r.DB, &existing, t)
+				backfillMissingTradeData(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped: %s %v qty=%v price=%v", t.Symbol, t.DateTime, t.Quantity, t.Price)
 				continue
 			}
@@ -140,12 +140,11 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 	return data, nil
 }
 
-// backfillConid updates an existing duplicate transaction's conid (and symbol)
-// when the incoming trade carries a conid that the stored row is missing.
-// Also backfills ISIN when the stored row has none.
+// backfillMissingTradeData updates an existing duplicate transaction's metadata
+// when the incoming trade carries data that the stored row is missing.
 // This lets a re-upload of a FlexQuery retroactively enrich old rows that were
-// imported before conid/ISIN support was added.
-func backfillConid(db *gorm.DB, existing *models.Transaction, incoming models.Trade) {
+// imported before certain fields (like conid, isin, listing_exchange) were supported.
+func backfillMissingTradeData(db *gorm.DB, existing *models.Transaction, incoming models.Trade) {
 	updates := map[string]interface{}{}
 	if incoming.Conid != "" && existing.Conid != incoming.Conid {
 		updates["conid"] = incoming.Conid
@@ -157,6 +156,9 @@ func backfillConid(db *gorm.DB, existing *models.Transaction, incoming models.Tr
 	}
 	if incoming.ISIN != "" && existing.ISIN == "" {
 		updates["isin"] = incoming.ISIN
+	}
+	if incoming.ListingExchange != "" && existing.ListingExchange == "" {
+		updates["listing_exchange"] = incoming.ListingExchange
 	}
 	if len(updates) > 0 {
 		db.Model(existing).Updates(updates)

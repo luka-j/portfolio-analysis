@@ -102,8 +102,8 @@ function SectionCard({ section, formatValue, privacy }: SectionCardProps) {
         <div className="flex-1 w-full max-w-2xl min-w-0">
           <div className={`overflow-x-auto${section.entries.length > 6 ? ' overflow-y-auto max-h-78' : ''}`}>
           <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-[#0f1117] z-10">
-              <tr className="text-slate-500 text-xs font-semibold border-b border-[#2a2e42]/40">
+            <thead className="sticky top-0 bg-bg z-10">
+              <tr className="text-slate-500 text-xs font-semibold border-b border-border-dim/40">
                 <th className="text-left py-4 pr-3 md:pr-6 w-1/2">Category</th>
                 <th className="text-right py-4 pr-3 md:pr-6 w-24 md:w-32">Value</th>
                 <th className="text-right py-4">Weight</th>
@@ -226,7 +226,7 @@ export default function BreakdownPage() {
         {error && !loading && <ErrorAlert message={error} className="mb-8" />}
 
         {!loading && !error && sections.length === 0 && (
-          <div className="text-center py-24 text-slate-600 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
+          <div className="text-center py-24 text-slate-500 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
         )}
 
         {!loading && !error && sections.length > 0 && (
@@ -235,11 +235,11 @@ export default function BreakdownPage() {
               <div key={s.title} className="w-full">
                 <SectionCard section={s} formatValue={fmt} privacy={privacy} />
                 {i < sections.length - 1 && (
-                  <div className="mt-4 border-t border-[#2a2e42]/40 opacity-30" />
+                  <div className="mt-4 border-t border-border-dim/40 opacity-30" />
                 )}
               </div>
             ))}
-            <footer className="mt-12 text-[8px] font-black text-slate-800 uppercase tracking-[0.4em] text-center leading-loose max-w-2xl mx-auto opacity-30">
+            <footer className="mt-12 text-[8px] font-black text-slate-500 uppercase tracking-[0.4em] text-center leading-loose max-w-2xl mx-auto opacity-30">
               Fundamental attribution weights are derived from aggregated security metadata.
               Values represent your current portfolio composition.
             </footer>

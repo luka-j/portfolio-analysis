@@ -54,7 +54,7 @@ export default function DatePicker({ value, onChange }: Props) {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full bg-[#0f1117] border border-[#2a2e42] rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors text-left flex items-center justify-between"
+        className="w-full bg-bg border border-border-dim rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors text-left flex items-center justify-between"
       >
         <span className="font-mono">{value || 'Select date'}</span>
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-500 shrink-0">
@@ -64,7 +64,7 @@ export default function DatePicker({ value, onChange }: Props) {
       </button>
 
       {open && (
-        <div className="absolute z-[70] mt-1 left-0 bg-[#1a1d2e] border border-[#2a2e42]/70 rounded-2xl px-5 py-4 shadow-2xl">
+        <div className="absolute z-[70] mt-1 left-0 bg-surface border border-border-dim/70 rounded-2xl px-5 py-4 shadow-2xl">
           <div className="flex items-center justify-between mb-3">
             <button
               type="button"
@@ -83,7 +83,7 @@ export default function DatePicker({ value, onChange }: Props) {
 
           <div className="grid grid-cols-7 mb-0.5">
             {DAY_ABBRS.map(d => (
-              <div key={d} className="text-center py-1 text-[9px] font-black text-slate-600 tracking-wider">{d}</div>
+              <div key={d} className="text-center py-1 text-[9px] font-black text-slate-500 tracking-wider">{d}</div>
             ))}
           </div>
 
@@ -101,7 +101,7 @@ export default function DatePicker({ value, onChange }: Props) {
                   onClick={() => { onChange(ds); setOpen(false) }}
                   className={[
                     'h-8 w-full text-[11px] font-semibold transition-all',
-                    future    ? 'text-slate-800 cursor-default' : 'cursor-pointer',
+                    future    ? 'text-slate-500 cursor-default' : 'cursor-pointer',
                     isSelected ? 'bg-indigo-600 text-white shadow-md rounded-lg' : '',
                     !isSelected && !future ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-lg' : '',
                     isToday && !isSelected ? 'ring-1 ring-inset ring-indigo-500/40 rounded-lg' : '',

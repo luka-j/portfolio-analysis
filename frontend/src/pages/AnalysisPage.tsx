@@ -30,7 +30,7 @@ const PERIOD_OPTIONS = [
   { label: 'Custom', value: -1 },
 ]
 
-const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6']
+const COLORS = ['#818cf8', '#34d399', '#fbbf24', '#f87171', '#22d3ee', '#f472b6', '#a78bfa']
 
 const STAT_TOOLTIPS: Record<string, string> = {
   twr: 'Time-weighted return. Eliminates the effect of cash flows — best for evaluating portfolio manager skill.',
@@ -324,12 +324,12 @@ export default function AnalysisPage() {
             <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
             <div className="flex flex-col items-center gap-2">
               <div className="relative group/rfr cursor-default">
-                <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">Risk-free rate</span>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 max-w-[calc(100vw-2rem)] px-3 py-2.5 bg-[#12151f] border border-[#2a2e42]/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/rfr:opacity-100 transition-opacity z-50 shadow-2xl">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Risk-free rate</span>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 max-w-[calc(100vw-2rem)] px-3 py-2.5 bg-panel border border-border-dim/80 rounded-xl text-[10px] text-slate-400 leading-relaxed pointer-events-none opacity-0 group-hover/rfr:opacity-100 transition-opacity z-50 shadow-2xl">
                   The annual return of a theoretically risk-free asset. Used as the baseline in Sharpe and Sortino ratio calculations — only returns above this threshold are treated as compensation for risk.
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
+              <div className="flex items-center gap-1.5 bg-surface rounded-2xl p-1.5 border border-border-dim/50 shadow-xl shadow-black/20">
                 <div className="relative flex items-center">
                   <input
                     type="number" value={riskFreeRateInput}
@@ -343,14 +343,14 @@ export default function AnalysisPage() {
                     <button
                       type="button" tabIndex={-1}
                       onClick={() => applyRiskFreeRate(Math.min(0.20, Math.round((riskFreeRate + 0.001) * 1000) / 1000))}
-                      className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                      className="flex items-center justify-center w-4 h-3.5 text-slate-500 hover:text-slate-300 transition-colors"
                     >
                       <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 4L4 1L7 4"/></svg>
                     </button>
                     <button
                       type="button" tabIndex={-1}
                       onClick={() => applyRiskFreeRate(Math.max(0, Math.round((riskFreeRate - 0.001) * 1000) / 1000))}
-                      className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                      className="flex items-center justify-center w-4 h-3.5 text-slate-500 hover:text-slate-300 transition-colors"
                     >
                       <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 1L4 4L7 1"/></svg>
                     </button>
@@ -423,7 +423,7 @@ export default function AnalysisPage() {
                   if (numVal === null) return null
                   const tooltip = STAT_TOOLTIPS[key.toLowerCase()]
                   return (
-                    <div key={key} className={`relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
+                    <div key={key} className={`relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
                       {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
                       <p className="text-sm font-medium text-slate-500 mb-2 capitalize">{key.replace(/_/g, ' ')}</p>
                       <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -440,35 +440,35 @@ export default function AnalysisPage() {
                 )}
                 {portfolioStandalone && (
                   <>
-                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                    <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
                       <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Sharpe Ratio</p>
                       <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {portfolioStandalone.sharpe_ratio.toFixed(3)}
                       </p>
                     </div>
-                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                    <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
                       <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">VAMI</p>
                       <p className="text-2xl font-semibold tabular-nums text-slate-100">
                         {portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                       </p>
                     </div>
-                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                    <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
                       <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Volatility</p>
                       <p className="text-2xl font-semibold tabular-nums text-slate-400">
                         {(portfolioStandalone.volatility * 100).toFixed(2)}%
                       </p>
                     </div>
-                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                    <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
                       <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Sortino Ratio</p>
                       <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {portfolioStandalone.sortino_ratio.toFixed(3)}
                       </p>
                     </div>
-                    <div className="relative group bg-[#1a1d2e]/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                    <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
                       <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
                       <p className="text-sm font-medium text-slate-500 mb-2">Max Drawdown</p>
                       <p className="text-2xl font-semibold tabular-nums text-rose-400">
@@ -492,7 +492,7 @@ export default function AnalysisPage() {
                 <input
                   type="text" value={benchmarkInput} onChange={e => setBenchmarkInput(e.target.value)}
                   placeholder="Symbols (SPY, QQQ, VWCE.DE)"
-                  className="w-full px-6 py-3 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all"
+                  className="w-full px-6 py-3 bg-surface border border-border-dim/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all"
                   onKeyDown={e => e.key === 'Enter' && handleCompare()}
                 />
                 <button
@@ -505,7 +505,7 @@ export default function AnalysisPage() {
               {benchmarkSymbols.length > 0 && (
                 <div className="flex flex-wrap gap-2 w-full">
                   {benchmarkSymbols.map(sym => (
-                    <span key={sym} className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-lg text-sm font-medium text-slate-300">
+                    <span key={sym} className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-border-dim/60 rounded-lg text-sm font-medium text-slate-300">
                       {sym}
                       <button onClick={() => handleRemoveSymbol(sym)} className="text-slate-500 hover:text-red-400 transition-colors leading-none" aria-label={`Remove ${sym}`}>×</button>
                     </span>
@@ -554,7 +554,7 @@ export default function AnalysisPage() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-600 opacity-60">
+              <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-500 opacity-60">
                 <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
                 <p className="text-sm font-medium">Ready to compare</p>
               </div>
@@ -570,7 +570,7 @@ export default function AnalysisPage() {
                 {standaloneError && <ErrorAlert message={standaloneError} className="mb-3" />}
                 <table className="w-full min-w-160 text-sm">
                   <thead>
-                    <tr className="border-b border-[#2a2e42]/60">
+                    <tr className="border-b border-border-dim/60">
                       {(['Security', 'Sharpe', 'VAMI', 'Volatility', 'Sortino', 'Max DD'] as const).map(h => {
                         const tipKey = { Security: undefined, Sharpe: 'sharpe', VAMI: 'vami', Volatility: 'volatility', Sortino: 'sortino', 'Max DD': 'max_drawdown' }[h] as keyof typeof STANDALONE_TOOLTIPS | undefined
                         const tip = tipKey ? STANDALONE_TOOLTIPS[tipKey] : undefined
@@ -627,7 +627,7 @@ export default function AnalysisPage() {
                 <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Benchmark Comparison</p>
                 <table className="w-full min-w-160 text-sm">
                   <thead>
-                    <tr className="border-b border-[#2a2e42]/60">
+                    <tr className="border-b border-border-dim/60">
                       {(['Security', 'Alpha', 'Beta', 'Treynor', 'Tracking Err', 'Info Ratio', 'Correlation'] as const).map(h => {
                         const tip = COMPARE_TOOLTIPS[h]
                         return (
@@ -641,7 +641,7 @@ export default function AnalysisPage() {
                           </th>
                         )
                       })}
-                      <th className="py-4 px-4 w-8 sticky right-0 bg-[#0f1117]" />
+                      <th className="py-4 px-4 w-8 sticky right-0 bg-bg" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#2a2e42]/30">
@@ -654,7 +654,7 @@ export default function AnalysisPage() {
                         <td className="py-4 px-4 text-right text-slate-400 font-medium">{(bm.tracking_error * 100).toFixed(2)}%</td>
                         <td className="py-4 px-4 text-right text-slate-300 font-medium tabular-nums">{bm.information_ratio.toFixed(3)}</td>
                         <td className="py-4 px-4 text-right text-slate-400 font-medium">{bm.correlation.toFixed(3)}</td>
-                        <td className="py-4 px-4 text-right sticky right-0 bg-[#0f1117]">
+                        <td className="py-4 px-4 text-right sticky right-0 bg-bg">
                           {portfolioStandalone && !bm.error && (
                             <button
                               onClick={() => navigate('/llm', {

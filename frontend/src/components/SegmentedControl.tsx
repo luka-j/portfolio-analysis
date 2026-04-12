@@ -19,8 +19,8 @@ export default function SegmentedControl<T extends string | number>({
 }: Props<T>) {
   return (
     <div className="flex flex-col items-center gap-2">
-      <span className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em]">{label}</span>
-      <div className="flex items-center gap-1 bg-[#1a1d2e] rounded-2xl p-1.5 border border-[#2a2e42]/50 shadow-xl shadow-black/20">
+      <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">{label}</span>
+      <div className="flex items-center gap-1 bg-surface rounded-2xl p-1.5 border border-border-dim/50 shadow-xl shadow-black/20">
         {options.map(opt => (
           <div key={String(opt.value)} className="relative group">
             <button

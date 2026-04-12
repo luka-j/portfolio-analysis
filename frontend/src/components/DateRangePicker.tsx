@@ -38,7 +38,7 @@ function MonthGrid({
       </div>
       <div className="grid grid-cols-7 mb-0.5">
         {DAY_ABBRS.map(d => (
-          <div key={d} className="text-center py-1 text-[9px] font-black text-slate-600 tracking-wider">{d}</div>
+          <div key={d} className="text-center py-1 text-[9px] font-black text-slate-500 tracking-wider">{d}</div>
         ))}
       </div>
       <div className="grid grid-cols-7">
@@ -58,7 +58,7 @@ function MonthGrid({
               onMouseLeave={onLeave}
               className={[
                 'h-8 w-full text-[11px] font-semibold transition-all',
-                future ? 'text-slate-800 cursor-default' : 'cursor-pointer',
+                future ? 'text-slate-500 cursor-default' : 'cursor-pointer',
                 isFrom || isTo ? 'bg-indigo-600 text-white shadow-md rounded-lg relative z-10' : '',
                 inRange ? 'bg-indigo-500/15 text-indigo-300' : '',
                 !isFrom && !isTo && !inRange && !future ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-lg' : '',
@@ -113,17 +113,17 @@ export default function DateRangePicker({ initialFrom, initialTo, onApply }: {
   const shared = { from: tmpFrom, to: tmpTo, hover, stage, today, onClick: handleClick, onEnter: setHover, onLeave: () => setHover(null) }
 
   return (
-    <div className="bg-[#1a1d2e] border border-[#2a2e42]/70 rounded-3xl px-8 py-6 shadow-2xl flex flex-col items-center gap-4">
+    <div className="bg-surface border border-border-dim/70 rounded-3xl px-8 py-6 shadow-2xl flex flex-col items-center gap-4">
       <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
-        <span className={`px-3 py-1.5 rounded-xl border transition-colors ${stage === 'from' ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300' : 'border-[#2a2e42]/60 text-slate-400'}`}>
+        <span className={`px-3 py-1.5 rounded-xl border transition-colors ${stage === 'from' ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300' : 'border-border-dim/60 text-slate-400'}`}>
           {tmpFrom}
         </span>
-        <span className="text-slate-700">→</span>
-        <span className={`px-3 py-1.5 rounded-xl border transition-colors ${stage === 'to' ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300' : 'border-[#2a2e42]/60 text-slate-400'}`}>
+        <span className="text-slate-500">→</span>
+        <span className={`px-3 py-1.5 rounded-xl border transition-colors ${stage === 'to' ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300' : 'border-border-dim/60 text-slate-400'}`}>
           {tmpTo}
         </span>
       </div>
-      <p className="text-[9px] font-black text-slate-700 uppercase tracking-widest -mt-1">
+      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest -mt-1">
         {stage === 'from' ? 'Select start date' : 'Select end date'}
       </p>
       <div className="flex items-start gap-2">

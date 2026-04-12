@@ -106,13 +106,13 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
       onClick={onClose}
     >
       <div
-        className="bg-[#13151f]/95 border border-white/8 rounded-2xl p-6 w-full max-w-md shadow-2xl backdrop-blur-xl ring-1 ring-white/5 max-h-[90vh] overflow-y-auto"
+        className="bg-panel/95 border border-white/8 rounded-2xl p-6 w-full max-w-md shadow-2xl backdrop-blur-xl ring-1 ring-white/5 max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <h2 className="text-slate-100 font-semibold mb-4">Add Transaction</h2>
 
         {/* Transaction type tabs */}
-        <div className="flex gap-1 mb-5 bg-[#0f1117] rounded-xl p-1">
+        <div className="flex gap-1 mb-5 bg-bg rounded-xl p-1">
           {tabs.map(tab => (
             <button
               key={tab.key}
@@ -173,7 +173,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
                 {txType === 'espp_vest' ? (
                   <span className="relative group inline-flex items-center gap-1 cursor-default">
                     FMV (on purchase date)
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-500 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
                     <HoverTooltip align="left" className="w-56 font-normal normal-case tracking-normal">
                       Fair market value — the stock's closing price on the ESPP purchase date. Used to calculate taxable employment income (FMV minus your purchase price).
                     </HoverTooltip>
@@ -181,7 +181,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
                 ) : txType === 'rsu_vest' ? (
                   <span className="relative group inline-flex items-center gap-1 cursor-default">
                     FMV (on vest date)
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-500 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
                     <HoverTooltip align="left" className="w-56 font-normal normal-case tracking-normal">
                       Fair market value — the stock's closing price on the vest date. The full FMV is taxed as employment income; cost basis is set to zero.
                     </HoverTooltip>
@@ -206,7 +206,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
           {(txType === 'buy' || txType === 'sell') && (
             <div>
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1 pl-1">
-                Commission <span className="text-slate-700 normal-case font-normal">(optional)</span>
+                Commission <span className="text-slate-500 normal-case font-normal">(optional)</span>
               </label>
               <NumberInput value={commission} onChange={setCommission} placeholder="0.00" min={0} step={0.01} />
             </div>
@@ -218,7 +218,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1 pl-1">
                 <span className="relative group inline-flex items-center gap-1 cursor-default">
                   Employee purchase price
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-600 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-500 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
                   <HoverTooltip align="left" className="w-60 font-normal normal-case tracking-normal">
                     The discounted price you actually paid (your tax cost basis). The spread between FMV and this price is taxed as employment income in the year of purchase.
                   </HoverTooltip>
@@ -230,8 +230,8 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
 
           {/* Total */}
           {total > 0 && (txType === 'buy' || txType === 'sell') && (
-            <div className="bg-[#0f1117] border border-[#2a2e42]/50 rounded-xl px-4 py-2.5 flex justify-between items-center">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Total</span>
+            <div className="bg-bg border border-border-dim/50 rounded-xl px-4 py-2.5 flex justify-between items-center">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total</span>
               <span className="text-slate-300 font-bold text-sm tabular-nums">
                 {total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currency}
               </span>

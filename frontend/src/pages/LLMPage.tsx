@@ -183,7 +183,7 @@ export default function LLMPage() {
   const cannedDisabled = loading || !includePortfolio
 
   return (
-    <div className="min-h-screen md:h-screen bg-[#0f1117] flex flex-col md:overflow-hidden">
+    <div className="min-h-screen md:h-screen bg-bg flex flex-col md:overflow-hidden">
       <NavBar />
 
       {weightsOpen && (
@@ -284,7 +284,7 @@ export default function LLMPage() {
                 {msg.role === 'assistant' && msg.cached && i === messages.length - 1 && (
                   <button
                     onClick={() => handleRegenerate(i)}
-                    className="absolute -right-8 top-1.5 p-1.5 text-indigo-400/40 hover:text-indigo-300 transition-colors opacity-0 group-hover:opacity-100 bg-[#1a1d2e] rounded-md border border-indigo-500/10 shadow-sm"
+                    className="absolute -right-8 top-1.5 p-1.5 text-indigo-400/40 hover:text-indigo-300 transition-colors opacity-0 group-hover:opacity-100 bg-surface rounded-md border border-indigo-500/10 shadow-sm"
                     title="Cached response. Click to force regenerate."
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -369,7 +369,7 @@ export default function LLMPage() {
                 onChange={e => !portfolioShared && setIncludePortfolio(e.target.checked)}
                 className="accent-indigo-400 w-3 h-3 disabled:opacity-60"
               />
-              <span className={`text-[11px] uppercase font-bold tracking-wide ${portfolioShared ? 'text-slate-600' : 'text-slate-500'}`}>Include portfolio</span>
+              <span className={`text-[11px] uppercase font-bold tracking-wide ${portfolioShared ? 'text-slate-500' : 'text-slate-500'}`}>Include portfolio</span>
               {portfolioShared && (
                 <HoverTooltip className="w-60">
                   Portfolio data has already been shared in this conversation and cannot be removed from context
@@ -390,7 +390,7 @@ export default function LLMPage() {
           </div>
 
           {/* Disclosure */}
-          <p className="text-[10px] text-slate-600 leading-relaxed">
+          <p className="text-[10px] text-slate-500 leading-relaxed">
             Your portfolio weights (symbol, name, allocation %) are sent to the Gemini API by Google for analysis. No account IDs or personal details are included.
           </p>
         </div>

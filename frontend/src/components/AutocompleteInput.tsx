@@ -100,7 +100,7 @@ export default function AutocompleteInput({
         autoFocus={autoFocus}
         autoComplete="off"
         spellCheck={false}
-        className="w-full bg-[#0f1117] border border-[#2a2e42] rounded-xl px-4 py-2.5 text-slate-100 font-mono text-sm focus:outline-none focus:border-indigo-500/50 transition-colors"
+        className="w-full bg-bg border border-border-dim rounded-xl px-4 py-2.5 text-slate-100 font-mono text-sm focus:outline-none focus:border-indigo-500/50 transition-colors"
         value={value}
         placeholder={placeholder}
         onChange={e => {
@@ -115,7 +115,7 @@ export default function AutocompleteInput({
       {open && filtered.length > 0 && (
         <ul
           ref={listRef}
-          className="absolute z-60 mt-1 w-full bg-[#1a1d2e] border border-[#2a2e42] rounded-xl shadow-2xl overflow-y-auto"
+          className="absolute z-60 mt-1 w-full bg-surface border border-border-dim rounded-xl shadow-2xl overflow-y-auto"
           style={{ maxHeight: '14rem' }}
           onMouseDown={e => e.preventDefault()} // keep focus on input
         >
@@ -133,7 +133,7 @@ export default function AutocompleteInput({
               <span className="font-mono text-sm font-semibold">{opt.value}</span>
               {opt.label && (
                 <span className={`text-[11px] truncate max-w-[55%] ${
-                  i === activeIndex ? 'text-indigo-400/70' : 'text-slate-600'
+                  i === activeIndex ? 'text-indigo-400/70' : 'text-slate-500'
                 }`}>
                   {opt.label}
                 </span>

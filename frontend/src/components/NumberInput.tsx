@@ -25,7 +25,7 @@ export default function NumberInput({ value, onChange, placeholder = '0', min, m
   }
 
   return (
-    <div className="relative flex items-center bg-[#0f1117] border border-[#2a2e42] rounded-xl focus-within:border-indigo-500/50 transition-colors">
+    <div className="relative flex items-center bg-bg border border-border-dim rounded-xl focus-within:border-indigo-500/50 transition-colors">
       <input
         type="number"
         value={value}
@@ -38,7 +38,7 @@ export default function NumberInput({ value, onChange, placeholder = '0', min, m
           type="button"
           tabIndex={-1}
           onClick={() => adjust(1)}
-          className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+          className="flex items-center justify-center w-4 h-3.5 text-slate-500 hover:text-slate-300 transition-colors"
         >
           <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M1 4L4 1L7 4"/>
@@ -48,7 +48,7 @@ export default function NumberInput({ value, onChange, placeholder = '0', min, m
           type="button"
           tabIndex={-1}
           onClick={() => adjust(-1)}
-          className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+          className="flex items-center justify-center w-4 h-3.5 text-slate-500 hover:text-slate-300 transition-colors"
         >
           <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M1 1L4 4L7 1"/>

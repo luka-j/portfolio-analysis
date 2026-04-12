@@ -55,7 +55,7 @@ function InlineCalendar({ value, onChange }: InlineCalendarProps) {
   const cells = buildCalendarCells(viewYear, viewMonth)
 
   return (
-    <div className="bg-[#0f1117] border border-[#2a2e42]/70 rounded-2xl px-5 py-4 shadow-2xl w-fit">
+    <div className="bg-bg border border-border-dim/70 rounded-2xl px-5 py-4 shadow-2xl w-fit">
       <div className="flex items-center justify-between mb-3">
         <button type="button" onClick={() => nav(-1)}
           className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-white/5 rounded-lg transition-all leading-none text-base">‹</button>
@@ -68,7 +68,7 @@ function InlineCalendar({ value, onChange }: InlineCalendarProps) {
 
       <div className="grid grid-cols-7 mb-0.5">
         {DAY_ABBRS.map(d => (
-          <div key={d} className="text-center py-1 text-[9px] font-black text-slate-600 tracking-wider">{d}</div>
+          <div key={d} className="text-center py-1 text-[9px] font-black text-slate-500 tracking-wider">{d}</div>
         ))}
       </div>
 
@@ -86,7 +86,7 @@ function InlineCalendar({ value, onChange }: InlineCalendarProps) {
               onClick={() => onChange(ds)}
               className={[
                 'h-8 w-full text-[11px] font-semibold transition-all',
-                future     ? 'text-slate-800 cursor-default' : 'cursor-pointer',
+                future     ? 'text-slate-500 cursor-default' : 'cursor-pointer',
                 isSelected ? 'bg-indigo-600 text-white shadow-md rounded-lg' : '',
                 !isSelected && !future ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-lg' : '',
                 isToday && !isSelected ? 'ring-1 ring-inset ring-indigo-500/40 rounded-lg' : '',
@@ -395,7 +395,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
               className={`px-3 py-1 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 ${
                 period === p
                   ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-lg shadow-indigo-600/20'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-surface/40 border border-white/5'
               }`}
             >
               {p.toUpperCase()}
@@ -406,7 +406,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
             className={`px-3 py-1 rounded-xl text-[9px] font-bold uppercase transition-all duration-200 ${
               period === 'custom'
                 ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/20 shadow-lg shadow-indigo-600/20'
-                : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-[#1a1d2e]/40 border border-white/5'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 bg-surface/40 border border-white/5'
             }`}
           >
             {period === 'custom' && customFrom ? customFrom : 'Custom'}
@@ -420,14 +420,14 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
             className={`text-[9px] font-bold uppercase px-2 py-1 rounded-lg border transition-all ${
               maEnabled
                 ? 'border-violet-500/40 text-violet-400 bg-violet-500/10'
-                : 'border-white/5 text-slate-600 bg-transparent'
+                : 'border-white/5 text-slate-500 bg-transparent'
             }`}
           >
             MA
           </button>
           {maEnabled && (
             <div className="flex items-center gap-1">
-              <span className="text-[9px] text-slate-600 uppercase font-bold">Days</span>
+              <span className="text-[9px] text-slate-500 uppercase font-bold">Days</span>
               <input
                 type="number"
                 min={2}
@@ -436,7 +436,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
                 onChange={e => setMaDaysInput(e.target.value)}
                 onBlur={commitMaDays}
                 onKeyDown={e => { if (e.key === 'Enter') commitMaDays() }}
-                className="w-14 px-2 py-1 bg-[#0f1117] border border-[#2a2e42] rounded-lg text-slate-200 text-[11px] text-center focus:outline-none focus:border-indigo-500/50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                className="w-14 px-2 py-1 bg-bg border border-border-dim rounded-lg text-slate-200 text-[11px] text-center focus:outline-none focus:border-indigo-500/50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               />
             </div>
           )}
@@ -458,7 +458,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
           {fetchState.error}
         </div>
       ) : enrichedData.length === 0 ? (
-        <div className="h-80 flex items-center justify-center text-slate-700 text-[10px] font-black uppercase tracking-[0.3em]">
+        <div className="h-80 flex items-center justify-center text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">
           No price data available
         </div>
       ) : (

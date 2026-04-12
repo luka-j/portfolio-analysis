@@ -29,7 +29,7 @@ export default function WeightsModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="w-full max-w-sm mx-4 bg-[#13151f]/95 backdrop-blur-xl border border-white/8 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-sm mx-4 bg-panel/95 backdrop-blur-xl border border-white/8 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
           <div>
@@ -89,14 +89,14 @@ export default function WeightsModal({
                             step={0.1}
                             value={row.weight}
                             onChange={e => onWeightChange(idx, e.target.value)}
-                            className="w-20 px-3 py-1.5 pr-6 bg-[#1a1d2e] border border-[#2a2e42]/60 rounded-xl text-sm text-slate-200 text-right focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            className="w-20 px-3 py-1.5 pr-6 bg-surface border border-border-dim/60 rounded-xl text-sm text-slate-200 text-right focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                           />
                           <div className="absolute right-1.5 flex flex-col">
                             <button
                               type="button"
                               tabIndex={-1}
                               onClick={() => onWeightStep(idx, 0.1)}
-                              className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                              className="flex items-center justify-center w-4 h-3.5 text-slate-500 hover:text-slate-300 transition-colors"
                             >
                               <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 4L4 1L7 4"/></svg>
                             </button>
@@ -104,19 +104,19 @@ export default function WeightsModal({
                               type="button"
                               tabIndex={-1}
                               onClick={() => onWeightStep(idx, -0.1)}
-                              className="flex items-center justify-center w-4 h-3.5 text-slate-600 hover:text-slate-300 transition-colors"
+                              className="flex items-center justify-center w-4 h-3.5 text-slate-500 hover:text-slate-300 transition-colors"
                             >
                               <svg width="8" height="5" viewBox="0 0 8 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 1L4 4L7 1"/></svg>
                             </button>
                           </div>
                         </div>
-                        <span className="text-xs text-slate-600">%</span>
+                        <span className="text-xs text-slate-500">%</span>
                       </div>
                     </td>
                     <td className="pr-4 py-3 text-center">
                       <button
                         onClick={() => onRemove(idx)}
-                        className="text-slate-700 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
+                        className="text-slate-500 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100"
                         aria-label={`Remove ${row.symbol}`}
                       >
                         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -133,7 +133,7 @@ export default function WeightsModal({
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-white/5">
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-slate-500">
             Changes apply to the next freeform message only. Canned prompts always use live data.
           </p>
         </div>
