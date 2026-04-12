@@ -332,9 +332,13 @@ func (h *LLMHandler) renderRiskMetrics(cp *llm.CannedPrompt, req ChatRequest, da
 	if rfr == 0 {
 		rfr = 0.05
 	}
+	acctModel, acctErr := models.ValidateAccountingModel(req.AccountingModel)
+	if acctErr != nil {
+		return "", acctErr
+	}
 	metrics, err := computePortfolioMetrics(
 		h.PortfolioService, data, from, to,
-		req.Currency, models.ParseAccountingModel(req.AccountingModel), rfr, false,
+		req.Currency, acctModel, rfr, false,
 	)
 	if err != nil {
 		return "", fmt.Errorf("computing portfolio metrics: %w", err)
@@ -375,7 +379,10 @@ func (h *LLMHandler) renderBenchmarkAnalysis(cp *llm.CannedPrompt, req ChatReque
 	if rfr == 0 {
 		rfr = 0.05
 	}
-	acctModel := models.ParseAccountingModel(req.AccountingModel)
+	acctModel, acctErr := models.ValidateAccountingModel(req.AccountingModel)
+	if acctErr != nil {
+		return "", acctErr
+	}
 	metrics, err := computePortfolioMetrics(h.PortfolioService, data, from, to, req.Currency, acctModel, rfr, false)
 	if err != nil {
 		return "", fmt.Errorf("computing portfolio metrics: %w", err)

@@ -63,16 +63,19 @@ export interface PositionValue {
   quantity: number;
   native_currency: string;
   yahoo_symbol?: string;
+  prices?: Record<string, number>;
+  cost_bases?: Record<string, number>;
+  values?: Record<string, number>;
   price: number;
   cost_basis: number;
   realized_gl: number;
   value: number;
   commission: number;
-  bond_duration?: number; // bond ETF: effective duration in years
-  name?: string;          // security long name
-  isin?: string;          // ISIN from IB FlexQuery
-  asset_type?: string;    // "Stock" | "ETF" | "Bond ETF" | "Commodity" | "Unknown"
-  price_status?: 'no_data' | 'stale' | 'fetch_failed'; // absent/undefined means ok
+  bond_duration?: number;
+  name?: string;
+  isin?: string;
+  asset_type?: string;
+  price_status?: 'no_data' | 'stale' | 'fetch_failed';
 }
 
 export interface PortfolioValueResponse {
@@ -290,6 +293,17 @@ export async function getPortfolioValue(currency = 'USD', accountingModel = 'his
   return request<PortfolioValueResponse>(`/portfolio/value?${query}`);
 }
 
+// getPortfolioValueMulti requests multiple currencies in a single backend pass:
+// market data is fetched once and FX conversions happen locally in parallel.
+// The primary currency's scalars (price/value/cost_basis) are still populated,
+// while per-currency maps are filled for every requested currency.
+export async function getPortfolioValueMulti(
+  currencies: string[], accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal
+): Promise<PortfolioValueResponse> {
+  const query = `currencies=${currencies.map(encodeURIComponent).join(',')}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
+  return request<PortfolioValueResponse>(`/portfolio/value?${query}`, { signal });
+}
+
 export async function getPortfolioHistory(
   from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal
 ): Promise<PortfolioHistoryResponse> {
@@ -310,10 +324,11 @@ export async function getMarketHistory(
 }
 
 export async function getPortfolioStats(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal
 ): Promise<StatsResponse> {
   return request<StatsResponse>(
-    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`
+    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`,
+    { signal }
   );
 }
 

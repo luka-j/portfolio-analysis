@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"portfolio-analysis/models"
 	"portfolio-analysis/services/cashbucket"
 	"portfolio-analysis/services/fifo"
@@ -21,11 +23,117 @@ type Service struct {
 	MarketProvider       market.Provider
 	FXService            *fx.Service
 	CashBucketExpiryDays int
+
+	// sfDailyValues collapses concurrent GetDailyValuesFor calls for the same
+	// (userHash, from, to, currency, acctModel, cachedOnly) tuple. This matters
+	// because history/stats/returns handlers all derive their output from the
+	// same underlying daily-values computation, and the frontend commonly fires
+	// them in parallel on landing.
+	sfDailyValues singleflight.Group
 }
 
 // NewService creates a new portfolio service.
 func NewService(mp market.Provider, fxSvc *fx.Service, cashBucketExpiryDays int) *Service {
 	return &Service{MarketProvider: mp, FXService: fxSvc, CashBucketExpiryDays: cashBucketExpiryDays}
+}
+
+// fxMemo is a per-request memoization layer on top of FXService. It collapses
+// repeated (fromCurrency, toCurrency[, date]) lookups inside a single request so
+// that we never call the underlying FX provider twice for the same conversion.
+// Rates are computed lazily and stored with a sync.RWMutex so the memo is safe
+// for concurrent use by the parallel holdings loop.
+type fxMemo struct {
+	fx         *fx.Service
+	cachedOnly bool
+
+	mu       sync.RWMutex
+	spot     map[string]float64            // key: "from|to"
+	hist     map[string]map[string]float64 // outer: "from|to", inner: "YYYY-MM-DD"
+}
+
+func newFXMemo(svc *fx.Service, cachedOnly bool) *fxMemo {
+	return &fxMemo{
+		fx:         svc,
+		cachedOnly: cachedOnly,
+		spot:       make(map[string]float64),
+		hist:       make(map[string]map[string]float64),
+	}
+}
+
+// SpotRate returns a cached spot rate, fetching once per (from, to) pair.
+func (m *fxMemo) SpotRate(from, to string) (float64, error) {
+	if from == to || from == "" || to == "" {
+		return 1.0, nil
+	}
+	key := from + "|" + to
+	m.mu.RLock()
+	if r, ok := m.spot[key]; ok {
+		m.mu.RUnlock()
+		return r, nil
+	}
+	m.mu.RUnlock()
+	r, err := m.fx.GetSpotRate(from, to, m.cachedOnly)
+	if err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	m.spot[key] = r
+	m.mu.Unlock()
+	return r, nil
+}
+
+// HistoricalRate returns a cached historical rate, fetching once per (from, to, date).
+func (m *fxMemo) HistoricalRate(from, to string, date time.Time) (float64, error) {
+	if from == to || from == "" || to == "" {
+		return 1.0, nil
+	}
+	key := from + "|" + to
+	ds := date.Format("2006-01-02")
+	m.mu.RLock()
+	if inner, ok := m.hist[key]; ok {
+		if r, ok2 := inner[ds]; ok2 {
+			m.mu.RUnlock()
+			return r, nil
+		}
+	}
+	m.mu.RUnlock()
+	r, err := m.fx.GetRate(from, to, date, m.cachedOnly)
+	if err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	inner := m.hist[key]
+	if inner == nil {
+		inner = make(map[string]float64)
+		m.hist[key] = inner
+	}
+	inner[ds] = r
+	m.mu.Unlock()
+	return r, nil
+}
+
+// ConvertSpot converts an amount at the memoized spot rate.
+func (m *fxMemo) ConvertSpot(amount float64, from, to string) (float64, error) {
+	if amount == 0 || from == to {
+		return amount, nil
+	}
+	r, err := m.SpotRate(from, to)
+	if err != nil {
+		return 0, err
+	}
+	return amount * r, nil
+}
+
+// Convert converts an amount at the memoized historical rate.
+func (m *fxMemo) Convert(amount float64, from, to string, date time.Time) (float64, error) {
+	if amount == 0 || from == to {
+		return amount, nil
+	}
+	r, err := m.HistoricalRate(from, to, date)
+	if err != nil {
+		return 0, err
+	}
+	return amount * r, nil
 }
 
 // isFXTrade delegates to the centralized check in models.
@@ -102,33 +210,107 @@ func (s *Service) getYahooSymbolMap(data *models.FlexQueryData) map[string]strin
 }
 
 // GetCurrentValue returns the portfolio value in the requested display currency.
+// Equivalent to GetCurrentValueMulti with a single-currency slice; retained for
+// callers that only need one currency projection.
 func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioValueResponse, error) {
+	results, err := s.GetCurrentValueMulti(data, []string{currency}, acctModel, cachedOnly)
+	if err != nil {
+		return nil, err
+	}
+	return results[currency], nil
+}
+
+// GetCurrentValueMulti computes the portfolio value in every requested display currency
+// in a single pass. Price data is fetched once per symbol (in parallel, deduplicated via
+// the market provider's singleflight) and projected to all target currencies locally,
+// so wall-clock cost is O(unique_symbols / limiter_rate) rather than O(currencies × symbols).
+// The first currency in the slice is the "primary" one, used for scalar Price/Value fields.
+func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []string, acctModel models.AccountingModel, cachedOnly bool) (map[string]*models.PortfolioValueResponse, error) {
+	if len(currencies) == 0 {
+		return nil, fmt.Errorf("GetCurrentValueMulti: at least one currency required")
+	}
 	holdings := s.GetCurrentHoldings(data)
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-
-	costBasisMap, realizedGLMap, commissionsMap := s.computeCurrentValueMaps(data, currency, acctModel, cachedOnly)
-
 	yMap := s.getYahooSymbolMap(data)
 
-	var totalValue float64
-	positions := make([]models.PositionValue, 0, len(holdings))
+	isOriginalMode := acctModel == models.AccountingModelOriginal
+
+	// ── Phase 1: Fetch all latest prices in parallel ───────────────────────────
+	// Sequential GetLatestPrice calls at a 5 req/s limiter floor scale N/5 seconds
+	// for N symbols; parallelising lets the limiter run at full capacity while also
+	// interleaving HTTP + DB I/O. Singleflight in the Yahoo provider dedupes any
+	// repeated symbol fetches issued concurrently by other handlers.
+	type priceResult struct {
+		price float64
+		err   error
+	}
+	priceByKey := make(map[string]priceResult, len(holdings))
+	var priceMu sync.Mutex
+	var wg sync.WaitGroup
 	for _, h := range holdings {
 		k := posKey(h.Symbol, h.ListingExchange)
 		querySymbol := h.Symbol
 		if ys, ok := yMap[k]; ok && ys != "" {
 			querySymbol = ys
 		}
+		wg.Add(1)
+		go func(k, sym string) {
+			defer wg.Done()
+			p, err := s.MarketProvider.GetLatestPrice(sym, cachedOnly)
+			priceMu.Lock()
+			priceByKey[k] = priceResult{price: p, err: err}
+			priceMu.Unlock()
+		}(k, querySymbol)
+	}
+	wg.Wait()
 
-		latestPrice, err := s.MarketProvider.GetLatestPrice(querySymbol, cachedOnly)
-		if err != nil {
-			log.Printf("Warning: fetching latest price for %s (mapped to %s): %v", h.Symbol, querySymbol, err)
+	// ── Phase 2: Compute cost-basis/realized-GL/commissions per currency ───────
+	// These also go through the FX service; with the memo they collapse to one
+	// lookup per unique (from, to[, date]) tuple for the whole request.
+	type perCurrencyMaps struct {
+		costBasis  map[string]float64
+		realizedGL map[string]float64
+		commission map[string]float64
+	}
+	ccyMaps := make(map[string]perCurrencyMaps, len(currencies))
+	for _, cur := range currencies {
+		memo := newFXMemo(s.FXService, cachedOnly)
+		cb, gl, comm := s.computeCurrentValueMapsMemo(data, cur, acctModel, memo)
+		ccyMaps[cur] = perCurrencyMaps{costBasis: cb, realizedGL: gl, commission: comm}
+	}
+
+	// Dedicated memo for the price→value conversions below, shared across currencies
+	// via a map so that each currency reuses its own memoized spot rates.
+	valueMemo := make(map[string]*fxMemo, len(currencies))
+	for _, cur := range currencies {
+		valueMemo[cur] = newFXMemo(s.FXService, cachedOnly)
+	}
+
+	// ── Phase 3: Build per-currency PositionValue slices ──────────────────────
+	results := make(map[string]*models.PortfolioValueResponse, len(currencies))
+	totalByCcy := make(map[string]float64, len(currencies))
+	positionsByCcy := make(map[string][]models.PositionValue, len(currencies))
+	for _, cur := range currencies {
+		positionsByCcy[cur] = make([]models.PositionValue, 0, len(holdings))
+	}
+
+	for _, h := range holdings {
+		k := posKey(h.Symbol, h.ListingExchange)
+		querySymbol := h.Symbol
+		if ys, ok := yMap[k]; ok && ys != "" {
+			querySymbol = ys
+		}
+		pr := priceByKey[k]
+		latestPrice := pr.price
+		fetchErr := pr.err
+		if fetchErr != nil {
+			log.Printf("Warning: fetching latest price for %s (mapped to %s): %v", h.Symbol, querySymbol, fetchErr)
 		}
 
-		// Determine price status on a best-effort basis.
 		var priceStatus string
 		if latestPrice == 0 {
-			if err != nil {
+			if fetchErr != nil {
 				priceStatus = "fetch_failed"
 			} else if checker, ok := s.MarketProvider.(market.PriceStatusChecker); ok && checker.HasCachedData(querySymbol) {
 				priceStatus = "stale"
@@ -138,70 +320,116 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 		}
 		nativeValue := h.Quantity * latestPrice
 
-		var convertedPrice, convertedValue float64
-		if currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal {
-			convertedPrice = latestPrice
-			convertedValue = nativeValue
-		} else {
-			var fxErr error
-			convertedPrice, fxErr = s.FXService.ConvertSpot(latestPrice, h.Currency, currency, cachedOnly)
-			if fxErr != nil {
-				return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, currency, fxErr)
+		posPrices := make(map[string]float64, len(currencies))
+		posCostBases := make(map[string]float64, len(currencies))
+		posValues := make(map[string]float64, len(currencies))
+
+		for _, cur := range currencies {
+			var convertedPrice, convertedValue float64
+			if isOriginalMode || acctModel == models.AccountingModelOriginal {
+				convertedPrice = latestPrice
+				convertedValue = nativeValue
+			} else {
+				var fxErr error
+				convertedPrice, fxErr = valueMemo[cur].ConvertSpot(latestPrice, h.Currency, cur)
+				if fxErr != nil {
+					return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, cur, fxErr)
+				}
+				convertedValue, fxErr = valueMemo[cur].ConvertSpot(nativeValue, h.Currency, cur)
+				if fxErr != nil {
+					return nil, fmt.Errorf("converting value %s to %s: %w", h.Currency, cur, fxErr)
+				}
 			}
-			convertedValue, fxErr = s.FXService.ConvertSpot(nativeValue, h.Currency, currency, cachedOnly)
-			if fxErr != nil {
-				return nil, fmt.Errorf("converting value %s to %s: %w", h.Currency, currency, fxErr)
+			totalByCcy[cur] += convertedValue
+			posPrices[cur] = convertedPrice
+			posValues[cur] = convertedValue
+			posCostBases[cur] = ccyMaps[cur].costBasis[k]
+		}
+
+		for _, cur := range currencies {
+			maps := ccyMaps[cur]
+			positionsByCcy[cur] = append(positionsByCcy[cur], models.PositionValue{
+				Symbol:          h.Symbol,
+				ListingExchange: h.ListingExchange,
+				YahooSymbol:     yMap[k],
+				Quantity:        h.Quantity,
+				NativeCurrency:  h.Currency,
+				Prices:          posPrices,
+				CostBases:       posCostBases,
+				Values:          posValues,
+				Price:           posPrices[cur],
+				CostBasis:       maps.costBasis[k],
+				RealizedGL:      maps.realizedGL[k],
+				Value:           posValues[cur],
+				Commission:      maps.commission[k],
+				PriceStatus:     priceStatus,
+			})
+		}
+	}
+
+	// ── Phase 4: Pending cash per currency ─────────────────────────────────────
+	pendingCashByCcy := make(map[string]float64, len(currencies))
+	hasPendingCash := false
+	for _, cur := range currencies {
+		memo := newFXMemo(s.FXService, cachedOnly)
+		pendingCash, err := s.computePendingCashMemo(data, cur, acctModel, memo, today)
+		if err != nil {
+			log.Printf("Warning: computing pending cash for %s: %v", cur, err)
+			pendingCash = 0
+		}
+		pendingCashByCcy[cur] = pendingCash
+		if pendingCash > 0 {
+			hasPendingCash = true
+		}
+	}
+
+	if hasPendingCash {
+		posPrices := make(map[string]float64, len(currencies))
+		posCostBases := make(map[string]float64, len(currencies))
+		posValues := make(map[string]float64, len(currencies))
+		for _, cur := range currencies {
+			posPrices[cur] = 1
+			posCostBases[cur] = 0
+			posValues[cur] = pendingCashByCcy[cur]
+			totalByCcy[cur] += pendingCashByCcy[cur]
+		}
+		for _, cur := range currencies {
+			if pendingCashByCcy[cur] > 0 {
+				positionsByCcy[cur] = append(positionsByCcy[cur], models.PositionValue{
+					Symbol:         "PENDING_CASH",
+					NativeCurrency: cur,
+					Prices:         posPrices,
+					CostBases:      posCostBases,
+					Values:         posValues,
+					Price:          1,
+					Value:          pendingCashByCcy[cur],
+					Quantity:       pendingCashByCcy[cur],
+				})
 			}
 		}
-		totalValue += convertedValue
-
-		positions = append(positions, models.PositionValue{
-			Symbol:          h.Symbol,
-			ListingExchange: h.ListingExchange,
-			YahooSymbol:     yMap[k],
-			Quantity:        h.Quantity,
-			NativeCurrency:  h.Currency,
-			Prices:          map[string]float64{currency: convertedPrice},
-			CostBases:       map[string]float64{currency: costBasisMap[k]},
-			Values:          map[string]float64{currency: convertedValue},
-			Price:           convertedPrice,
-			CostBasis:       costBasisMap[k],
-			RealizedGL:      realizedGLMap[k],
-			Value:           convertedValue,
-			Commission:      commissionsMap[k],
-			PriceStatus:     priceStatus,
-		})
 	}
-
-	// Compute pending cash from unsettled sale buckets.
-	pendingCash, err := s.computePendingCash(data, currency, acctModel, cachedOnly, today)
-	if err != nil {
-		log.Printf("Warning: computing pending cash: %v", err)
-	} else if pendingCash > 0 {
-		totalValue += pendingCash
-		positions = append(positions, models.PositionValue{
-			Symbol:         "PENDING_CASH",
-			NativeCurrency: currency,
-			Prices:         map[string]float64{currency: 1},
-			CostBases:      map[string]float64{currency: 0},
-			Values:         map[string]float64{currency: pendingCash},
-			Price:          1,
-			Value:          pendingCash,
-			Quantity:       pendingCash,
-		})
+	
+	for _, cur := range currencies {
+		results[cur] = &models.PortfolioValueResponse{
+			Value:       totalByCcy[cur],
+			Currency:    cur,
+			Positions:   positionsByCcy[cur],
+			PendingCash: pendingCashByCcy[cur],
+		}
 	}
-
-	return &models.PortfolioValueResponse{
-		Value:     totalValue,
-		Currency:  currency,
-		Positions: positions,
-		PendingCash: pendingCash,
-	}, nil
+	return results, nil
 }
 
-// computeCurrentValueMaps returns cost-basis, realized GL, and commissions maps in
-// a single pass over trades, calling fifo.Match once per position instead of twice.
+// computeCurrentValueMaps is a backwards-compatible wrapper around
+// computeCurrentValueMapsMemo that allocates a fresh FX memo for the call.
 func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) (costBasisMap, realizedGLMap, commissionsMap map[string]float64) {
+	return s.computeCurrentValueMapsMemo(data, currency, acctModel, newFXMemo(s.FXService, cachedOnly))
+}
+
+// computeCurrentValueMapsMemo returns cost-basis, realized GL, and commissions maps in
+// a single pass over trades, calling fifo.Match once per position instead of twice.
+// The FX memo collapses repeated currency lookups across all trades in the request.
+func (s *Service) computeCurrentValueMapsMemo(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, memo *fxMemo) (costBasisMap, realizedGLMap, commissionsMap map[string]float64) {
 	costBasisMap = make(map[string]float64)
 	realizedGLMap = make(map[string]float64)
 	commissionsMap = make(map[string]float64)
@@ -239,9 +467,9 @@ func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency s
 				if isOriginal {
 					p = l.Price
 				} else if acctModel == models.AccountingModelSpot {
-					p, _ = s.FXService.ConvertSpot(l.Price, l.Curr, currency, cachedOnly)
+					p, _ = memo.ConvertSpot(l.Price, l.Curr, currency)
 				} else {
-					p, _ = s.FXService.Convert(l.Price, l.Curr, currency, l.Date, cachedOnly)
+					p, _ = memo.Convert(l.Price, l.Curr, currency, l.Date)
 				}
 				totalCost += l.Qty * p
 				totalQty += l.Qty
@@ -249,7 +477,7 @@ func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency s
 			if totalQty > 0 {
 				costBasisMap[key] = totalCost / totalQty
 			} else {
-				costBasisMap[key], _ = s.FXService.ConvertSpot(0, nativeCurrency, currency, cachedOnly)
+				costBasisMap[key], _ = memo.ConvertSpot(0, nativeCurrency, currency)
 			}
 		}
 
@@ -260,12 +488,12 @@ func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency s
 			if isOriginal {
 				profit = m.Qty * (m.SellPrice - m.CostPrice)
 			} else if acctModel == models.AccountingModelSpot {
-				sp, _ := s.FXService.ConvertSpot(m.SellPrice, m.Curr, currency, cachedOnly)
-				cp, _ := s.FXService.ConvertSpot(m.CostPrice, m.Curr, currency, cachedOnly)
+				sp, _ := memo.ConvertSpot(m.SellPrice, m.Curr, currency)
+				cp, _ := memo.ConvertSpot(m.CostPrice, m.Curr, currency)
 				profit = m.Qty * (sp - cp)
 			} else {
-				sp, _ := s.FXService.Convert(m.SellPrice, m.Curr, currency, m.SellDate, cachedOnly)
-				cp, _ := s.FXService.Convert(m.CostPrice, m.Curr, currency, m.CostDate, cachedOnly)
+				sp, _ := memo.Convert(m.SellPrice, m.Curr, currency, m.SellDate)
+				cp, _ := memo.Convert(m.CostPrice, m.Curr, currency, m.CostDate)
 				profit = m.Qty * (sp - cp)
 			}
 			gl += profit
@@ -273,10 +501,10 @@ func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency s
 				if isOriginal {
 					gl += m.Comm
 				} else if acctModel == models.AccountingModelSpot {
-					c, _ := s.FXService.ConvertSpot(m.Comm, m.Curr, currency, cachedOnly)
+					c, _ := memo.ConvertSpot(m.Comm, m.Curr, currency)
 					gl += c
 				} else {
-					c, _ := s.FXService.Convert(m.Comm, m.Curr, currency, m.SellDate, cachedOnly)
+					c, _ := memo.Convert(m.Comm, m.Curr, currency, m.SellDate)
 					gl += c
 				}
 			}
@@ -292,9 +520,9 @@ func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency s
 			if isOriginal {
 				comm = t.Commission
 			} else if acctModel == models.AccountingModelSpot {
-				comm, _ = s.FXService.ConvertSpot(t.Commission, t.Currency, currency, cachedOnly)
+				comm, _ = memo.ConvertSpot(t.Commission, t.Currency, currency)
 			} else {
-				comm, _ = s.FXService.Convert(t.Commission, t.Currency, currency, t.DateTime, cachedOnly)
+				comm, _ = memo.Convert(t.Commission, t.Currency, currency, t.DateTime)
 			}
 			commissionsMap[key] += comm
 		}
@@ -308,7 +536,7 @@ func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency s
 		if isOriginal {
 			costBasisMap[op.Symbol] = op.CostBasisPerShare
 		} else if acctModel == models.AccountingModelSpot {
-			costBasisMap[op.Symbol], _ = s.FXService.ConvertSpot(op.CostBasisPerShare, op.Currency, currency, cachedOnly)
+			costBasisMap[op.Symbol], _ = memo.ConvertSpot(op.CostBasisPerShare, op.Currency, currency)
 		}
 	}
 
@@ -385,10 +613,45 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 
 
 // GetDailyValues returns the portfolio value for each day in [from, to].
-// Prices are loaded one symbol at a time so each symbol's slice is GC-eligible
-// before the next one loads, keeping peak memory proportional to a single
-// symbol's history rather than all symbols' histories combined.
+// Concurrent callers with the same (userHash, from, to, currency, acctModel, cachedOnly)
+// tuple share one underlying computation via singleflight — this is the dominant
+// wall-clock win when the landing page fires history + stats + returns in parallel
+// for the same range. Results are cloned so downstream mutation is safe.
 func (s *Service) GetDailyValues(
+	data *models.FlexQueryData,
+	from, to time.Time,
+	currency string,
+	acctModel models.AccountingModel,
+	cachedOnly bool,
+) (*models.PortfolioHistoryResponse, error) {
+	key := fmt.Sprintf("dv|%s|%s|%s|%s|%s|%v",
+		data.UserHash,
+		from.Format("2006-01-02"),
+		to.Format("2006-01-02"),
+		currency,
+		string(acctModel),
+		cachedOnly,
+	)
+	v, err, _ := s.sfDailyValues.Do(key, func() (interface{}, error) {
+		return s.getDailyValuesUncached(data, from, to, currency, acctModel, cachedOnly)
+	})
+	if err != nil {
+		return nil, err
+	}
+	orig := v.(*models.PortfolioHistoryResponse)
+	dataCopy := make([]models.DailyValue, len(orig.Data))
+	copy(dataCopy, orig.Data)
+	return &models.PortfolioHistoryResponse{
+		Currency:        orig.Currency,
+		AccountingModel: orig.AccountingModel,
+		Data:            dataCopy,
+	}, nil
+}
+
+// getDailyValuesUncached performs the actual daily-value computation; always
+// called through GetDailyValues so the singleflight wrapper can dedup in-flight
+// requests across concurrent handlers.
+func (s *Service) getDailyValuesUncached(
 	data *models.FlexQueryData,
 	from, to time.Time,
 	currency string,
@@ -657,7 +920,32 @@ func fxRateAt(prices []models.PricePoint, d time.Time) float64 {
 
 // GetCashFlows returns external cash flows for IRR/TWR calculation, converted to the target currency.
 // It applies cash-bucket logic to prevent cross-broker reinvestments from appearing as outflows+inflows.
+// Concurrent callers with the same (userHash, currency, acctModel, cachedOnly, asOf)
+// tuple share one underlying computation via singleflight. Results are cloned per
+// caller for safety.
 func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) ([]models.CashFlow, error) {
+	key := fmt.Sprintf("cf|%s|%s|%s|%v|%s",
+		data.UserHash,
+		currency,
+		string(acctModel),
+		cachedOnly,
+		asOf.Format("2006-01-02"),
+	)
+	v, err, _ := s.sfDailyValues.Do(key, func() (interface{}, error) {
+		return s.getCashFlowsUncached(data, currency, acctModel, cachedOnly, asOf)
+	})
+	if err != nil {
+		return nil, err
+	}
+	orig := v.([]models.CashFlow)
+	out := make([]models.CashFlow, len(orig))
+	copy(out, orig)
+	return out, nil
+}
+
+// getCashFlowsUncached performs the actual cash-flow computation; always invoked
+// through GetCashFlows so the singleflight wrapper can dedup concurrent calls.
+func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) ([]models.CashFlow, error) {
 	var rawTradeFlows []models.Trade
 	for _, t := range data.Trades {
 		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
@@ -910,6 +1198,12 @@ func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Tim
 
 // computePendingCash returns the current aggregate value of all active (non-expired) cash buckets.
 func (s *Service) computePendingCash(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) (float64, error) {
+	return s.computePendingCashMemo(data, currency, acctModel, newFXMemo(s.FXService, cachedOnly), asOf)
+}
+
+// computePendingCashMemo is the memo-aware variant so that callers computing
+// multi-currency values can share one FX memo across phases.
+func (s *Service) computePendingCashMemo(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, memo *fxMemo, asOf time.Time) (float64, error) {
 	if s.CashBucketExpiryDays == 0 {
 		return 0, nil
 	}
@@ -927,9 +1221,9 @@ func (s *Service) computePendingCash(data *models.FlexQueryData, currency string
 			return amount, nil
 		}
 		if acctModel == models.AccountingModelSpot {
-			return s.FXService.ConvertSpot(amount, from, currency, cachedOnly)
+			return memo.ConvertSpot(amount, from, currency)
 		}
-		return s.FXService.Convert(amount, from, currency, date, cachedOnly)
+		return memo.Convert(amount, from, currency, date)
 	}
 
 	result, err := cashbucket.Process(trades, nil, s.CashBucketExpiryDays, asOf, convertFn)

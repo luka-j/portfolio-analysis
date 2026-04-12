@@ -67,7 +67,10 @@ func (h *MarketHandler) GetHistory(c *gin.Context) {
 	// Spot accounting uses a constant multiplier which cancels out in % return charts,
 	// so conversion is only meaningful for the historical model.
 	currency := c.Query("currency")
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	if currency != "" && (acctModel == models.AccountingModelHistorical || acctModel == "") && h.CurrencyGetter != nil {
 		nativeCcy, err := h.CurrencyGetter.GetCurrency(symbol)
 		if err != nil {
@@ -157,7 +160,10 @@ func (h *MarketHandler) GetSecurityChart(c *gin.Context) {
 	// Apply FX conversion when a real display currency is requested.
 	// "Original" (or absent) means keep native prices.
 	currency := c.Query("currency")
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	if currency != "" && currency != "Original" && h.CurrencyGetter != nil {
 		nativeCcy, ccyErr := h.CurrencyGetter.GetCurrency(effectiveSym)
 		if ccyErr != nil {

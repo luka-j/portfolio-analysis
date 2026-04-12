@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 
 	"portfolio-analysis/models"
@@ -49,9 +50,17 @@ type PriceStatusChecker interface {
 type YahooFinanceService struct {
 	DB             *gorm.DB
 	HTTPClient     *http.Client
-	limiter        *rate.Limiter // 3 requests/second for chart API
+	limiter        *rate.Limiter // 5 requests/second for chart API
 	summaryLimiter *rate.Limiter // 1 request/second for quoteSummary API (more restricted)
 	crumbMgr       *CrumbManager
+
+	// sfHistory, sfCurrent, sfQuoteType, sfCurrency collapse concurrent calls for
+	// the same underlying request so that N parallel callers issue only one upstream
+	// Yahoo fetch and share the result.
+	sfHistory   singleflight.Group
+	sfCurrent   singleflight.Group
+	sfQuoteType singleflight.Group
+	sfCurrency  singleflight.Group
 }
 
 // NewYahooFinanceService creates a new Yahoo Finance service backed by DB caching.
@@ -65,7 +74,7 @@ func NewYahooFinanceService(db *gorm.DB) *YahooFinanceService {
 	return &YahooFinanceService{
 		DB:             db,
 		HTTPClient:     client,
-		limiter:        rate.NewLimiter(rate.Limit(3), 5), // 3 req/s, burst of 5
+		limiter:        rate.NewLimiter(rate.Limit(5), 8), // 5 req/s, burst of 8
 		summaryLimiter: rate.NewLimiter(rate.Limit(1), 2), // 1 req/s, burst of 2
 		crumbMgr:       newCrumbManager(client),
 	}
@@ -108,6 +117,8 @@ func (s *YahooFinanceService) HasCachedData(symbol string) bool {
 }
 
 // GetHistory returns daily price data for the symbol in [from, to].
+// Concurrent callers for the same (symbol, from, to) are collapsed via singleflight
+// so that only one upstream Yahoo fetch is issued and all callers share the result.
 func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
 	// Truncate dates to midnight for consistency.
 	fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
@@ -116,6 +127,27 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 	if cachedOnly {
 		return s.loadCache(symbol, fromDate, toDate)
 	}
+
+	key := fmt.Sprintf("%s|%d|%d", symbol, fromDate.Unix(), toDate.Unix())
+	v, err, _ := s.sfHistory.Do(key, func() (interface{}, error) {
+		points, fetchErr := s.getHistoryUncached(symbol, fromDate, toDate)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		return points, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	return v.([]models.PricePoint), nil
+}
+
+// getHistoryUncached is the non-deduplicated body of GetHistory. It is only
+// invoked via singleflight; callers must go through GetHistory.
+func (s *YahooFinanceService) getHistoryUncached(symbol string, fromDate, toDate time.Time) ([]models.PricePoint, error) {
 
 	firstDate, lastDate, hasCache, err := s.loadCacheBounds(symbol, fromDate, toDate)
 	if err != nil {
@@ -232,7 +264,27 @@ type yahooChartResponse struct {
 // GetQuoteType returns the Yahoo Finance asset class and display name for a symbol.
 // The asset type is mapped to our internal type string ("Stock", "ETF", "Commodity", or "" if unknown).
 // The name is taken from meta.longName and may be empty. Uses a minimal 1-day request — no premium quota.
+// Concurrent calls for the same symbol are deduplicated via singleflight.
 func (s *YahooFinanceService) GetQuoteType(symbol string) (string, string, error) {
+	type qtResult struct {
+		assetType string
+		name      string
+	}
+	v, err, _ := s.sfQuoteType.Do(symbol, func() (interface{}, error) {
+		at, name, err := s.getQuoteTypeUncached(symbol)
+		if err != nil {
+			return nil, err
+		}
+		return qtResult{at, name}, nil
+	})
+	if err != nil {
+		return "", "", err
+	}
+	r := v.(qtResult)
+	return r.assetType, r.name, nil
+}
+
+func (s *YahooFinanceService) getQuoteTypeUncached(symbol string) (string, string, error) {
 	if err := s.limiter.Wait(context.Background()); err != nil {
 		return "", "", fmt.Errorf("rate limiter: %w", err)
 	}
@@ -294,6 +346,7 @@ func yahooQuoteTypeToAssetType(qt string) string {
 // GetCurrency returns the native trading currency for a symbol (e.g. "USD", "EUR").
 // It checks asset_fundamentals first; on a miss it fetches from Yahoo and persists the result.
 // Returns an empty string when the symbol is not found on Yahoo.
+// Concurrent calls for the same symbol are deduplicated via singleflight.
 func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
 	symbol = strings.ToUpper(strings.TrimSpace(symbol))
 	// DB cache check — skip when DB is nil (e.g. in unit tests).
@@ -304,6 +357,20 @@ func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
 		}
 	}
 
+	v, err, _ := s.sfCurrency.Do(symbol, func() (interface{}, error) {
+		cur, fetchErr := s.getCurrencyFromYahoo(symbol)
+		if fetchErr != nil {
+			return "", fetchErr
+		}
+		return cur, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return v.(string), nil
+}
+
+func (s *YahooFinanceService) getCurrencyFromYahoo(symbol string) (string, error) {
 	if err := s.limiter.Wait(context.Background()); err != nil {
 		return "", fmt.Errorf("rate limiter: %w", err)
 	}
@@ -363,7 +430,8 @@ func (s *YahooFinanceService) GetCurrency(symbol string) (string, error) {
 
 // GetCurrentPrice returns the current market price for symbol.
 // It checks the database first; if cachedOnly is false and stored price is older than 5 minutes
-// it fetches fresh data from Yahoo.
+// it fetches fresh data from Yahoo. Concurrent fresh-fetches for the same symbol are
+// collapsed via singleflight so that N parallel callers issue only one Yahoo request.
 func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
 	const maxAge = 5 * time.Minute
 
@@ -388,6 +456,33 @@ func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (f
 		return 0, fmt.Errorf("no cached price for %s", symbol)
 	}
 
+	v, err, _ := s.sfCurrent.Do(symbol, func() (interface{}, error) {
+		// Re-check DB inside the flight in case a prior duplicate in-flight
+		// call already populated it while we were queued.
+		if s.DB != nil {
+			var cp models.CurrentPrice
+			if dbErr := s.DB.Where("symbol = ?", symbol).First(&cp).Error; dbErr == nil {
+				if time.Since(cp.FetchedAt) < maxAge {
+					if cp.Price == -1 {
+						return float64(0), fmt.Errorf("no current price fetched for %s (negative cache)", symbol)
+					}
+					return cp.Price, nil
+				}
+			}
+		}
+		price, fetchErr := s.fetchCurrentPriceFromYahoo(symbol)
+		if fetchErr != nil {
+			return float64(0), fetchErr
+		}
+		return price, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return v.(float64), nil
+}
+
+func (s *YahooFinanceService) fetchCurrentPriceFromYahoo(symbol string) (float64, error) {
 	if err := s.limiter.Wait(context.Background()); err != nil {
 		return 0, fmt.Errorf("rate limiter: %w", err)
 	}

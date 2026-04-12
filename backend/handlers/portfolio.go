@@ -179,40 +179,23 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 	}
 
 	currenciesStr := c.DefaultQuery("currencies", "USD")
-	currencies := splitCurrencies(currenciesStr)
+	currencies, ok := parseCurrencies(c, currenciesStr)
+	if !ok {
+		return
+	}
 	primaryCurrency := currencies[0]
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	cachedOnly := parseCachedOnly(c)
 
-	result, err := h.PortfolioService.GetCurrentValue(data, primaryCurrency, acctModel, cachedOnly)
+	resultsByCur, err := h.PortfolioService.GetCurrentValueMulti(data, currencies, acctModel, cachedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	// For additional currencies, compute and merge into the per-currency maps.
-	for _, cur := range currencies[1:] {
-		extra, err := h.PortfolioService.GetCurrentValue(data, cur, acctModel, cachedOnly)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		// Index extra positions by (symbol, exchange) to match with primary results.
-		type posKey struct{ symbol, exchange string }
-		extraByKey := make(map[posKey]*models.PositionValue, len(extra.Positions))
-		for j := range extra.Positions {
-			p := &extra.Positions[j]
-			extraByKey[posKey{p.Symbol, p.ListingExchange}] = p
-		}
-		for i := range result.Positions {
-			p := &result.Positions[i]
-			if ep, ok := extraByKey[posKey{p.Symbol, p.ListingExchange}]; ok {
-				p.Prices[cur] = ep.Price
-				p.CostBases[cur] = ep.CostBasis
-				p.Values[cur] = ep.Value
-			}
-		}
-	}
+	result := resultsByCur[primaryCurrency]
 
 	// Enrich bond ETF positions with effective duration from asset_fundamentals.
 	for i := range result.Positions {
@@ -270,7 +253,10 @@ func (h *PortfolioHandler) GetHistory(c *gin.Context) {
 		return
 	}
 
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	cachedOnly := parseCachedOnly(c)
 	result, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
 	if err != nil {
@@ -373,7 +359,10 @@ func (h *PortfolioHandler) GetReturns(c *gin.Context) {
 		return
 	}
 
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	cachedOnly := parseCachedOnly(c)
 	returnType := c.DefaultQuery("type", "twr")
 
@@ -421,7 +410,10 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 	}
 
 	currency := c.DefaultQuery("currency", "USD")
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 
 	// Resolve positions to get yahoo symbols and native currencies.
 	val, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel, false) // price history usually wants fresh data

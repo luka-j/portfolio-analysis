@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -63,6 +64,10 @@ type FlexQueryData struct {
 	Trades           []Trade           `json:"trades"`
 	OpenPositions    []OpenPosition    `json:"open_positions"`
 	CashTransactions []CashTransaction `json:"cash_transactions"`
+	// UserHash is the scoped owner of this data set, set by Repository.LoadSaved.
+	// Used by the portfolio service for request-level singleflight dedup so that
+	// concurrent handlers for the same user share a single computation.
+	UserHash string `json:"-"`
 }
 
 // CashFlow is used for MWR/IRR calculation.
@@ -105,6 +110,8 @@ const (
 )
 
 // ParseAccountingModel parses a string into an AccountingModel, defaulting to historical.
+// An empty string is treated as "historical". Use ValidateAccountingModel when an
+// explicit unknown value should be rejected rather than silently defaulted.
 func ParseAccountingModel(s string) AccountingModel {
 	switch s {
 	case "spot":
@@ -113,6 +120,22 @@ func ParseAccountingModel(s string) AccountingModel {
 		return AccountingModelOriginal
 	default:
 		return AccountingModelHistorical
+	}
+}
+
+// ValidateAccountingModel parses s and returns an error for any value that is
+// not one of the three known models. An empty string is accepted and treated as
+// "historical" so that optional fields in JSON bodies are handled cleanly.
+func ValidateAccountingModel(s string) (AccountingModel, error) {
+	switch s {
+	case "", "historical":
+		return AccountingModelHistorical, nil
+	case "spot":
+		return AccountingModelSpot, nil
+	case "original":
+		return AccountingModelOriginal, nil
+	default:
+		return AccountingModelHistorical, fmt.Errorf("unknown accounting_model %q: must be one of historical, spot, original", s)
 	}
 }
 

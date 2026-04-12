@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -38,24 +39,58 @@ func parseDateRange(c *gin.Context) (time.Time, time.Time, error) {
 	return from, to, nil
 }
 
-// splitCurrencies parses a comma-separated currencies string into a non-empty slice.
-// Returns ["USD"] if the input is empty.
-func splitCurrencies(s string) []string {
+// parseCurrencies parses a comma-separated currencies query parameter and
+// validates each token. Returns a 400 and false when:
+//   - all tokens are empty (defaults to ["USD"] are intentional via the caller)
+//   - any token is the reserved sentinel "Original" (that is a mode flag, not a currency)
+//   - any token contains non-alpha characters or is not 2–10 characters long
+//   - the same code appears more than once
+func parseCurrencies(c *gin.Context, s string) ([]string, bool) {
 	var out []string
-	for _, c := range strings.Split(s, ",") {
-		if c = strings.TrimSpace(c); c != "" {
-			out = append(out, c)
+	seen := make(map[string]bool)
+	for _, tok := range strings.Split(s, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
 		}
+		upper := strings.ToUpper(tok)
+		if upper == "ORIGINAL" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": `"Original" is an accounting mode, not a currency — use accounting_model=original instead`})
+			return nil, false
+		}
+		if len(tok) < 2 || len(tok) > 10 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid currency code %q: must be 2–10 characters", tok)})
+			return nil, false
+		}
+		for _, r := range tok {
+			if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid currency code %q: only letters allowed", tok)})
+				return nil, false
+			}
+		}
+		if seen[upper] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("duplicate currency code %q", tok)})
+			return nil, false
+		}
+		seen[upper] = true
+		out = append(out, tok)
 	}
 	if len(out) == 0 {
-		return []string{"USD"}
+		return []string{"USD"}, true
 	}
-	return out
+	return out, true
 }
 
-// parseAccountingModel extracts the accounting_model query parameter.
-func parseAccountingModel(c *gin.Context) models.AccountingModel {
-	return models.ParseAccountingModel(c.DefaultQuery("accounting_model", "historical"))
+// parseAccountingModel extracts and validates the accounting_model query parameter.
+// Writes a 400 and returns false when the value is set but not one of the known models.
+func parseAccountingModel(c *gin.Context) (models.AccountingModel, bool) {
+	raw := c.DefaultQuery("accounting_model", "historical")
+	m, err := models.ValidateAccountingModel(raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return m, false
+	}
+	return m, true
 }
 
 // parseCachedOnly extracts the cachedOnly query parameter.

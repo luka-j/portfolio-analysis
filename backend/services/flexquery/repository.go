@@ -136,6 +136,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 	// (this allows the upload endpoint to say "uploaded N items".
 	// We could also return the full historical dataset, but currently
 	// the handler just counts what was in the file).
+	data.UserHash = userHash
 	return data, nil
 }
 
@@ -172,7 +173,7 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 	if err := r.DB.Where(models.User{TokenHash: userHash}).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// User has never uploaded data — return an empty portfolio instead of an error.
-			return &models.FlexQueryData{}, nil
+			return &models.FlexQueryData{UserHash: userHash}, nil
 		}
 		return nil, fmt.Errorf("fetching user: %w", err)
 	}
@@ -297,6 +298,7 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 	// OpenPositions array is intentionally left empty. The portfolio service
 	// will automatically fallback to reconstructing holdings and cost bases from the trades dataset!
 
+	data.UserHash = userHash
 	return data, nil
 }
 

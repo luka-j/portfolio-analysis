@@ -5,7 +5,7 @@ import NavBar from '../components/NavBar'
 import HoverTooltip from '../components/HoverTooltip'
 import { useNavigate } from 'react-router-dom'
 import {
-  getPortfolioValue, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
+  getPortfolioValueMulti, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
   uploadFlexQuery, uploadEtradeBenefits, uploadEtradeSales,
   getLLMSummary,
   type DailyValue,
@@ -55,6 +55,8 @@ export default function LandingPage() {
   const [llmForceRefresh, setLlmForceRefresh] = useState(false)
 
   const loadGenRef = useRef(0)
+  // statsRefreshing: cached stats shown, fresh fetch still in flight
+  const [statsRefreshing, setStatsRefreshing] = useState(false)
 
   // Auto-dismiss the upload status message after 4 seconds.
   useEffect(() => {
@@ -87,67 +89,107 @@ export default function LandingPage() {
     })
   }
 
-  const loadData = useCallback(async () => {
+  // applyMulti reads the primary value for the currently-selected currency
+  // and also snapshots every per-currency scalar the backend computed in a
+  // single pass (market data fetched once, FX conversions local + parallel).
+  const applyMulti = useCallback((res: { value: number; has_transactions: boolean; positions?: { values?: Record<string, number> }[] }) => {
+    const next: Record<string, number> = {}
+    for (const curr of CURRENCIES) {
+      let sum = 0
+      for (const pos of res.positions ?? []) {
+        const v = pos.values?.[curr]
+        if (typeof v === 'number') sum += v
+      }
+      if (sum > 0) next[curr] = sum
+    }
+    if (Object.keys(next).length === 0) {
+      // Fall back to the primary-currency scalar when positions are absent
+      // (e.g. empty portfolio).
+      next[currency] = res.value
+    }
+    setPortfolioValues(prev => ({ ...prev, ...next }))
+    setHasTransactions(res.has_transactions)
+  }, [currency])
+
+  // Value loader: one multi-currency request for all CURRENCIES. Runs only when
+  // currency changes (for the hero scalar) or after an upload. The period picker
+  // does not affect this series, so switching 1M ↔ 1Y no longer re-fetches prices.
+  useEffect(() => {
     loadGenRef.current += 1
     const gen = loadGenRef.current
+    const controller = new AbortController()
     setLoading(true)
     setError('')
+    let freshArrived = false
 
-    // For the active currency: do a staged fetch (show cached value immediately,
-    // then replace with fresh). For the other two currencies, a single fresh call
-    // is enough — they're secondary and not worth doubling the request count.
-    const loadActiveCurrency = async (curr: string) => {
-      let freshArrived = false
-
-      // 1. Fire cached call — show value immediately and mark as refreshing
-      getPortfolioValue(curr, 'historical', true).then(res => {
+    // 1. Cached call — paint the hero instantly if anything is cached.
+    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', true, controller.signal)
+      .then(res => {
         if (gen === loadGenRef.current && !freshArrived && res.value > 0) {
-          setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
-          setHasTransactions(res.has_transactions)
-          setLoading(false)       // unblock the hero display
-          setValueRefreshing(true) // show stale indicator
+          applyMulti(res)
+          setLoading(false)
+          setValueRefreshing(true)
         }
-      }).catch(() => {})
+      })
+      .catch(() => {})
 
-      // 2. Await fresh call — always takes priority
-      const res = await getPortfolioValue(curr, 'historical', false)
-      if (gen === loadGenRef.current) {
+    // 2. Fresh call — authoritative, clears the stale indicator.
+    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', false, controller.signal)
+      .then(res => {
+        if (gen !== loadGenRef.current) return
         freshArrived = true
-        setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
-        setHasTransactions(res.has_transactions)
-        setValueRefreshing(false) // fresh arrived, clear stale indicator
-        setLoading(false) // unblock hero immediately once fresh data arrives
-      }
-    }
-
-    const loadOtherCurrency = async (curr: string) => {
-      const res = await getPortfolioValue(curr, 'historical', false)
-      if (gen === loadGenRef.current) {
-        setPortfolioValues(prev => ({ ...prev, [curr]: res.value }))
-      }
-    }
-
-    try {
-      const others = CURRENCIES.filter(c => c !== currency)
-      await Promise.all([
-        loadActiveCurrency(currency),
-        ...others.map(loadOtherCurrency),
-        getPortfolioStats(getFromDate(period), formatDate(new Date()), currency).then(st => {
-          if (gen === loadGenRef.current) setStats(st.statistics)
-        }),
-      ])
-    } catch (err) {
-      if (gen !== loadGenRef.current) return
-      setError(err instanceof Error ? err.message : 'Failed to load data')
-    } finally {
-      if (gen === loadGenRef.current) {
+        applyMulti(res)
+        setValueRefreshing(false)
+        setLoading(false)
+      })
+      .catch(err => {
+        if (gen !== loadGenRef.current) return
+        if ((err as Error)?.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Failed to load data')
         setLoading(false)
         setValueRefreshing(false)
-      }
-    }
-  }, [currency, period])
+      })
 
-  useEffect(() => { loadData() }, [loadData])
+    return () => { controller.abort() }
+  }, [currency, uploadCount, applyMulti])
+
+  // Stats loader: depends on period (and currency / upload count). Split from
+  // the value loader so period switches don't re-trigger the multi-currency
+  // price pass. Uses the same cached-then-fresh pattern for instant feedback.
+  useEffect(() => {
+    const controller = new AbortController()
+    let cancelled = false
+    let freshArrived = false
+    const from = getFromDate(period)
+    const to = formatDate(new Date())
+    setStatsRefreshing(false)
+
+    getPortfolioStats(from, to, currency, 'historical', true, controller.signal)
+      .then(st => {
+        if (cancelled || freshArrived) return
+        if (st.statistics && Object.keys(st.statistics).length > 0) {
+          setStats(st.statistics)
+          setStatsRefreshing(true)
+        }
+      })
+      .catch(() => {})
+
+    getPortfolioStats(from, to, currency, 'historical', false, controller.signal)
+      .then(st => {
+        if (cancelled) return
+        freshArrived = true
+        setStats(st.statistics)
+        setStatsRefreshing(false)
+      })
+      .catch(() => { if (!cancelled) setStatsRefreshing(false) })
+
+    return () => { cancelled = true; controller.abort() }
+  }, [currency, period, uploadCount])
+
+  // Re-fetch triggered by explicit post-upload callback.
+  const loadData = useCallback(() => {
+    setUploadCount(c => c + 1)
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -291,7 +333,7 @@ export default function LandingPage() {
             </button>
           {loading || hasTransactions === false ? '—' : privacy ? '———' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(currValue)}
           </h1>
-          {valueRefreshing && (
+          {(valueRefreshing || statsRefreshing) && (
             <span className="w-5 h-5 rounded-full border-2 border-indigo-400/25 border-t-indigo-300 animate-spin" />
           )}
           <div className="relative group">

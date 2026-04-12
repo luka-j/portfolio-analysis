@@ -54,7 +54,10 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
@@ -214,7 +217,10 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 		}
 	}
 
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	cachedOnly := parseCachedOnly(c)
 
 	// Get portfolio daily returns.
@@ -368,7 +374,10 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 		}
 	}
 
-	acctModel := parseAccountingModel(c)
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 	cachedOnly := parseCachedOnly(c)
 
 	// Portfolio daily returns.
