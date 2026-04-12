@@ -4,6 +4,10 @@ A self-hosted web application for analysing stock and ETF portfolios held at Int
 
 ---
 
+## Screenshots
+![Landing page](images/LandingPage.png)
+![Portfolio page](images/PortfolioPage.png)
+
 ## Features
 
 ### Portfolio tracking
@@ -247,4 +251,14 @@ If `ALLOWED_TOKEN_HASHES` is not set, the app runs in open mode — no authentic
 
 
 ## Q & A
-No one asked me anything yet.
+**Q: Feature X doesn't exist, why?**
+> Likely I didn't need it (options, futures, anything related to dividends, distributed ETFs, any non-CZ tax reporting? yeah)
+
+**Q: Some number is wrong, or a feature isn't working?**
+> See above. Ideally submit a fix. (Frankly, I wouldn't be surprised if some number is off in some scenario)
+
+**Q: If I open an issue, when will it addressed?**
+> Maybe next weekend. Maybe never. Open a PR if you'd like to see something added or fixed.
+
+**Q: Can I use LLM to generate my PR code?**
+> Sure. 
