@@ -48,6 +48,13 @@ func (h *BreakdownHandler) GetBreakdown(c *gin.Context) {
 		return
 	}
 
+	// Resolve user ID for scoped asset_fundamentals lookup.
+	var user models.User
+	if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+
 	// GetCurrentValue uses spot accounting model for breakdown (we only need current weights).
 	result, err := h.PortfolioSvc.GetCurrentValue(data, currency, models.AccountingModelSpot, cachedOnly)
 	if err != nil {
@@ -55,7 +62,7 @@ func (h *BreakdownHandler) GetBreakdown(c *gin.Context) {
 		return
 	}
 
-	breakdown, err := h.BreakdownSvc.Calculate(result.Positions, currency)
+	breakdown, err := h.BreakdownSvc.Calculate(result.Positions, currency, user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "calculating breakdown: " + err.Error()})
 		return

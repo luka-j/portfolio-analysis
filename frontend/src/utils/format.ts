@@ -23,6 +23,11 @@ export function formatNumber(value: number, decimals = 2): string {
   return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
 }
 
+/** Formats a quantity with up to maxDecimals significant fractional digits, trimming trailing zeros. */
+export function formatQuantity(value: number, maxDecimals = 2): string {
+  return value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: maxDecimals })
+}
+
 export function escapeCSVField(value: string): string {
   if (value.includes(',') || value.includes('"') || value.includes('\n')) {
     return '"' + value.replace(/"/g, '""') + '"'

@@ -197,15 +197,24 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 	}
 	result := resultsByCur[primaryCurrency]
 
-	// Enrich bond ETF positions with effective duration from asset_fundamentals.
+	// Resolve user ID for scoped asset_fundamentals lookup.
+	// A user that has never uploaded has no row yet — skip enrichment (no positions to enrich).
+	var user models.User
+	userFound := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error == nil
+
+	// Enrich positions with metadata from asset_fundamentals (scoped to this user).
 	for i := range result.Positions {
+		if !userFound {
+			break
+		}
 		pos := &result.Positions[i]
 		eff := pos.YahooSymbol
 		if eff == "" {
 			eff = pos.Symbol
 		}
 		var fund models.AssetFundamental
-		if err := h.Repo.DB.Select("asset_type, duration, name, isin").Where("symbol = ?", eff).First(&fund).Error; err == nil {
+		if err := h.Repo.DB.Select("asset_type, duration, name, isin").
+			Where("user_id = ? AND symbol = ?", user.ID, eff).First(&fund).Error; err == nil {
 			if fund.AssetType == "Bond ETF" && fund.Duration != nil {
 				result.Positions[i].BondDuration = fund.Duration
 			}
@@ -596,6 +605,7 @@ type addTransactionRequest struct {
 	TransactionType string  `json:"transaction_type"` // "buy", "sell", "espp_vest", "rsu_vest"
 	Symbol          string  `json:"symbol"`
 	Currency        string  `json:"currency"`
+	ListingExchange string  `json:"listing_exchange"`
 	Date            string  `json:"date"` // YYYY-MM-DD
 	Quantity        float64 `json:"quantity"`
 	Price           float64 `json:"price"`
@@ -624,6 +634,11 @@ func (h *PortfolioHandler) AddTransaction(c *gin.Context) {
 	}
 	if req.Currency == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "currency is required"})
+		return
+	}
+	req.ListingExchange = strings.TrimSpace(strings.ToUpper(req.ListingExchange))
+	if req.ListingExchange == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "listing_exchange is required"})
 		return
 	}
 	if req.Quantity <= 0 {
@@ -701,19 +716,20 @@ func (h *PortfolioHandler) AddTransaction(c *gin.Context) {
 	}
 
 	txn := models.Transaction{
-		UserID:        user.ID,
-		Type:          txnType,
-		Symbol:        req.Symbol,
-		Currency:      req.Currency,
-		DateTime:      dt,
-		Quantity:      quantity,
-		Price:         req.Price,
-		Proceeds:      proceeds,
-		Commission:    req.Commission,
-		BuySell:       buySell,
-		AssetCategory: "STK",
-		TaxCostBasis:  taxCostBasis,
-		EntryMethod:   "manual",
+		UserID:          user.ID,
+		Type:            txnType,
+		Symbol:          req.Symbol,
+		Currency:        req.Currency,
+		ListingExchange: req.ListingExchange,
+		DateTime:        dt,
+		Quantity:        quantity,
+		Price:           req.Price,
+		Proceeds:        proceeds,
+		Commission:      req.Commission,
+		BuySell:         buySell,
+		AssetCategory:   "STK",
+		TaxCostBasis:    taxCostBasis,
+		EntryMethod:     "manual",
 	}
 	if err := h.Repo.DB.Create(&txn).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "saving transaction: " + err.Error()})
@@ -750,4 +766,132 @@ func (h *PortfolioHandler) DeleteTransaction(c *gin.Context) {
 
 	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+// editAssetRequest is the JSON body for PUT /api/v1/portfolio/assets/:symbol.
+type editAssetRequest struct {
+	Name            *string `json:"name"`
+	AssetType       *string `json:"asset_type"`
+	Country         *string `json:"country"`
+	Sector          *string `json:"sector"`
+	YahooSymbol     *string `json:"yahoo_symbol"`
+	ListingExchange *string `json:"listing_exchange"`
+}
+
+// EditAsset handles PUT /api/v1/portfolio/assets/:symbol.
+// Updates name, asset_type, country, sector in asset_fundamentals and/or
+// yahoo_symbol / listing_exchange in transactions — all scoped to the authenticated user.
+// Sets DataSource="User" when any background-managed field (name/asset_type/country/sector) is provided,
+// preventing the periodic job from overwriting manual edits.
+func (h *PortfolioHandler) EditAsset(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+	symbol := c.Param("symbol")
+
+	var req editAssetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	var user models.User
+	if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+
+	// Resolve the effective symbol: the background fundamentals service and GetValue both key
+	// asset_fundamentals rows to YahooSymbol (when set), not the raw broker symbol.
+	// Using the wrong key here would create a phantom row that GetValue never reads.
+	var yahooSym string
+	h.Repo.DB.Model(&models.Transaction{}).
+		Where("user_id = ? AND symbol = ? AND yahoo_symbol != ''", user.ID, symbol).
+		Limit(1).Pluck("yahoo_symbol", &yahooSym)
+	fundSymbol := symbol
+	if yahooSym != "" {
+		fundSymbol = yahooSym
+	}
+
+	// ── Update asset_fundamentals (upsert per user) ──────────────────────────
+	fundamentalFields := req.Name != nil || req.AssetType != nil || req.Country != nil || req.Sector != nil
+	if fundamentalFields {
+		updates := map[string]interface{}{
+			"data_source":  "User",
+			"last_updated": time.Now().UTC(),
+		}
+		if req.Name != nil {
+			updates["name"] = *req.Name
+		}
+		if req.AssetType != nil {
+			updates["asset_type"] = *req.AssetType
+		}
+		if req.Country != nil {
+			updates["country"] = *req.Country
+		}
+		if req.Sector != nil {
+			updates["sector"] = *req.Sector
+		}
+
+		// Try update first; if no row exists, create one.
+		result := h.Repo.DB.Model(&models.AssetFundamental{}).
+			Where("user_id = ? AND symbol = ?", user.ID, fundSymbol).
+			Updates(updates)
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "updating fundamentals: " + result.Error.Error()})
+			return
+		}
+		if result.RowsAffected == 0 {
+			// No existing row — insert a new one.
+			now := time.Now().UTC()
+			newRec := models.AssetFundamental{
+				UserID:      user.ID,
+				Symbol:      fundSymbol,
+				DataSource:  "User",
+				LastUpdated: now,
+			}
+			if req.Name != nil {
+				newRec.Name = *req.Name
+			}
+			if req.AssetType != nil {
+				newRec.AssetType = *req.AssetType
+			}
+			if req.Country != nil {
+				newRec.Country = *req.Country
+			}
+			if req.Sector != nil {
+				newRec.Sector = *req.Sector
+			}
+			if err := h.Repo.DB.Create(&newRec).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "creating fundamentals: " + err.Error()})
+				return
+			}
+		}
+	}
+
+	// ── Update yahoo_symbol in transactions ──────────────────────────────────
+	if req.YahooSymbol != nil {
+		exchange := c.Query("exchange")
+		if err := h.Repo.UpdateSymbolMapping(userHash, symbol, exchange, *req.YahooSymbol); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "updating yahoo symbol: " + err.Error()})
+			return
+		}
+	}
+
+	// ── Update listing_exchange in transactions (only where currently empty) ─
+	if req.ListingExchange != nil && *req.ListingExchange != "" {
+		exchange := c.Query("exchange")
+		base := h.Repo.DB.Model(&models.Transaction{}).Where("user_id = ? AND symbol = ?", user.ID, symbol)
+		if exchange != "" {
+			// Scope to the specific exchange group so an unrelated same-ticker entry on
+			// a different exchange is not affected.
+			base = base.Where("listing_exchange = ?", exchange)
+		} else {
+			base = base.Where("listing_exchange IS NULL OR listing_exchange = ''")
+		}
+		if err := base.Update("listing_exchange", *req.ListingExchange).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "updating listing exchange: " + err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "asset updated"})
 }

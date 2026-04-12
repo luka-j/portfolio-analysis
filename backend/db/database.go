@@ -56,6 +56,11 @@ func Init(dsn string) (*gorm.DB, error) {
 	// AutoMigrate never drops/recreates indexes, so we do it manually once.
 	database.Exec(`DROP INDEX IF EXISTS idx_llmcache_user_prompt`)
 
+	// Drop the old single-column unique index on asset_fundamentals.symbol.
+	// The schema now uses a composite (user_id, symbol) unique index so each user
+	// can have their own row per symbol. The old index blocks inserts for shared symbols.
+	database.Exec(`DROP INDEX IF EXISTS idx_asset_fundamentals_symbol`)
+
 	err = database.AutoMigrate(
 		&models.User{},
 		&models.Transaction{},

@@ -35,7 +35,7 @@ type Transaction struct {
 	AssetCategory   string
 	TaxCostBasis    *float64
 	Conid           string `gorm:"index"` // IB permanent contract ID; empty for eTrade/cash txns
-	ISIN            string `gorm:"index"` // ISIN from IB FlexQuery; empty when not provided
+	ISIN            string `gorm:"index"` // raw ISIN from IB FlexQuery; seeded into asset_fundamentals by background bootstrap
 	PublicID        string `gorm:"uniqueIndex"` // UUID; stable external ID used in API responses and DELETE endpoint
 	EntryMethod     string `gorm:"index"`               // "manual", "flexquery", "etrade_benefits", "etrade_sales"
 }
@@ -62,21 +62,31 @@ type MarketData struct {
 	Provider string `gorm:"default:'Yahoo'"`
 }
 
-// AssetFundamental stores fundamentals for a single security (stock, ETF, commodity).
+// AssetFundamental stores the descriptive profile of a single security (stock, ETF, commodity)
+// scoped to a specific user. This is the authoritative source for all asset-level metadata consumed
+// by the API and LLM layers. Each user has their own row per symbol so edits are personal.
+//
 // Symbol is the effective ticker used to query external APIs (YahooSymbol if set, else broker Symbol).
+// The unique constraint is (user_id, symbol) — same symbol can exist for multiple users.
+//
+// DataSource: "Yahoo" or "IB" for background-populated rows; "User" for manually edited rows.
+// Rows with DataSource="User" are never overwritten by the background fetch job.
+//
+// ISIN: seeded from transactions.isin (IB FlexQuery source) by the background bootstrap.
+// It is display-only here — the canonical persistence path is transactions → background seed → this table.
 type AssetFundamental struct {
 	ID          uint   `gorm:"primaryKey"`
-	Symbol      string `gorm:"uniqueIndex;not null"` // effective ticker (e.g. AAPL, VWCE.DE)
-	Conid       string `gorm:"index"`                // IB permanent contract ID; empty for non-IB securities
-	ISIN        string `gorm:"index"`                // ISIN from IB FlexQuery; empty when not provided
+	UserID      uint   `gorm:"uniqueIndex:user_symbol;not null;default:0"` // owner; matches users.id
+	Symbol      string `gorm:"uniqueIndex:user_symbol;not null"` // effective ticker (e.g. AAPL, VWCE.DE)
+	Conid       string `gorm:"index"`                            // IB permanent contract ID; empty for non-IB securities
+	ISIN        string `gorm:"index"`                            // display-only; seeded from transactions by bootstrap
 	Name        string
 	AssetType   string `gorm:"index"` // "Stock", "ETF", "Bond ETF", "Commodity", "Unknown"
 	Country     string `gorm:"index"`
 	Sector      string `gorm:"index"`
-	Exchange    string
-	Currency    string    // native trading currency, e.g. "USD", "EUR" (from IB transactions or Yahoo)
-	Duration    *float64  // bond ETF: effective duration in years (from Yahoo bondHoldings)
-	DataSource  string    // provider that supplied this record, e.g. "FMP"
+	Currency    string   // native trading currency, e.g. "USD", "EUR" (from IB transactions or Yahoo)
+	Duration    *float64 // bond ETF: effective duration in years (from Yahoo bondHoldings)
+	DataSource  string   // "Yahoo", "IB", or "User" (user edits are never overwritten by the background job)
 	LastUpdated time.Time `gorm:"index"`
 }
 

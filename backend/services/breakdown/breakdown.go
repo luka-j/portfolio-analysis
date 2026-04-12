@@ -37,7 +37,8 @@ type positionWithValue struct {
 
 // Calculate returns a complete BreakdownResponse for the given positions.
 // Positions must already carry `.Values[currency]` populated by the portfolio service.
-func (s *Service) Calculate(positions []models.PositionValue, currency string) (*models.BreakdownResponse, error) {
+// userID scopes the asset_fundamentals lookup to the authenticated user's rows.
+func (s *Service) Calculate(positions []models.PositionValue, currency string, userID uint) (*models.BreakdownResponse, error) {
 	var posValues []positionWithValue
 	totalPortfolioValue := 0.0
 	for _, pos := range positions {
@@ -82,7 +83,7 @@ func (s *Service) Calculate(positions []models.PositionValue, currency string) (
 			continue
 		}
 
-		fund, err := s.loadFundamentals(pos.symbol)
+		fund, err := s.loadFundamentals(pos.symbol, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -231,10 +232,10 @@ func safePct(v, total float64) float64 {
 	return (v / total) * 100
 }
 
-// loadFundamentals returns cached AssetFundamental for symbol, or nil if absent.
-func (s *Service) loadFundamentals(symbol string) (*models.AssetFundamental, error) {
+// loadFundamentals returns cached AssetFundamental for symbol scoped to userID, or nil if absent.
+func (s *Service) loadFundamentals(symbol string, userID uint) (*models.AssetFundamental, error) {
 	var f models.AssetFundamental
-	if err := s.DB.Where("symbol = ?", symbol).First(&f).Error; err != nil {
+	if err := s.DB.Where("user_id = ? AND symbol = ?", userID, symbol).First(&f).Error; err != nil {
 		return nil, nil
 	}
 	return &f, nil

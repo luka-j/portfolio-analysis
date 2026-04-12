@@ -19,6 +19,7 @@ const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CZK', 'CHF', 'SEK', 'NOK', 'DKK
 export default function AddTransactionModal({ positions, onSuccess, onClose }: Props) {
   const [txType, setTxType] = useState<TxType>('buy')
   const [symbol, setSymbol] = useState('')
+  const [listingExchange, setListingExchange] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [quantity, setQuantity] = useState('')
   const [price, setPrice] = useState('')
@@ -55,6 +56,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
 
     if (!symbol.trim()) { setError('Symbol is required'); return }
     if (symbol.trim().toUpperCase() === 'PENDING_CASH') { setError('PENDING_CASH is not a valid symbol'); return }
+    if (!listingExchange.trim()) { setError('Stock exchange code is required'); return }
     if (!date) { setError('Date is required'); return }
     if (!qty || qty <= 0) { setError('Quantity must be greater than 0'); return }
     if (!prc || prc <= 0) { setError('Price must be greater than 0'); return }
@@ -64,6 +66,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
       transaction_type: txType,
       symbol: symbol.trim().toUpperCase(),
       currency,
+      listing_exchange: listingExchange.trim().toUpperCase(),
       date,
       quantity: qty,
       price: prc,
@@ -138,7 +141,12 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
             <AutocompleteInput
               options={symbolOptions}
               value={symbol}
-              onChange={v => { setSymbol(v); setDuplicateId(null) }}
+              onChange={v => {
+                setSymbol(v)
+                setDuplicateId(null)
+                const matched = positions.find(p => p.symbol === v.toUpperCase())
+                setListingExchange(matched?.listing_exchange ?? '')
+              }}
               placeholder="e.g. AAPL"
               autoFocus
             />
@@ -150,6 +158,21 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
                 This symbol is not in your current portfolio
               </p>
             )}
+          </div>
+
+          {/* Stock exchange code */}
+          <div>
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1 pl-1">
+              Stock exchange code
+            </label>
+            <input
+              type="text"
+              value={listingExchange}
+              onChange={e => setListingExchange(e.target.value)}
+              placeholder="e.g. NASDAQ"
+              spellCheck={false}
+              className="w-full bg-bg border border-border-dim rounded-xl px-4 py-2.5 text-slate-100 font-mono text-sm focus:outline-none focus:border-indigo-500/50 transition-colors uppercase placeholder:normal-case placeholder:text-slate-600"
+            />
           </div>
 
           {/* Date */}

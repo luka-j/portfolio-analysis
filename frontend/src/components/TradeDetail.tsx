@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import HoverTooltip from './HoverTooltip'
 import { SecurityPriceChart } from './SecurityPriceChart'
 import { getPortfolioTrades, deleteTransaction, type TradeEntry } from '../api'
-import { formatNumber } from '../utils/format'
+import { formatNumber, formatQuantity } from '../utils/format'
 
 interface Props {
   symbol: string
@@ -141,7 +141,7 @@ export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acc
                     </span>
                   </div>
                   <div>{entryMethodBadge(trade.entry_method)}</div>
-                  <div className="text-right text-slate-200 font-black tabular-nums">{privacy ? '—' : formatNumber(trade.quantity, 0)}</div>
+                  <div className="text-right text-slate-200 font-black tabular-nums">{privacy ? '—' : formatQuantity(trade.quantity)}</div>
                   <div className="text-right text-slate-500 font-bold tabular-nums text-[11px]">{privacy ? '—' : formatNumber(trade.price)}</div>
                   {!isOriginal && <div className="text-right text-slate-200 font-black tabular-nums">{privacy ? '—' : formatNumber(trade.converted_price)}</div>}
                   <div className="text-right text-slate-300 font-black tabular-nums">{privacy ? '—' : formatNumber(Math.abs(trade.quantity * (isOriginal ? trade.price : trade.converted_price)))}</div>

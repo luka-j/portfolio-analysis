@@ -88,7 +88,6 @@ func TestYahooFundamentalsProviderStock(t *testing.T) {
 	assert.Equal(t, "Apple Inc.", fund.Name)
 	assert.Equal(t, "United States", fund.Country)
 	assert.Equal(t, "Technology", fund.Sector)
-	assert.Equal(t, "NMS", fund.Exchange)
 	assert.Equal(t, "Yahoo", fund.DataSource)
 	assert.WithinDuration(t, time.Now().UTC(), fund.LastUpdated, 5*time.Second)
 }
@@ -108,7 +107,6 @@ func TestYahooFundamentalsProviderETF(t *testing.T) {
 	// ETFs have no country/sector in assetProfile — emptyToUnknown applies.
 	assert.Equal(t, "Unknown", fund.Country)
 	assert.Equal(t, "Unknown", fund.Sector)
-	assert.Equal(t, "LSE", fund.Exchange)
 }
 
 // TestYahooFundamentalsProviderNotFound verifies nil, nil when no profile data exists.

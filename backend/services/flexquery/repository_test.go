@@ -241,7 +241,7 @@ func TestUpdateSymbolMapping_PurgesOldCache(t *testing.T) {
 	// Seed stale cache data under the broker symbol "ARMY" (fetched before mapping existed).
 	db.Create(&models.MarketData{Symbol: "ARMY", Date: dt, Volume: 100})
 	db.Create(&models.CurrentPrice{Symbol: "ARMY", Price: 10.0, FetchedAt: dt})
-	db.Create(&models.AssetFundamental{Symbol: "ARMY", AssetType: "Stock"})
+	db.Create(&models.AssetFundamental{UserID: user.ID, Symbol: "ARMY", AssetType: "Stock"})
 	db.Create(&models.EtfBreakdown{FundSymbol: "ARMY", Dimension: "sector", Label: "Defense", Weight: 1.0})
 
 	repo := NewRepository(db)

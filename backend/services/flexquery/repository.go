@@ -381,7 +381,7 @@ func (r *Repository) UpdateSymbolMapping(userHash, symbol, exchange, yahooSymbol
 	if oldEffective != newEffective {
 		r.DB.Where("symbol = ?", oldEffective).Delete(&models.MarketData{})
 		r.DB.Where("symbol = ?", oldEffective).Delete(&models.CurrentPrice{})
-		r.DB.Where("symbol = ?", oldEffective).Delete(&models.AssetFundamental{})
+		r.DB.Where("user_id = ? AND symbol = ?", user.ID, oldEffective).Delete(&models.AssetFundamental{})
 		r.DB.Where("fund_symbol = ?", oldEffective).Delete(&models.EtfBreakdown{})
 	}
 

@@ -182,6 +182,7 @@ export interface AddTransactionRequest {
   transaction_type: 'buy' | 'sell' | 'espp_vest' | 'rsu_vest';
   symbol: string;
   currency: string;
+  listing_exchange: string;
   date: string;       // YYYY-MM-DD
   quantity: number;
   price: number;
@@ -383,6 +384,25 @@ export async function verifyToken(): Promise<boolean> {
     return false;
   }
 }
+
+export interface UpdateAssetRequest {
+  name?: string
+  asset_type?: string
+  country?: string
+  sector?: string
+  yahoo_symbol?: string
+  listing_exchange?: string
+}
+
+export const updateAsset = (symbol: string, exchange: string | undefined, req: UpdateAssetRequest) =>
+  request<{ message: string }>(
+    `/portfolio/assets/${encodeURIComponent(symbol)}${exchange ? `?exchange=${encodeURIComponent(exchange)}` : ''}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }
+  );
 
 export const updateSymbolMapping = (symbol: string, yahooSymbol: string, exchange?: string) => {
   const query = exchange ? `?exchange=${encodeURIComponent(exchange)}` : '';

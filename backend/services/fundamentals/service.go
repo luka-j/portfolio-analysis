@@ -217,11 +217,11 @@ func (s *Service) runFetchCycle(ctx context.Context) {
 		log.Println("fundamentals: no symbols need fundamentals enrichment (all fresh or definitive)")
 	}
 
-	for _, sym := range funQueue {
+	for _, entry := range funQueue {
 		if ctx.Err() != nil {
 			return
 		}
-		s.fetchOneFundamentals(sym)
+		s.fetchOneFundamentals(entry)
 	}
 
 	// Step 4: Yahoo quoteSummary — aggregate breakdown for confirmed ETFs not updated today.
@@ -244,46 +244,77 @@ func (s *Service) runFetchCycle(ctx context.Context) {
 
 // ── Symbol collection ──────────────────────────────────────────────────────────
 
+// symbolWithUsers pairs an effective ticker with all user IDs that hold it.
+// The background job fetches provider data once per symbol and writes per-user rows.
+type symbolWithUsers struct {
+	Symbol  string // effective ticker (YahooSymbol if set, otherwise broker Symbol)
+	UserIDs []uint // sorted list of user IDs holding this symbol
+}
+
 // collectAllSymbols returns portfolio-level symbols that have been priced by Yahoo.
 // Comes from the database: the function is restart-safe.
-func (s *Service) collectAllSymbols() ([]string, error) {
+func (s *Service) collectAllSymbols() ([]symbolWithUsers, error) {
 	return s.collectPortfolioSymbols()
 }
 
-// collectPortfolioSymbols returns effective ticker symbols for all portfolio positions
-// that are safe to query externally (YahooSymbol set, or market_data row exists).
-func (s *Service) collectPortfolioSymbols() ([]string, error) {
+// collectPortfolioSymbols returns effective ticker symbols grouped by the users who hold them.
+// A symbol is included only when it has a YahooSymbol override or has existing market data.
+// Provider data is fetched once per symbol and written to each user's row independently.
+func (s *Service) collectPortfolioSymbols() ([]symbolWithUsers, error) {
 	type row struct {
 		Symbol      string
 		YahooSymbol string
+		UserID      uint
 	}
 	var rows []row
 	err := s.DB.Model(&models.Transaction{}).
-		Select("DISTINCT symbol, yahoo_symbol").
+		Select("DISTINCT user_id, symbol, yahoo_symbol").
 		Where("type IN ?", []string{"Trade", "ESPP_VEST", "RSU_VEST"}).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("collect portfolio symbols: %w", err)
 	}
 
-	seen := make(map[string]struct{})
-	var out []string
+	type symInfo struct {
+		userIDs map[uint]struct{}
+		include bool
+		checked bool
+	}
+	symMap := make(map[string]*symInfo)
+
 	for _, r := range rows {
 		eff := effectiveSymbol(r.Symbol, r.YahooSymbol)
-		if _, ok := seen[eff]; ok {
-			continue
+		info, ok := symMap[eff]
+		if !ok {
+			info = &symInfo{userIDs: make(map[uint]struct{})}
+			symMap[eff] = info
 		}
-		seen[eff] = struct{}{}
+		info.userIDs[r.UserID] = struct{}{}
 
-		if r.YahooSymbol != "" {
-			out = append(out, eff) // user explicitly mapped — always include
+		if !info.checked {
+			info.checked = true
+			if r.YahooSymbol != "" {
+				info.include = true // user explicitly mapped — always include
+			} else {
+				info.include = s.hasMarketData(eff)
+				if !info.include {
+					log.Printf("fundamentals: skipping %q — no YahooSymbol and no market data", eff)
+				}
+			}
+		}
+	}
+
+	var out []symbolWithUsers
+	for sym, info := range symMap {
+		if !info.include {
 			continue
 		}
-		if s.hasMarketData(eff) {
-			out = append(out, eff) // Yahoo can resolve this ticker
-		} else {
-			log.Printf("fundamentals: skipping %q — no YahooSymbol and no market data", eff)
+		var userIDs []uint
+		for uid := range info.userIDs {
+			userIDs = append(userIDs, uid)
 		}
+		sort.Slice(userIDs, func(i, j int) bool { return userIDs[i] < userIDs[j] })
+		out = append(out, symbolWithUsers{Symbol: sym, UserIDs: userIDs})
 	}
 	return out, nil
 }
@@ -311,33 +342,31 @@ func (s *Service) hasMarketData(symbol string) bool {
 //
 // The fundamentals provider is NOT called here. Symbols that remain unknown after
 // both free sources are left for the fundamentals provider in buildFundamentalsQueue.
-func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
+func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []symbolWithUsers) {
 	ibCount, yahooCount, skipCount := 0, 0, 0
-	for _, sym := range symbols {
+	for _, entry := range symbols {
+		sym := entry.Symbol
 		if ctx.Err() != nil {
 			return
 		}
 
 		// Always seed conid and ISIN from IB transactions — idempotent, and must run even
 		// for already-classified symbols so that re-uploaded reports backfill these fields.
+		// transactions.isin is the raw source; asset_fundamentals.isin is the display copy read by the API.
+		// These UPDATE calls use WHERE symbol=? to touch all users' rows (universal property).
 		conid := s.ibConid(sym)
 		s.seedConid(sym, conid)
 		s.seedISIN(conid, s.ibISINForConid(conid))
 
-		// Skip if already definitively classified by IB itself.
-		// If the type was set by an external source, let IB re-confirm —
-		// external sources can misclassify (e.g. quoteType maps MUTUALFUND → ETF).
-		var rec models.AssetFundamental
-		if err := s.DB.Where("symbol = ?", sym).First(&rec).Error; err == nil {
-			if isDefinitiveAssetType(rec.AssetType) && rec.DataSource == "IB" {
-				skipCount++
-				continue
-			}
+		// Skip if ALL users already have a definitive IB classification.
+		if s.allUsersDefinitiveIB(sym, entry.UserIDs) {
+			skipCount++
+			continue
 		}
 
 		// Tier 0: IB broker category — definitive for ETF, Commodity, Bond; ambiguous for STK.
 		if ibType := s.ibAssetType(sym); ibType != "" {
-			s.seedAssetType(sym, ibType, "IB", "")
+			s.seedAssetType(sym, ibType, "IB", "", entry.UserIDs)
 			// IB transaction currency is authoritative — seed it without a Yahoo call.
 			s.seedCurrency(sym, s.ibCurrency(sym))
 			ibCount++
@@ -350,7 +379,7 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 			if err != nil {
 				log.Printf("fundamentals: Yahoo quoteType %s error: %v", sym, err)
 			} else if qt != "" {
-				s.seedAssetType(sym, qt, "Yahoo", name)
+				s.seedAssetType(sym, qt, "Yahoo", name, entry.UserIDs)
 				// Currency for non-IB symbols will be populated on first GetCurrency call.
 				yahooCount++
 				continue
@@ -360,6 +389,20 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []string) {
 	if ibCount > 0 || yahooCount > 0 {
 		log.Printf("fundamentals: bootstrap complete: %d from IB, %d from Yahoo, %d already definitive", ibCount, yahooCount, skipCount)
 	}
+}
+
+// allUsersDefinitiveIB returns true when every user in userIDs already has a definitively
+// IB-classified row for symbol. Used as a fast-path skip in bootstrapAssetTypes.
+func (s *Service) allUsersDefinitiveIB(symbol string, userIDs []uint) bool {
+	if len(userIDs) == 0 {
+		return false
+	}
+	var count int64
+	s.DB.Model(&models.AssetFundamental{}).
+		Where("symbol = ? AND user_id IN ? AND data_source = 'IB' AND asset_type IN ?",
+			symbol, userIDs, []string{"ETF", "Bond ETF", "Stock", "Bond", "Commodity", "Mutual Fund"}).
+		Count(&count)
+	return int(count) >= len(userIDs)
 }
 
 // isDefinitiveAssetType returns true when the type is settled and needs no external confirmation.
@@ -468,124 +511,155 @@ func (s *Service) ibAssetType(symbol string) string {
 	}
 }
 
-// seedAssetType writes an AssetType (and optionally a name) into the DB for symbol.
-// Creates a new record if none exists. If a record exists, only overwrites when
-// its current AssetType is empty or "Unknown" — never downgrades a richer record.
+// seedAssetType writes an AssetType (and optionally a name) into the DB for each user in userIDs.
+// Creates a new per-user record if none exists. If a record exists, only overwrites when its
+// current AssetType is empty or "Unknown" — never downgrades a richer record.
 // In particular, "Bond ETF" is never downgraded back to "ETF" even by IB.
+// Records with DataSource="User" are never overwritten.
 // name is written only when non-empty and the existing record has no name yet.
-func (s *Service) seedAssetType(symbol, assetType, source, name string) {
+func (s *Service) seedAssetType(symbol, assetType, source, name string, userIDs []uint) {
 	now := time.Now().UTC()
-	var rec models.AssetFundamental
-	if err := s.DB.Where("symbol = ?", symbol).First(&rec).Error; err != nil {
-		newRec := models.AssetFundamental{
-			Symbol:      symbol,
-			AssetType:   assetType,
-			DataSource:  source,
-			LastUpdated: now,
+	for _, userID := range userIDs {
+		var rec models.AssetFundamental
+		if err := s.DB.Where("user_id = ? AND symbol = ?", userID, symbol).First(&rec).Error; err != nil {
+			newRec := models.AssetFundamental{
+				UserID:      userID,
+				Symbol:      symbol,
+				AssetType:   assetType,
+				DataSource:  source,
+				LastUpdated: now,
+			}
+			if name != "" {
+				newRec.Name = name
+			}
+			if err2 := s.DB.Create(&newRec).Error; err2 != nil {
+				log.Printf("fundamentals: seed create %s (user=%d): %v", symbol, userID, err2)
+			}
+			continue
 		}
-		if name != "" {
-			newRec.Name = name
+		// Never touch user-edited records.
+		if rec.DataSource == "User" {
+			continue
 		}
-		if err2 := s.DB.Create(&newRec).Error; err2 != nil {
-			log.Printf("fundamentals: seed create %s: %v", symbol, err2)
+		// Never downgrade Bond ETF → ETF (Bond ETF is the more specific classification).
+		if rec.AssetType == "Bond ETF" && assetType == "ETF" {
+			continue
 		}
-		return
-	}
-	// Never downgrade Bond ETF → ETF (Bond ETF is the more specific classification).
-	if rec.AssetType == "Bond ETF" && assetType == "ETF" {
-		return
-	}
-	if rec.AssetType == "" || rec.AssetType == "Unknown" || source == "IB" {
-		updates := map[string]interface{}{
-			"asset_type":   assetType,
-			"data_source":  source,
-			"last_updated": now,
-		}
-		if name != "" && rec.Name == "" {
-			updates["name"] = name
-		}
-		if err := s.DB.Model(&rec).Updates(updates).Error; err != nil {
-			log.Printf("fundamentals: seed update %s: %v", symbol, err)
+		if rec.AssetType == "" || rec.AssetType == "Unknown" || source == "IB" {
+			updates := map[string]interface{}{
+				"asset_type":   assetType,
+				"data_source":  source,
+				"last_updated": now,
+			}
+			if name != "" && rec.Name == "" {
+				updates["name"] = name
+			}
+			if err := s.DB.Model(&rec).Updates(updates).Error; err != nil {
+				log.Printf("fundamentals: seed update %s (user=%d): %v", symbol, userID, err)
+			}
 		}
 	}
 }
 
 // ── Tier 1: fundamentals enrichment queue ─────────────────────────────────────
 
-// buildFundamentalsQueue returns symbols for fundamentals enrichment, sorted oldest-first.
-// A symbol is included when ALL of the following hold:
-//   - It is not updated today (data doesn't change intra-day).
-//   - Its AssetType is unresolved ("", "Unknown") OR its Name/Country field is empty.
-func (s *Service) buildFundamentalsQueue(symbols []string, today time.Time) []string {
-	type entry struct {
-		name        string
-		lastUpdated time.Time
+// buildFundamentalsQueue returns entries needing fundamentals enrichment, sorted oldest-first.
+// For each symbol, only the user IDs whose records are stale/incomplete (and not user-edited)
+// are included in the returned entry. Provider data is fetched once per symbol.
+func (s *Service) buildFundamentalsQueue(symbols []symbolWithUsers, today time.Time) []symbolWithUsers {
+	type queueEntry struct {
+		sw      symbolWithUsers
+		oldest  time.Time
 	}
-	var queue []entry
+	var queue []queueEntry
 
-	for _, sym := range symbols {
-		var rec models.AssetFundamental
-		if err := s.DB.Where("symbol = ?", sym).First(&rec).Error; err != nil {
-			queue = append(queue, entry{sym, time.Time{}}) // no record → highest priority
-			continue
+	for _, sw := range symbols {
+		var needEnrichment []uint
+		var oldest time.Time
+
+		for _, userID := range sw.UserIDs {
+			var rec models.AssetFundamental
+			if err := s.DB.Where("user_id = ? AND symbol = ?", userID, sw.Symbol).First(&rec).Error; err != nil {
+				needEnrichment = append(needEnrichment, userID) // no record — highest priority
+				continue
+			}
+			if rec.DataSource == "User" {
+				continue // user-edited; never overwrite
+			}
+			if sameDay(rec.LastUpdated, today) {
+				continue // fresh — skip
+			}
+			if rec.AssetType == "Unknown" || rec.AssetType == "" || rec.Name == "" || rec.Country == "" {
+				needEnrichment = append(needEnrichment, userID)
+				if oldest.IsZero() || (!rec.LastUpdated.IsZero() && rec.LastUpdated.Before(oldest)) {
+					oldest = rec.LastUpdated
+				}
+			}
 		}
-		if sameDay(rec.LastUpdated, today) {
-			continue // fresh — skip
-		}
-		if rec.AssetType == "Unknown" || rec.AssetType == "" || rec.Name == "" || rec.Country == "" {
-			queue = append(queue, entry{sym, rec.LastUpdated})
+
+		if len(needEnrichment) > 0 {
+			queue = append(queue, queueEntry{
+				sw:     symbolWithUsers{Symbol: sw.Symbol, UserIDs: needEnrichment},
+				oldest: oldest,
+			})
 		}
 	}
 
 	sort.Slice(queue, func(i, j int) bool {
-		if queue[i].lastUpdated.IsZero() {
+		if queue[i].oldest.IsZero() {
 			return true
 		}
-		if queue[j].lastUpdated.IsZero() {
+		if queue[j].oldest.IsZero() {
 			return false
 		}
-		return queue[i].lastUpdated.Before(queue[j].lastUpdated)
+		return queue[i].oldest.Before(queue[j].oldest)
 	})
 
-	out := make([]string, len(queue))
+	out := make([]symbolWithUsers, len(queue))
 	for i, e := range queue {
-		out[i] = e.name
+		out[i] = e.sw
 	}
 	return out
 }
 
-// fetchOneFundamentals tries each FundamentalsProvider in priority order for one symbol.
-func (s *Service) fetchOneFundamentals(symbol string) {
+// fetchOneFundamentals fetches provider data once for entry.Symbol and upserts it for each
+// user in entry.UserIDs whose record is not user-edited (DataSource != "User").
+func (s *Service) fetchOneFundamentals(entry symbolWithUsers) {
 	for _, p := range s.fundamentalsProviders {
 		state := s.fundamentalsStates[p.Name()]
 		cfg := p.RateLimit()
 		if !state.available(cfg) {
-			log.Printf("fundamentals: %s rate limited, skipping fundamentals for %s", p.Name(), symbol)
+			log.Printf("fundamentals: %s rate limited, skipping fundamentals for %s", p.Name(), entry.Symbol)
 			continue
 		}
 
-		log.Printf("fundamentals: %s fetching fundamentals for %s", p.Name(), symbol)
+		log.Printf("fundamentals: %s fetching fundamentals for %s", p.Name(), entry.Symbol)
 		state.consume()
-		fund, err := p.FetchFundamentals(symbol)
+		fund, err := p.FetchFundamentals(entry.Symbol)
 		if err != nil {
-			log.Printf("fundamentals: %s error for %s: %v", p.Name(), symbol, err)
+			log.Printf("fundamentals: %s error for %s: %v", p.Name(), entry.Symbol, err)
 			if isRateLimitErr(err) {
 				state.triggerCooldown(cfg)
 			}
 			continue
 		}
 		if fund == nil {
-			log.Printf("fundamentals: %s profile not found for %s", p.Name(), symbol)
+			log.Printf("fundamentals: %s profile not found for %s", p.Name(), entry.Symbol)
 			// Provider has no profile — write a stub so we don't retry too aggressively.
-			s.upsertFundamentals(symbol, &models.AssetFundamental{
-				Symbol:      symbol,
+			stub := &models.AssetFundamental{
+				Symbol:      entry.Symbol,
 				AssetType:   "Unknown",
 				DataSource:  p.Name(),
 				LastUpdated: time.Now().UTC(),
-			})
+			}
+			for _, uid := range entry.UserIDs {
+				s.upsertFundamentals(entry.Symbol, stub, uid)
+			}
 			return
 		}
-		s.upsertFundamentals(symbol, fund)
+		for _, uid := range entry.UserIDs {
+			s.upsertFundamentals(entry.Symbol, fund, uid)
+		}
 		return
 	}
 }
@@ -594,23 +668,27 @@ func (s *Service) fetchOneFundamentals(symbol string) {
 
 // buildBreakdownQueue returns confirmed ETF/Bond ETF symbols for breakdown enrichment,
 // where no breakdown rows were updated today.
-func (s *Service) buildBreakdownQueue(symbols []string, today time.Time) []string {
+func (s *Service) buildBreakdownQueue(symbols []symbolWithUsers, today time.Time) []string {
 	var queue []string
-	for _, sym := range symbols {
+	for _, sw := range symbols {
+		if len(sw.UserIDs) == 0 {
+			continue
+		}
+		// Asset type is universal — check the first available user's record.
 		var rec models.AssetFundamental
-		// Only confirmed equity or bond ETFs.
-		if err := s.DB.Where("symbol = ? AND asset_type IN ?", sym, []string{"ETF", "Bond ETF"}).First(&rec).Error; err != nil {
+		if err := s.DB.Where("user_id = ? AND symbol = ? AND asset_type IN ?",
+			sw.UserIDs[0], sw.Symbol, []string{"ETF", "Bond ETF"}).First(&rec).Error; err != nil {
 			continue
 		}
 		// Skip if any breakdown row was updated today.
 		var freshCount int64
 		s.DB.Model(&models.EtfBreakdown{}).
-			Where("fund_symbol = ? AND last_updated >= ?", sym, startOfDay(today)).
+			Where("fund_symbol = ? AND last_updated >= ?", sw.Symbol, startOfDay(today)).
 			Count(&freshCount)
 		if freshCount > 0 {
 			continue
 		}
-		queue = append(queue, sym)
+		queue = append(queue, sw.Symbol)
 	}
 	return queue
 }
@@ -663,31 +741,47 @@ func (s *Service) fetchOneBreakdown(fundSymbol string) {
 
 // updateBondETFMeta sets asset_type="Bond ETF" and stores duration for a confirmed bond ETF.
 func (s *Service) updateBondETFMeta(symbol string, duration *float64) {
-	updates := map[string]interface{}{
-		"asset_type":   "Bond ETF",
-		"last_updated": time.Now().UTC(),
+	// asset_type: skip user-edited rows so manual classifications are preserved.
+	if err := s.DB.Model(&models.AssetFundamental{}).
+		Where("symbol = ? AND data_source != 'User'", symbol).
+		Update("asset_type", "Bond ETF").Error; err != nil {
+		log.Printf("fundamentals: updateBondETFMeta asset_type %s: %v", symbol, err)
 	}
+	// duration + last_updated: always refresh — duration changes over time and users cannot set it.
+	durationUpdates := map[string]interface{}{"last_updated": time.Now().UTC()}
 	if duration != nil {
-		updates["duration"] = *duration
+		durationUpdates["duration"] = *duration
 	}
-	if err := s.DB.Model(&models.AssetFundamental{}).Where("symbol = ?", symbol).Updates(updates).Error; err != nil {
-		log.Printf("fundamentals: updateBondETFMeta %s: %v", symbol, err)
+	if err := s.DB.Model(&models.AssetFundamental{}).
+		Where("symbol = ?", symbol).
+		Updates(durationUpdates).Error; err != nil {
+		log.Printf("fundamentals: updateBondETFMeta duration %s: %v", symbol, err)
 	}
 }
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
-// upsertFundamentals writes/updates an AssetFundamental row.
-func (s *Service) upsertFundamentals(symbol string, f *models.AssetFundamental) {
+// upsertFundamentals writes/updates an AssetFundamental row for the given user.
+// Skips silently when the existing row has DataSource="User" (user-edited records are preserved).
+func (s *Service) upsertFundamentals(symbol string, f *models.AssetFundamental, userID uint) {
+	// Never overwrite records the user has manually edited.
+	var existing models.AssetFundamental
+	if s.DB.Where("user_id = ? AND symbol = ?", userID, symbol).First(&existing).Error == nil {
+		if existing.DataSource == "User" {
+			return
+		}
+	}
+	row := *f // shallow copy so we can set UserID without mutating the shared template
+	row.UserID = userID
 	err := s.DB.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "symbol"}},
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "symbol"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"name", "country", "sector",
-			"exchange", "data_source", "last_updated",
+			"data_source", "last_updated",
 		}),
-	}).Create(f).Error
+	}).Create(&row).Error
 	if err != nil {
-		log.Printf("fundamentals: upsert %s: %v", symbol, err)
+		log.Printf("fundamentals: upsert %s (user=%d): %v", symbol, userID, err)
 	}
 }
 
@@ -702,10 +796,10 @@ func (s *Service) upsertBreakdowns(fundSymbol string, rows []models.EtfBreakdown
 	}
 }
 
-// GetFundamentals returns cached AssetFundamental for symbol (no external calls).
-func (s *Service) GetFundamentals(symbol string) (*models.AssetFundamental, error) {
+// GetFundamentals returns cached AssetFundamental for symbol scoped to userID (no external calls).
+func (s *Service) GetFundamentals(symbol string, userID uint) (*models.AssetFundamental, error) {
 	var f models.AssetFundamental
-	if err := s.DB.Where("symbol = ?", symbol).First(&f).Error; err != nil {
+	if err := s.DB.Where("user_id = ? AND symbol = ?", userID, symbol).First(&f).Error; err != nil {
 		return nil, nil
 	}
 	return &f, nil

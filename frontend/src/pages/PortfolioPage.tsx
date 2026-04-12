@@ -4,13 +4,13 @@ import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
-import SymbolMappingModal from '../components/SymbolMappingModal'
+import EditAssetModal from '../components/EditAssetModal'
 import AddTransactionModal from '../components/AddTransactionModal'
 import DateRangePicker from '../components/DateRangePicker'
 import { TradeDetail } from '../components/TradeDetail'
 import ErrorAlert from '../components/ErrorAlert'
-import { getPortfolioValue, getPortfolioPriceHistory, updateSymbolMapping, type PositionValue, type SymbolPriceHistory } from '../api'
-import { formatCurrency, formatNumber, formatDate } from '../utils/format'
+import { getPortfolioValue, getPortfolioPriceHistory, type PositionValue, type SymbolPriceHistory } from '../api'
+import { formatCurrency, formatNumber, formatQuantity, formatDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
 
@@ -67,7 +67,7 @@ export default function PortfolioPage() {
   const [valueRefreshing, setValueRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [mappingTarget, setMappingTarget] = useState<{ symbol: string; yahooSymbol?: string; exchange?: string } | null>(null)
+  const [mappingTarget, setMappingTarget] = useState<PositionValue | null>(null)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'desc' | 'asc' | null>(null)
   const [priceHistory, setPriceHistory] = useState<Record<string, SymbolPriceHistory>>({})
@@ -172,20 +172,9 @@ export default function PortfolioPage() {
     })
   }
 
-  const handleMapSymbol = (e: React.MouseEvent, symbol: string, currentYahooSymbol?: string, exchange?: string) => {
+  const handleEditAsset = (e: React.MouseEvent, pos: PositionValue) => {
     e.stopPropagation()
-    setMappingTarget({ symbol, yahooSymbol: currentYahooSymbol, exchange })
-  }
-
-  const handleMapConfirm = async (yahooSymbol: string) => {
-    if (!mappingTarget) return
-    try {
-      await updateSymbolMapping(mappingTarget.symbol, yahooSymbol, mappingTarget.exchange)
-      setMappingTarget(null)
-      await loadData()
-    } catch {
-      window.alert('Failed to map symbol')
-    }
+    setMappingTarget(pos)
   }
 
   const toggleExpand = (symbol: string, exchange?: string) => {
@@ -241,10 +230,9 @@ export default function PortfolioPage() {
   return (
     <PageLayout maxWidth="max-w-[1400px]">
       {mappingTarget && (
-        <SymbolMappingModal
-          symbol={mappingTarget.symbol}
-          currentYahooSymbol={mappingTarget.yahooSymbol}
-          onConfirm={handleMapConfirm}
+        <EditAssetModal
+          position={mappingTarget}
+          onSuccess={loadData}
           onClose={() => setMappingTarget(null)}
         />
       )}
@@ -260,7 +248,7 @@ export default function PortfolioPage() {
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 text-slate-300 align-middle">
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </span>{' '}
-              pencil icon next to each position to adjust Yahoo! Finance symbol mappings.<br/>This ensures accurate price data and performance calculations.
+              pencil icon next to each position to edit asset details including the Yahoo Finance symbol mapping.<br/>This ensures accurate price data and performance calculations.
             </p>
           </div>
           <button
@@ -469,14 +457,14 @@ export default function PortfolioPage() {
                             <div className="flex items-center gap-0.5 shrink-0">
                               <div className="relative group">
                                 <button
-                                  onClick={(e) => handleMapSymbol(e, pos.symbol, pos.yahoo_symbol, pos.listing_exchange)}
+                                  onClick={(e) => handleEditAsset(e, pos)}
                                   className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
                                 >
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                   </svg>
                                 </button>
-                                <HoverTooltip direction="down" className="w-max whitespace-nowrap">Edit Yahoo! symbol</HoverTooltip>
+                                <HoverTooltip direction="down" className="w-max whitespace-nowrap">Edit asset details</HoverTooltip>
                               </div>
                               <div className="relative group">
                                 <button
@@ -507,7 +495,7 @@ export default function PortfolioPage() {
                         </div>
                       </div>
 
-                      <div className="col-span-1 text-right text-sm text-slate-300 font-medium tabular-nums">{privacy ? '—' : formatNumber(pos.quantity, 0)}</div>
+                      <div className="col-span-1 text-right text-sm text-slate-300 font-medium tabular-nums">{privacy ? '—' : formatQuantity(pos.quantity)}</div>
 
                       {/* Price cell — always visible, cost basis labeled clearly */}
                       <div className="col-span-2 text-right">

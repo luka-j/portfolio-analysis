@@ -351,7 +351,6 @@ func TestGetAssetProfileStock(t *testing.T) {
 	assert.Equal(t, "Apple Inc.", profile.Name)
 	assert.Equal(t, "United States", profile.Country)
 	assert.Equal(t, "Technology", profile.Sector)
-	assert.Equal(t, "NMS", profile.Exchange)
 }
 
 func TestGetAssetProfileETFFallsBackToFundProfile(t *testing.T) {
@@ -370,7 +369,6 @@ func TestGetAssetProfileETFFallsBackToFundProfile(t *testing.T) {
 	require.NotNil(t, profile)
 	assert.Equal(t, "Vanguard FTSE All-World UCITS ETF", profile.Name)
 	assert.Equal(t, "", profile.Country) // ETFs have no country in assetProfile
-	assert.Equal(t, "LSE", profile.Exchange)
 }
 
 func TestGetAssetProfileFallsBackToPriceLongName(t *testing.T) {
@@ -388,7 +386,6 @@ func TestGetAssetProfileFallsBackToPriceLongName(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, profile)
 	assert.Equal(t, "Some Asset Name", profile.Name)
-	assert.Equal(t, "NYSE", profile.Exchange)
 }
 
 func TestGetAssetProfileSymbolNotFound(t *testing.T) {

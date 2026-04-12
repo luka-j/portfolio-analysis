@@ -29,13 +29,12 @@ type ETFSummaryResult struct {
 	Duration   float64              // effective duration in years; 0 if not available
 }
 
-// AssetProfileResult holds the name, country, sector, and exchange for a symbol.
+// AssetProfileResult holds the name, country, and sector for a symbol.
 // Populated from the assetProfile (stocks), fundProfile (ETFs), and price modules.
 type AssetProfileResult struct {
-	Name     string
-	Country  string
-	Sector   string
-	Exchange string
+	Name    string
+	Country string
+	Sector  string
 }
 
 // CrumbManager handles Yahoo Finance cookie+crumb authentication required by the
@@ -486,10 +485,9 @@ func (s *YahooFinanceService) doQuoteSummary(symbol, crumb, modules string) (*ET
 	var profile *AssetProfileResult
 	if name != "" || r.AssetProfile.Country != "" || r.AssetProfile.Sector != "" {
 		profile = &AssetProfileResult{
-			Name:     name,
-			Country:  r.AssetProfile.Country,
-			Sector:   r.AssetProfile.Sector,
-			Exchange: r.Price.ExchangeName,
+			Name:    name,
+			Country: r.AssetProfile.Country,
+			Sector:  r.AssetProfile.Sector,
 		}
 	}
 

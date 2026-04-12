@@ -41,7 +41,7 @@ func TestCalculateStockPosition(t *testing.T) {
 	})
 
 	svc := NewService(db)
-	result, err := svc.Calculate([]models.PositionValue{pos("AAPL", "", 1000)}, "USD")
+	result, err := svc.Calculate([]models.PositionValue{pos("AAPL", "", 1000)}, "USD", 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "USD", result.Currency)
@@ -68,7 +68,7 @@ func TestCalculateETFWithBreakdown(t *testing.T) {
 	db.Create(&models.EtfBreakdown{FundSymbol: "VWCE.DE", Dimension: "country", Label: "Japan", Weight: 0.10, LastUpdated: now})
 
 	svc := NewService(db)
-	result, err := svc.Calculate([]models.PositionValue{pos("VWCE.DE", "VWCE.DE", 1000)}, "USD")
+	result, err := svc.Calculate([]models.PositionValue{pos("VWCE.DE", "VWCE.DE", 1000)}, "USD", 0)
 	require.NoError(t, err)
 
 	bySector := findSection(t, result.Sections, "By Sector")
@@ -99,7 +99,7 @@ func TestCalculateETFWithMissingBreakdown(t *testing.T) {
 	// No EtfBreakdown rows seeded.
 
 	svc := NewService(db)
-	result, err := svc.Calculate([]models.PositionValue{pos("SPY", "", 2000)}, "USD")
+	result, err := svc.Calculate([]models.PositionValue{pos("SPY", "", 2000)}, "USD", 0)
 	require.NoError(t, err)
 
 	byCountry := findSection(t, result.Sections, "By Country")
@@ -122,7 +122,7 @@ func TestCalculateMixedPortfolio(t *testing.T) {
 		pos("AAPL", "", 1000),
 		pos("VWCE.DE", "VWCE.DE", 1000),
 	}
-	result, err := svc.Calculate(positions, "USD")
+	result, err := svc.Calculate(positions, "USD", 0)
 	require.NoError(t, err)
 
 	// Total = 2000. Sections should sum to ~100%.
@@ -143,7 +143,7 @@ func TestCalculateMixedPortfolio(t *testing.T) {
 func TestCalculateEmptyPortfolio(t *testing.T) {
 	db := setupTestDB(t)
 	svc := NewService(db)
-	result, err := svc.Calculate(nil, "USD")
+	result, err := svc.Calculate(nil, "USD", 0)
 	require.NoError(t, err)
 	assert.Equal(t, "USD", result.Currency)
 	assert.Empty(t, result.Sections)

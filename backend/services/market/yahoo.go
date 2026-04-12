@@ -120,6 +120,10 @@ func (s *YahooFinanceService) HasCachedData(symbol string) bool {
 // Concurrent callers for the same (symbol, from, to) are collapsed via singleflight
 // so that only one upstream Yahoo fetch is issued and all callers share the result.
 func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+	// PENDING_CASH is a synthetic cash bucket, not a real security — skip entirely.
+	if symbol == "PENDING_CASH" {
+		return nil, nil
+	}
 	// Truncate dates to midnight for consistency.
 	fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
 	toDate := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)

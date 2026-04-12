@@ -34,7 +34,7 @@ func (p *YahooFundamentalsProvider) Name() string { return "Yahoo" }
 // RateLimit returns the configured rate limit.
 func (p *YahooFundamentalsProvider) RateLimit() RateLimitConfig { return p.rateLimit }
 
-// FetchFundamentals fetches name, country, sector, and exchange for the given symbol
+// FetchFundamentals fetches name, country, and sector for the given symbol
 // from Yahoo Finance. Returns nil, nil when the symbol is not found.
 func (p *YahooFundamentalsProvider) FetchFundamentals(symbol string) (*models.AssetFundamental, error) {
 	profile, err := p.yahoo.GetAssetProfile(symbol)
@@ -49,7 +49,6 @@ func (p *YahooFundamentalsProvider) FetchFundamentals(symbol string) (*models.As
 		Name:        profile.Name,
 		Country:     emptyToUnknown(profile.Country),
 		Sector:      emptyToUnknown(profile.Sector),
-		Exchange:    profile.Exchange,
 		DataSource:  "Yahoo",
 		LastUpdated: time.Now().UTC(),
 	}, nil
