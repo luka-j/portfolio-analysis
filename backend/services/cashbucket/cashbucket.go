@@ -38,34 +38,80 @@ type Result struct {
 // For Original accounting mode it should return the amount unchanged.
 type ConvertFn func(amount float64, from string, date time.Time) (float64, error)
 
+// Dividend is a corporate cash dividend that creates a pending-cash bucket,
+// just like a sell's proceeds. It participates in the same FIFO consumption
+// and expiry logic so subsequent buys can draw from it.
+type Dividend struct {
+	DateTime time.Time
+	Amount   float64
+	Currency string
+}
+
 // truncDate returns t rounded down to midnight UTC so that BalanceChange dates
 // align with the calendar-day granularity used by GetDailyValues.
 func truncDate(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// Process applies cash-bucket logic to a list of trades and dividend cash flows.
-// Sells create buckets; buys consume from the oldest bucket first (FIFO). Dividends pass through
-// unchanged. Buckets that are still non-empty after expiryDays become real outflows on their expiry date.
+// event is a unified trade-or-dividend record used for chronological processing.
+type event struct {
+	dt       time.Time
+	trade    *models.Trade
+	dividend *Dividend
+}
+
+// Process applies cash-bucket logic to a list of trades, dividend cash flows, and cash dividends.
+// Sells and cash dividends create buckets; buys consume from the oldest bucket first (FIFO).
+// DividendFlows pass through unchanged as real cash flows.
+// Buckets that are still non-empty after expiryDays become real outflows on their expiry date.
 func Process(
 	trades []models.Trade,
 	dividendFlows []models.CashFlow,
+	cashDividends []Dividend,
 	expiryDays int,
 	asOf time.Time,
 	convertFn ConvertFn,
 ) (*Result, error) {
-	// Sort trades chronologically.
-	sorted := make([]models.Trade, len(trades))
-	copy(sorted, trades)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].DateTime.Before(sorted[j].DateTime)
+	// Build a unified, chronologically-sorted event list.
+	events := make([]event, 0, len(trades)+len(cashDividends))
+	for i := range trades {
+		events = append(events, event{dt: trades[i].DateTime, trade: &trades[i]})
+	}
+	for i := range cashDividends {
+		events = append(events, event{dt: cashDividends[i].DateTime, dividend: &cashDividends[i]})
+	}
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].dt.Before(events[j].dt)
 	})
 
 	var buckets []*Bucket
 	var adjustedFlows []models.CashFlow
 	var balanceChanges []BalanceChange
 
-	for _, t := range sorted {
+	for _, ev := range events {
+		// Handle corporate cash dividends — they create pending-cash buckets.
+		if ev.dividend != nil {
+			d := ev.dividend
+			converted, err := convertFn(d.Amount, d.Currency, d.DateTime)
+			if err != nil {
+				return nil, err
+			}
+			if converted > 0 {
+				expiry := d.DateTime.AddDate(0, 0, expiryDays)
+				buckets = append(buckets, &Bucket{
+					Date:       d.DateTime,
+					Remaining:  converted,
+					ExpiryDate: expiry,
+				})
+				balanceChanges = append(balanceChanges, BalanceChange{
+					Date:  truncDate(d.DateTime),
+					Delta: +converted,
+				})
+			}
+			continue
+		}
+
+		t := *ev.trade
 		if models.IsFXTrade(t) || t.BuySell == "TRANSFER_IN" {
 			continue
 		}

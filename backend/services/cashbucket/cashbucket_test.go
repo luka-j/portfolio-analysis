@@ -52,7 +52,7 @@ func TestNoSells(t *testing.T) {
 	}
 	asOf := d(2024, 3, 1)
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// The buy with no preceding sell creates a real inflow of 1000.
@@ -69,7 +69,7 @@ func TestSellThenBuySameCurrencyWithinWindow(t *testing.T) {
 	}
 	asOf := d(2024, 1, 25) // within 30 days of sell
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// No outflows from sell (absorbed), no inflows from buy (covered by bucket).
@@ -106,7 +106,7 @@ func TestSellUSDThenBuyEURWithinWindow(t *testing.T) {
 	}
 	asOf := d(2024, 1, 25)
 
-	result, err := Process(trades, nil, 30, asOf, convert)
+	result, err := Process(trades, nil, nil, 30, asOf, convert)
 	require.NoError(t, err)
 
 	// Buy cost = 800 EUR * 1.1 = 880 USD equivalent. Bucket starts at 1000.
@@ -125,7 +125,7 @@ func TestSellPartialBuy(t *testing.T) {
 	// asOf is after the 30-day expiry window (Jan 10 + 30 = Feb 9).
 	asOf := d(2024, 3, 1)
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Bucket starts at 1000, buy consumes 400 → remaining 600.
@@ -143,7 +143,7 @@ func TestSellNoBuyBucketExpires(t *testing.T) {
 	}
 	asOf := d(2024, 3, 1) // Feb 9 expiry has already passed
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	assert.Equal(t, 0.0, result.PendingCash)
@@ -161,7 +161,7 @@ func TestMultipleSellsFIFO(t *testing.T) {
 	}
 	asOf := d(2024, 1, 28) // within 30d of both sells
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// First bucket: 500 consumed entirely (remaining 0).
@@ -179,7 +179,7 @@ func TestBuyExceedsAllBuckets(t *testing.T) {
 	}
 	asOf := d(2024, 1, 28) // within 30d
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Bucket covers 500. Excess = 300 → real inflow (deposit with negative amount convention).
@@ -199,7 +199,7 @@ func TestSellAndBuySameDay(t *testing.T) {
 	}
 	asOf := d(2024, 3, 1)
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Bucket 1000, buy consumes 900 → pending 100. Expiry on Feb 9 < asOf → becomes outflow.
@@ -216,7 +216,7 @@ func TestZeroExpiryDays(t *testing.T) {
 	}
 	asOf := d(2024, 3, 1)
 
-	result, err := Process(trades, nil, 0, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 0, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// With expiryDays=0, the sell bucket expires immediately.
@@ -246,7 +246,7 @@ func TestDividendsPassThrough(t *testing.T) {
 	}
 	asOf := d(2024, 1, 25) // within 30d window; sell bucket still active
 
-	result, err := Process(trades, dividends, 30, asOf, noopConvert)
+	result, err := Process(trades, dividends, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Pending cash from bucket = 1000.
@@ -265,7 +265,7 @@ func TestBucketPartiallyConsumedThenExpires(t *testing.T) {
 	// asOf after expiry (Jan 10 + 30 = Feb 9).
 	asOf := d(2024, 2, 20)
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Bucket 1000 - 300 = 700 remaining → expires → outflow of 700 on Feb 9.
@@ -290,7 +290,7 @@ func TestBalanceChanges_SellOnly_ActiveBucket(t *testing.T) {
 	trades := []models.Trade{sell(d(2024, 1, 10), 1000)}
 	asOf := d(2024, 1, 25) // bucket expires Feb 9 — still active
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Sell: +1000 on Jan 10.
@@ -315,7 +315,7 @@ func TestBalanceChanges_SellPartialBuyExpiry(t *testing.T) {
 	}
 	asOf := d(2024, 3, 1) // after expiry (Feb 9)
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Expect: sell +1000, buy consume −400, expiry −600.
@@ -343,7 +343,7 @@ func TestBalanceChanges_FullyConsumedBucket(t *testing.T) {
 	}
 	asOf := d(2024, 3, 1)
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Sell +1000, buy consume −1000. No expiry (remaining == 0).
@@ -361,7 +361,7 @@ func TestBalanceChanges_ZeroExpiryDays(t *testing.T) {
 	trades := []models.Trade{sell(d(2024, 1, 10), 1000)}
 	asOf := d(2024, 3, 1)
 
-	result, err := Process(trades, nil, 0, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 0, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Sell +1000 and same-day expiry −1000 both on Jan 10.
@@ -394,10 +394,82 @@ func TestFXTradesIgnored(t *testing.T) {
 	}
 	asOf := d(2024, 1, 25)
 
-	result, err := Process(trades, nil, 30, asOf, noopConvert)
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
 	require.NoError(t, err)
 
 	// Only the normal sell created a bucket.
 	assert.InDelta(t, 500, result.PendingCash, 0.01)
 	assert.Empty(t, result.AdjustedCashFlows)
+}
+
+// TestCashDividend_CreatesBucket verifies that a corporate cash dividend creates a pending-cash bucket.
+func TestCashDividend_CreatesBucket(t *testing.T) {
+	divs := []Dividend{
+		{DateTime: d(2024, 1, 10), Amount: 500, Currency: "USD"},
+	}
+	asOf := d(2024, 1, 25)
+
+	result, err := Process(nil, nil, divs, 30, asOf, noopConvert)
+	require.NoError(t, err)
+	assert.InDelta(t, 500, result.PendingCash, 0.01)
+}
+
+// TestCashDividend_BuyConsumesDividendBucket verifies that a buy after a cash dividend consumes the bucket.
+func TestCashDividend_BuyConsumesDividendBucket(t *testing.T) {
+	divs := []Dividend{
+		{DateTime: d(2024, 1, 1), Amount: 500, Currency: "USD"},
+	}
+	trades := []models.Trade{
+		buy(d(2024, 1, 5), -200), // cost = 200, consumes 200 from the dividend bucket
+	}
+	asOf := d(2024, 1, 25)
+
+	result, err := Process(trades, nil, divs, 30, asOf, noopConvert)
+	require.NoError(t, err)
+	assert.InDelta(t, 300, result.PendingCash, 0.01)
+}
+
+// TestCashDividend_ExpiredBucketNotPending verifies that an expired dividend bucket does not count as pending cash.
+func TestCashDividend_ExpiredBucketNotPending(t *testing.T) {
+	divs := []Dividend{
+		{DateTime: d(2024, 1, 1), Amount: 500, Currency: "USD"},
+	}
+	asOf := d(2024, 3, 1) // well past 30-day expiry
+
+	result, err := Process(nil, nil, divs, 30, asOf, noopConvert)
+	require.NoError(t, err)
+	assert.InDelta(t, 0, result.PendingCash, 0.01)
+}
+
+// TestCashDividend_ChronologicalWithTrades verifies that dividends and trades are processed in chronological order.
+func TestCashDividend_ChronologicalWithTrades(t *testing.T) {
+	// BUY on day 1, dividend on day 3, sell on day 5.
+	// The BUY precedes both bucket sources and should not consume them.
+	divs := []Dividend{
+		{DateTime: d(2024, 1, 3), Amount: 50, Currency: "USD"},
+	}
+	trades := []models.Trade{
+		buy(d(2024, 1, 1), -100),         // before dividend/sell, treated as real deposit
+		sell(d(2024, 1, 5), 200),          // creates 200 bucket after dividend
+	}
+	asOf := d(2024, 1, 25)
+
+	result, err := Process(trades, nil, divs, 30, asOf, noopConvert)
+	require.NoError(t, err)
+	// dividend bucket = 50, sell bucket = 200; BUY on day 1 has no bucket to consume.
+	assert.InDelta(t, 250, result.PendingCash, 0.01)
+}
+
+// TestProcess_NilDividends_Unchanged is a regression guard: passing nil cashDividends must not change
+// the existing sell-then-buy behaviour.
+func TestProcess_NilDividends_Unchanged(t *testing.T) {
+	trades := []models.Trade{
+		sell(d(2024, 1, 1), 1000),
+		buy(d(2024, 1, 5), -400),
+	}
+	asOf := d(2024, 1, 25)
+
+	result, err := Process(trades, nil, nil, 30, asOf, noopConvert)
+	require.NoError(t, err)
+	assert.InDelta(t, 600, result.PendingCash, 0.01)
 }

@@ -64,10 +64,59 @@ type FlexQueryData struct {
 	Trades           []Trade           `json:"trades"`
 	OpenPositions    []OpenPosition    `json:"open_positions"`
 	CashTransactions []CashTransaction `json:"cash_transactions"`
+	// ParsedCorporateActions holds raw corporate actions from the XML, processed by the repository.
+	ParsedCorporateActions []ParsedCorporateAction `json:"-"`
+	// CashDividends holds cash dividend corporate actions loaded from DB, fed into cashbucket.
+	CashDividends []CashDividend `json:"-"`
 	// UserHash is the scoped owner of this data set, set by Repository.LoadSaved.
 	// Used by the portfolio service for request-level singleflight dedup so that
 	// concurrent handlers for the same user share a single computation.
 	UserHash string `json:"-"`
+}
+
+// ParsedCorporateAction is the output of parsing one CorporateAction XML element.
+type ParsedCorporateAction struct {
+	ActionID    string
+	Type        string // IC, FS, RS, SD, CD
+	Symbol      string
+	Conid       string
+	Currency    string
+	Quantity    float64
+	Amount      float64
+	DateTime    time.Time
+	Description string
+}
+
+// CashDividend is a corporate-action cash dividend used by the cashbucket package.
+// Loaded from the cash_dividend_records table by Repository.LoadSaved.
+type CashDividend struct {
+	ActionID    string
+	Symbol      string
+	Currency    string
+	Amount      float64
+	DateTime    time.Time
+	Description string
+}
+
+// ImportedCorporateAction is a summary of one corporate action returned in the upload API response.
+type ImportedCorporateAction struct {
+	ActionID    string  `json:"action_id"`
+	Type        string  `json:"type"`                    // IC, FS, RS, SD, CD
+	Symbol      string  `json:"symbol"`
+	NewSymbol   string  `json:"new_symbol,omitempty"`
+	Date        string  `json:"date"`                    // YYYY-MM-DD
+	Description string  `json:"description"`
+	SplitRatio  float64 `json:"split_ratio,omitempty"`
+	Quantity    float64 `json:"quantity,omitempty"`
+	Amount      float64 `json:"amount,omitempty"`
+	Currency    string  `json:"currency,omitempty"`
+	IsNew       bool    `json:"is_new"` // false = already existed (idempotent skip)
+}
+
+// ImportResult bundles trade and corporate-action import summaries from ParseAndSave.
+type ImportResult struct {
+	Transactions     []ImportedTransaction
+	CorporateActions []ImportedCorporateAction
 }
 
 // CashFlow is used for MWR/IRR calculation.

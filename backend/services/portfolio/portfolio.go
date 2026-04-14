@@ -719,7 +719,7 @@ func (s *Service) getDailyValuesUncached(
 			}
 			return s.FXService.Convert(amount, cur, currency, date, cachedOnly)
 		}
-		br, err := cashbucket.Process(tradeFlows, nil, s.CashBucketExpiryDays, to, bucketConvertFn)
+		br, err := cashbucket.Process(tradeFlows, nil, nil, s.CashBucketExpiryDays, to, bucketConvertFn)
 		if err != nil {
 			return nil, fmt.Errorf("GetDailyValues bucket balance: %w", err)
 		}
@@ -989,7 +989,7 @@ func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency stri
 		return s.FXService.Convert(amount, from, currency, date, cachedOnly)
 	}
 
-	result, err := cashbucket.Process(rawTradeFlows, dividendFlows, s.CashBucketExpiryDays, asOf, convertFn)
+	result, err := cashbucket.Process(rawTradeFlows, dividendFlows, nil, s.CashBucketExpiryDays, asOf, convertFn)
 	if err != nil {
 		return nil, fmt.Errorf("cashbucket.Process: %w", err)
 	}
@@ -1226,7 +1226,12 @@ func (s *Service) computePendingCashMemo(data *models.FlexQueryData, currency st
 		return memo.Convert(amount, from, currency, date)
 	}
 
-	result, err := cashbucket.Process(trades, nil, s.CashBucketExpiryDays, asOf, convertFn)
+	divs := make([]cashbucket.Dividend, len(data.CashDividends))
+	for i, cd := range data.CashDividends {
+		divs[i] = cashbucket.Dividend{DateTime: cd.DateTime, Amount: cd.Amount, Currency: cd.Currency}
+	}
+
+	result, err := cashbucket.Process(trades, nil, divs, s.CashBucketExpiryDays, asOf, convertFn)
 	if err != nil {
 		return 0, fmt.Errorf("computePendingCash: %w", err)
 	}

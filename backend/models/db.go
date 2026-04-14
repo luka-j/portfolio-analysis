@@ -126,6 +126,38 @@ type CurrentPrice struct {
 	FetchedAt time.Time `gorm:"index"`
 }
 
+// CorporateActionRecord stores every parsed IB corporate action for idempotency tracking and UI display.
+// The unique index on (user_id, action_id) prevents duplicate processing when the same FlexQuery is uploaded twice.
+type CorporateActionRecord struct {
+	ID          uint      `gorm:"primaryKey"`
+	UserID      uint      `gorm:"uniqueIndex:idx_ca_user_action;not null"`
+	ActionID    string    `gorm:"uniqueIndex:idx_ca_user_action;not null"` // IB's actionID attribute
+	Type        string    // IC, FS, RS, SD, CD
+	Symbol      string    `gorm:"index"`
+	NewSymbol   string    // IC only: parsed new ticker
+	Conid       string    `gorm:"index"`
+	Currency    string
+	Quantity    float64  // FS/RS/SD: net share change from IB
+	Amount      float64  // CD: dividend cash amount
+	SplitRatio  float64  // FS/RS: computed ratio (e.g. 4.0 for 4:1 FS, 0.25 for 1:4 RS)
+	DateTime    time.Time `gorm:"index"`
+	Description string
+}
+
+// CashDividendRecord stores corporate-action cash dividends in a separate table.
+// These amounts are fed into the pending-cash bucket calculation.
+// The unique index on (user_id, action_id) prevents duplicate entries.
+type CashDividendRecord struct {
+	ID          uint      `gorm:"primaryKey"`
+	UserID      uint      `gorm:"uniqueIndex:idx_cd_user_action;not null"`
+	ActionID    string    `gorm:"uniqueIndex:idx_cd_user_action;not null"`
+	Symbol      string    `gorm:"index"`
+	Currency    string
+	Amount      float64
+	DateTime    time.Time `gorm:"index"`
+	Description string
+}
+
 // LLMCache stores cached responses from the LLM.
 type LLMCache struct {
 	ID         uint      `gorm:"primaryKey"`

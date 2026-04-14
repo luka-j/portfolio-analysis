@@ -165,12 +165,28 @@ export interface ImportedTransaction {
   suspected_duplicate_id?: string; // PublicID of a manual entry that matches this new row
 }
 
+export interface ImportedCorporateAction {
+  action_id: string;
+  type: string; // IC, FS, RS, SD, CD
+  symbol: string;
+  new_symbol?: string;
+  date: string; // YYYY-MM-DD
+  description: string;
+  split_ratio?: number;
+  quantity?: number;
+  amount?: number;
+  currency?: string;
+  is_new: boolean;
+}
+
 export interface UploadResponse {
   message: string;
   positions_count: number;
   trades_count: number;
   cash_transactions_count: number;
+  corporate_actions_count?: number;
   transactions: ImportedTransaction[];
+  corporate_actions?: ImportedCorporateAction[];
 }
 
 export interface EtradeUploadResponse {

@@ -149,6 +149,9 @@ export default function TaxPage() {
           <p className="text-sm text-slate-500 mt-4 max-w-xl">
             Income and capital gains for Czech tax purposes, based on FIFO reconciliation.
           </p>
+          <p className="text-xs text-amber-500/80 mt-2 max-w-xl">
+            Tax reporting for cash dividends is not yet supported. Dividend income will not appear in this report.
+          </p>
 
           <div className="flex items-end gap-6 mt-6 flex-wrap justify-center">
             <div className="flex flex-col items-center gap-2 w-32">

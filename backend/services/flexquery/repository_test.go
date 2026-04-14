@@ -23,7 +23,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&gorm.Config{},
 	)
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.CurrentPrice{}, &models.AssetFundamental{}, &models.EtfBreakdown{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.CurrentPrice{}, &models.AssetFundamental{}, &models.EtfBreakdown{}, &models.CorporateActionRecord{}, &models.CashDividendRecord{}))
 	return db
 }
 
@@ -434,4 +434,398 @@ func TestLoadSaved_DeduplicationByTransactionID(t *testing.T) {
 	var count int64
 	db.Model(&models.Transaction{}).Where("transaction_id = ?", "T999").Count(&count)
 	assert.Equal(t, int64(1), count, "duplicate trade should be skipped")
+}
+
+// ---------- Helper for corporate action tests ----------
+
+func newRepoWithDB(t *testing.T) (*Repository, models.User) {
+	t.Helper()
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	user := createUserWithHash(t, db, "corp-test-hash")
+	return repo, user
+}
+
+// seedBuyTrade inserts a BUY transaction with explicit qty, price, proceeds, commission.
+func seedBuyTrade(t *testing.T, db *gorm.DB, userID uint, symbol, conid string, dt time.Time, qty, price float64) models.Transaction {
+	t.Helper()
+	txn := models.Transaction{
+		UserID:        userID,
+		Type:          "Trade",
+		TransactionID: fmt.Sprintf("buy-%s-%d", symbol, dt.Unix()),
+		Symbol:        symbol,
+		Conid:         conid,
+		Currency:      "USD",
+		DateTime:      dt,
+		Quantity:      qty,
+		Price:         price,
+		Proceeds:      0,
+		Commission:    0,
+		BuySell:       "BUY",
+		EntryMethod:   "flexquery",
+	}
+	require.NoError(t, db.Create(&txn).Error)
+	return txn
+}
+
+func seedSellTrade(t *testing.T, db *gorm.DB, userID uint, symbol, conid string, dt time.Time, qty, price, proceeds, commission float64) models.Transaction {
+	t.Helper()
+	txn := models.Transaction{
+		UserID:        userID,
+		Type:          "Trade",
+		TransactionID: fmt.Sprintf("sell-%s-%d", symbol, dt.Unix()),
+		Symbol:        symbol,
+		Conid:         conid,
+		Currency:      "USD",
+		DateTime:      dt,
+		Quantity:      qty,
+		Price:         price,
+		Proceeds:      proceeds,
+		Commission:    commission,
+		BuySell:       "SELL",
+		EntryMethod:   "flexquery",
+	}
+	require.NoError(t, db.Create(&txn).Error)
+	return txn
+}
+
+// ---------- parseSplitRatio tests ----------
+
+func TestParseSplitRatio(t *testing.T) {
+	cases := []struct {
+		desc string
+		want float64
+		ok   bool
+	}{
+		{"NVDA(US67066G1040) SPLIT 10 FOR 1", 10.0, true},
+		{"GME(US36467W1099) 1 FOR 25 REVERSE SPLIT", 0.04, true},
+		{"AAPL(US0378331005) SPLIT 4 FOR 1", 4.0, true},
+		{"BYND 1 FOR 3 REVERSE SPLIT", 1.0 / 3.0, true},
+		{"no ratio here", 0, false},
+		{"", 0, false},
+	}
+	for _, c := range cases {
+		ratio, ok := parseSplitRatio(c.desc)
+		assert.Equal(t, c.ok, ok, "ok for %q", c.desc)
+		if c.ok {
+			assert.InDelta(t, c.want, ratio, 1e-9, "ratio for %q", c.desc)
+		}
+	}
+}
+
+// ---------- parseNewSymbol tests ----------
+
+func TestParseNewSymbol(t *testing.T) {
+	cases := []struct {
+		desc, want string
+	}{
+		{"FB(US30303M1027) CHANGE TO: META(US30303M1027)", "META"},
+		{"TWTR RENAMED TO: X", "X"},
+		{"GOOGL SYMBOL CHANGE TO: GOOG", "GOOG"},
+		{"no change info", ""},
+	}
+	for _, c := range cases {
+		got := parseNewSymbol(c.desc)
+		assert.Equal(t, c.want, got, "for %q", c.desc)
+	}
+}
+
+// ---------- IC tests ----------
+
+func TestCorporateAction_IC_RenamesNoConidTransactions(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	splitDt := dt.Add(24 * time.Hour)
+
+	// No-conid transaction — should be renamed.
+	noConidTxn := seedBuyTrade(t, repo.DB, user.ID, "GOOGL", "", dt, 10, 100)
+	// Conid-bearing transaction — must NOT be renamed (LoadSaved handles it dynamically).
+	conidTxn := seedBuyTrade(t, repo.DB, user.ID, "GOOGL", "12345", dt, 5, 100)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "ic-001",
+		Type:        "IC",
+		Symbol:      "GOOGL",
+		DateTime:    splitDt,
+		Description: "GOOGL CHANGE TO: GOOG",
+	}}
+	results := repo.applyCorporateActions(user.ID, actions)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].IsNew)
+	assert.Equal(t, "GOOG", results[0].NewSymbol)
+
+	// No-conid transaction should now be named "GOOG".
+	var renamed models.Transaction
+	require.NoError(t, repo.DB.First(&renamed, noConidTxn.ID).Error)
+	assert.Equal(t, "GOOG", renamed.Symbol)
+
+	// Conid-bearing transaction must still be "GOOGL".
+	var unchanged models.Transaction
+	require.NoError(t, repo.DB.First(&unchanged, conidTxn.ID).Error)
+	assert.Equal(t, "GOOGL", unchanged.Symbol)
+
+	// One CorporateActionRecord must exist.
+	var caCount int64
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("user_id = ? AND action_id = ?", user.ID, "ic-001").Count(&caCount)
+	assert.Equal(t, int64(1), caCount)
+}
+
+func TestCorporateAction_IC_Idempotent(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "ic-idem",
+		Type:        "IC",
+		Symbol:      "OLD",
+		DateTime:    dt,
+		Description: "OLD CHANGE TO: NEW",
+	}}
+
+	repo.applyCorporateActions(user.ID, actions)
+	results := repo.applyCorporateActions(user.ID, actions)
+
+	require.Len(t, results, 1)
+	assert.False(t, results[0].IsNew)
+
+	var caCount int64
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "ic-idem").Count(&caCount)
+	assert.Equal(t, int64(1), caCount)
+}
+
+// ---------- FS / RS tests ----------
+
+func TestCorporateAction_ForwardSplit_ScalesPreSplitTrades(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	splitDt := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	preSplit := seedBuyTrade(t, repo.DB, user.ID, "NVDA", "555", splitDt.Add(-24*time.Hour), 100, 10.0)
+	postSplit := seedBuyTrade(t, repo.DB, user.ID, "NVDA", "555", splitDt.Add(24*time.Hour), 50, 20.0)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "fs-001",
+		Type:        "FS",
+		Symbol:      "NVDA",
+		Conid:       "555",
+		DateTime:    splitDt,
+		Description: "NVDA SPLIT 4 FOR 1",
+	}}
+	results := repo.applyCorporateActions(user.ID, actions)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].IsNew)
+	assert.InDelta(t, 4.0, results[0].SplitRatio, 1e-9)
+
+	var pre, post models.Transaction
+	require.NoError(t, repo.DB.First(&pre, preSplit.ID).Error)
+	require.NoError(t, repo.DB.First(&post, postSplit.ID).Error)
+
+	assert.InDelta(t, 400.0, pre.Quantity, 1e-9, "pre-split qty should be 100*4")
+	assert.InDelta(t, 2.5, pre.Price, 1e-9, "pre-split price should be 10/4")
+	assert.InDelta(t, 50.0, post.Quantity, 1e-9, "post-split qty unchanged")
+	assert.InDelta(t, 20.0, post.Price, 1e-9, "post-split price unchanged")
+}
+
+func TestCorporateAction_ForwardSplit_DoesNotScaleProceeds(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	splitDt := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	txn := seedSellTrade(t, repo.DB, user.ID, "AAPL", "", splitDt.Add(-24*time.Hour), -100, 15.0, 1500.0, -5.0)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "fs-proceeds",
+		Type:        "FS",
+		Symbol:      "AAPL",
+		DateTime:    splitDt,
+		Description: "AAPL SPLIT 4 FOR 1",
+	}}
+	repo.applyCorporateActions(user.ID, actions)
+
+	var updated models.Transaction
+	require.NoError(t, repo.DB.First(&updated, txn.ID).Error)
+	assert.InDelta(t, 1500.0, updated.Proceeds, 1e-9, "proceeds must not change")
+	assert.InDelta(t, -5.0, updated.Commission, 1e-9, "commission must not change")
+	assert.InDelta(t, -400.0, updated.Quantity, 1e-9, "qty scaled")
+	assert.InDelta(t, 3.75, updated.Price, 1e-9, "price scaled")
+}
+
+func TestCorporateAction_ReverseSplit_ScalesPreSplitTrades(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	splitDt := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	txn := seedBuyTrade(t, repo.DB, user.ID, "GME", "", splitDt.Add(-24*time.Hour), 100, 10.0)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "rs-001",
+		Type:        "RS",
+		Symbol:      "GME",
+		DateTime:    splitDt,
+		Description: "GME 1 FOR 4 REVERSE SPLIT",
+	}}
+	repo.applyCorporateActions(user.ID, actions)
+
+	var updated models.Transaction
+	require.NoError(t, repo.DB.First(&updated, txn.ID).Error)
+	assert.InDelta(t, 25.0, updated.Quantity, 1e-9, "qty: 100 * 0.25")
+	assert.InDelta(t, 40.0, updated.Price, 1e-9, "price: 10 / 0.25")
+}
+
+func TestCorporateAction_Split_Idempotent(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	splitDt := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	txn := seedBuyTrade(t, repo.DB, user.ID, "TSLA", "", splitDt.Add(-24*time.Hour), 100, 10.0)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "fs-idem",
+		Type:        "FS",
+		Symbol:      "TSLA",
+		DateTime:    splitDt,
+		Description: "TSLA SPLIT 4 FOR 1",
+	}}
+
+	// Apply twice.
+	repo.applyCorporateActions(user.ID, actions)
+	results := repo.applyCorporateActions(user.ID, actions)
+
+	require.Len(t, results, 1)
+	assert.False(t, results[0].IsNew)
+
+	// Transaction should only be scaled once.
+	var updated models.Transaction
+	require.NoError(t, repo.DB.First(&updated, txn.ID).Error)
+	assert.InDelta(t, 400.0, updated.Quantity, 1e-9, "qty scaled once: 100*4")
+
+	var caCount int64
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "fs-idem").Count(&caCount)
+	assert.Equal(t, int64(1), caCount)
+}
+
+// ---------- SD tests ----------
+
+func TestCorporateAction_SD_InsertsStockDividendTransaction(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "sd-001",
+		Type:        "SD",
+		Symbol:      "AAPL",
+		Conid:       "265598",
+		Currency:    "USD",
+		Quantity:    5.0,
+		DateTime:    dt,
+		Description: "AAPL stock dividend",
+	}}
+	results := repo.applyCorporateActions(user.ID, actions)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].IsNew)
+
+	var txn models.Transaction
+	require.NoError(t, repo.DB.Where("user_id = ? AND transaction_id = ?", user.ID, "sd-001").First(&txn).Error)
+	assert.Equal(t, "STOCK_DIVIDEND", txn.BuySell)
+	assert.Equal(t, "AAPL", txn.Symbol)
+	assert.InDelta(t, 5.0, txn.Quantity, 1e-9)
+}
+
+func TestCorporateAction_SD_Idempotent(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "sd-idem",
+		Type:        "SD",
+		Symbol:      "MSFT",
+		Currency:    "USD",
+		Quantity:    3.0,
+		DateTime:    dt,
+		Description: "MSFT stock dividend",
+	}}
+
+	repo.applyCorporateActions(user.ID, actions)
+	results := repo.applyCorporateActions(user.ID, actions)
+
+	require.Len(t, results, 1)
+	assert.False(t, results[0].IsNew)
+
+	var txnCount, caCount int64
+	repo.DB.Model(&models.Transaction{}).Where("user_id = ? AND transaction_id = ?", user.ID, "sd-idem").Count(&txnCount)
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "sd-idem").Count(&caCount)
+	assert.Equal(t, int64(1), txnCount)
+	assert.Equal(t, int64(1), caCount)
+}
+
+// ---------- CD tests ----------
+
+func TestCorporateAction_CD_InsertsCashDividend(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 4, 15, 0, 0, 0, 0, time.UTC)
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "cd-001",
+		Type:        "CD",
+		Symbol:      "MSFT",
+		Currency:    "USD",
+		Amount:      25.0,
+		DateTime:    dt,
+		Description: "MSFT cash dividend",
+	}}
+	results := repo.applyCorporateActions(user.ID, actions)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].IsNew)
+
+	var cd models.CashDividendRecord
+	require.NoError(t, repo.DB.Where("user_id = ? AND action_id = ?", user.ID, "cd-001").First(&cd).Error)
+	assert.Equal(t, "MSFT", cd.Symbol)
+	assert.InDelta(t, 25.0, cd.Amount, 1e-9)
+	assert.Equal(t, "USD", cd.Currency)
+
+	var caCount int64
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "cd-001").Count(&caCount)
+	assert.Equal(t, int64(1), caCount)
+}
+
+func TestCorporateAction_CD_Idempotent(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 4, 15, 0, 0, 0, 0, time.UTC)
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "cd-idem",
+		Type:        "CD",
+		Symbol:      "AAPL",
+		Currency:    "USD",
+		Amount:      10.0,
+		DateTime:    dt,
+		Description: "AAPL cash dividend",
+	}}
+
+	repo.applyCorporateActions(user.ID, actions)
+	results := repo.applyCorporateActions(user.ID, actions)
+
+	require.Len(t, results, 1)
+	assert.False(t, results[0].IsNew)
+
+	var cdCount int64
+	repo.DB.Model(&models.CashDividendRecord{}).Where("action_id = ?", "cd-idem").Count(&cdCount)
+	assert.Equal(t, int64(1), cdCount)
+}
+
+// ---------- LoadSaved cash dividends test ----------
+
+func TestLoadSaved_PopulatesCashDividends(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	// Seed a CashDividendRecord directly.
+	cd := models.CashDividendRecord{
+		UserID:      user.ID,
+		ActionID:    "cd-load-001",
+		Symbol:      "NVDA",
+		Currency:    "USD",
+		Amount:      42.0,
+		DateTime:    dt,
+		Description: "NVDA dividend",
+	}
+	require.NoError(t, repo.DB.Create(&cd).Error)
+
+	data, err := repo.LoadSaved(user.TokenHash)
+	require.NoError(t, err)
+	require.Len(t, data.CashDividends, 1)
+	assert.Equal(t, "NVDA", data.CashDividends[0].Symbol)
+	assert.InDelta(t, 42.0, data.CashDividends[0].Amount, 1e-9)
 }

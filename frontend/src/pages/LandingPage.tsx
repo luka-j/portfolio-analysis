@@ -9,7 +9,7 @@ import {
   getPortfolioValueMulti, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
   uploadFlexQuery, uploadEtradeBenefits, uploadEtradeSales,
   getLLMSummary,
-  type DailyValue, type ImportedTransaction,
+  type DailyValue, type ImportedTransaction, type ImportedCorporateAction,
 } from '../api'
 import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFromDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
@@ -48,6 +48,7 @@ export default function LandingPage() {
   const [uploadCount, setUploadCount] = useState(0)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadModalTransactions, setUploadModalTransactions] = useState<ImportedTransaction[]>([])
+  const [uploadModalCorporateActions, setUploadModalCorporateActions] = useState<ImportedCorporateAction[]>([])
   const [uploadModalError, setUploadModalError] = useState<string | null>(null)
   const [pendingFirstUpload, setPendingFirstUpload] = useState(false)
 
@@ -270,6 +271,7 @@ export default function LandingPage() {
   const handleModalClose = useCallback(async () => {
     setShowUploadModal(false)
     setUploadModalTransactions([])
+    setUploadModalCorporateActions([])
     setUploadModalError(null)
     setUploadCount(c => c + 1)
     if (pendingFirstUpload) {
@@ -280,19 +282,21 @@ export default function LandingPage() {
     }
   }, [pendingFirstUpload, navigate, loadData])
 
-  type UploadFn = (file: File) => Promise<{ transactions: ImportedTransaction[] }>
+  type UploadFn = (file: File) => Promise<{ transactions: ImportedTransaction[]; corporate_actions?: ImportedCorporateAction[] }>
   const createUploadHandler = (uploadFn: UploadFn) =>
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (!file) return
       setPendingFirstUpload(hasTransactions === false)
       setUploadModalTransactions([])
+      setUploadModalCorporateActions([])
       setUploadModalError(null)
       setShowUploadModal(true)
       setUploading(true)
       try {
         const res = await uploadFn(file)
         setUploadModalTransactions(res.transactions ?? [])
+        setUploadModalCorporateActions(res.corporate_actions ?? [])
       } catch (err) {
         setUploadModalError(err instanceof Error ? err.message : 'Upload failed')
       } finally {
@@ -519,11 +523,6 @@ export default function LandingPage() {
                 Processing upload…
               </div>
             )}
-            {uploadMsg && (
-              <div className="px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-emerald-500/10 backdrop-blur-3xl">
-                {uploadMsg}
-              </div>
-            )}
             {error && (
               <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-red-500/10 backdrop-blur-3xl">
                 {error}
@@ -709,6 +708,7 @@ export default function LandingPage() {
         uploading={uploading}
         error={uploadModalError}
         transactions={uploadModalTransactions}
+        corporateActions={uploadModalCorporateActions}
         onClose={handleModalClose}
       />
     </div>

@@ -24,11 +24,12 @@ type flexStatements struct {
 }
 
 type flexStatement struct {
-	AccountID        string           `xml:"accountId,attr"`
-	Trades           xmlTrades        `xml:"Trades"`
-	Transfers        xmlTransfers     `xml:"Transfers"`
-	OpenPositions    xmlOpenPositions `xml:"OpenPositions"`
-	CashTransactions xmlCashTxns      `xml:"CashTransactions"`
+	AccountID        string              `xml:"accountId,attr"`
+	Trades           xmlTrades           `xml:"Trades"`
+	Transfers        xmlTransfers        `xml:"Transfers"`
+	OpenPositions    xmlOpenPositions    `xml:"OpenPositions"`
+	CashTransactions xmlCashTxns         `xml:"CashTransactions"`
+	CorporateActions xmlCorporateActions `xml:"CorporateActions"`
 }
 
 type xmlTrades struct {
@@ -100,6 +101,32 @@ type xmlCashTxn struct {
 	Description   string `xml:"description,attr"`
 	Symbol        string `xml:"symbol,attr"`
 	TransactionID string `xml:"transactionID,attr"` // IB unique identifier
+}
+
+type xmlCorporateActions struct {
+	Items []xmlCorporateAction `xml:"CorporateAction"`
+}
+
+type xmlCorporateAction struct {
+	Type        string `xml:"type,attr"`
+	Symbol      string `xml:"symbol,attr"`
+	Conid       string `xml:"conid,attr"`
+	Currency    string `xml:"currency,attr"`
+	Quantity    string `xml:"quantity,attr"`
+	Amount      string `xml:"amount,attr"`
+	DateTime    string `xml:"dateTime,attr"`
+	ReportDate  string `xml:"reportDate,attr"`
+	Description string `xml:"description,attr"`
+	ActionID    string `xml:"actionID,attr"`
+}
+
+// supportedCorporateActionTypes is the set of IB corporate action types we handle.
+var supportedCorporateActionTypes = map[string]bool{
+	"IC": true, // Issue change (ticker rename)
+	"FS": true, // Forward split
+	"RS": true, // Reverse split
+	"SD": true, // Stock dividend
+	"CD": true, // Cash dividend
 }
 
 // Parser handles parsing IB FlexQuery XML files into FlexQueryData.
@@ -211,6 +238,34 @@ func (p *Parser) Parse(r io.Reader) (*models.FlexQueryData, error) {
 			DateTime:      dt,
 			Description:   ct.Description,
 			Symbol:        ct.Symbol,
+		})
+	}
+
+	// Parse corporate actions (IC, FS, RS, SD, CD only; unsupported types are logged and skipped).
+	for _, ca := range stmt.CorporateActions.Items {
+		if !supportedCorporateActionTypes[ca.Type] {
+			log.Printf("flexquery: skipping unsupported corporate action type %q for %s", ca.Type, ca.Symbol)
+			continue
+		}
+		if ca.ActionID == "" {
+			log.Printf("flexquery: skipping corporate action with empty actionID for %s (%s)", ca.Symbol, ca.Type)
+			continue
+		}
+		dt, err := parseIBDateTime(ca.DateTime, ca.ReportDate)
+		if err != nil {
+			log.Printf("flexquery: skipping corporate action %s/%s: bad date: %v", ca.Symbol, ca.Type, err)
+			continue
+		}
+		data.ParsedCorporateActions = append(data.ParsedCorporateActions, models.ParsedCorporateAction{
+			ActionID:    ca.ActionID,
+			Type:        ca.Type,
+			Symbol:      ca.Symbol,
+			Conid:       ca.Conid,
+			Currency:    ca.Currency,
+			Quantity:    parseFloat(ca.Quantity),
+			Amount:      parseFloat(ca.Amount),
+			DateTime:    dt,
+			Description: ca.Description,
 		})
 	}
 

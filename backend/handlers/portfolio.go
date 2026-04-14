@@ -63,7 +63,7 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	data, imported, err := h.Repo.ParseAndSave(file, userHash)
+	data, result, err := h.Repo.ParseAndSave(file, userHash)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "parse error: " + err.Error()})
 		return
@@ -73,11 +73,13 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":                 "upload successful",
-		"positions_count":         len(data.OpenPositions),
-		"trades_count":            len(data.Trades),
-		"cash_transactions_count": len(data.CashTransactions),
-		"transactions":            imported,
+		"message":                  "upload successful",
+		"positions_count":          len(data.OpenPositions),
+		"trades_count":             len(data.Trades),
+		"cash_transactions_count":  len(data.CashTransactions),
+		"corporate_actions_count":  len(result.CorporateActions),
+		"transactions":             result.Transactions,
+		"corporate_actions":        result.CorporateActions,
 	})
 }
 

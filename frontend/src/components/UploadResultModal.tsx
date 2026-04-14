@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { deleteTransaction, ImportedTransaction } from '../api';
+import { deleteTransaction, type ImportedTransaction, type ImportedCorporateAction } from '../api';
 import Spinner from './Spinner';
 import HoverTooltip from './HoverTooltip';
 
@@ -8,6 +8,7 @@ interface Props {
   uploading: boolean;
   error: string | null;
   transactions: ImportedTransaction[];
+  corporateActions?: ImportedCorporateAction[];
   onClose: () => void;
 }
 
@@ -15,7 +16,7 @@ type DedupeState = 'pending' | 'accepting' | 'accepted' | 'rejected';
 
 function sideBadge(side: string) {
   const isBuy =
-    side === 'BUY' || side === 'TRANSFER_IN' || side === 'ESPP_VEST' || side === 'RSU_VEST';
+    side === 'BUY' || side === 'TRANSFER_IN' || side === 'ESPP_VEST' || side === 'RSU_VEST' || side === 'STOCK_DIVIDEND';
   const isSell = side === 'SELL' || side === 'TRANSFER_OUT';
   const cls = isBuy
     ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
@@ -40,7 +41,7 @@ function formatQty(n: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(abs);
 }
 
-export default function UploadResultModal({ open, uploading, error, transactions, onClose }: Props) {
+export default function UploadResultModal({ open, uploading, error, transactions, corporateActions, onClose }: Props) {
   const [dedupeStates, setDedupeStates] = useState<Record<string, DedupeState>>({});
   const [bulkAccepting, setBulkAccepting] = useState(false);
 
@@ -55,11 +56,14 @@ export default function UploadResultModal({ open, uploading, error, transactions
   const dupCount = transactions.filter((t) => t.is_duplicate).length;
   const reviewCount = transactions.filter((t) => t.suspected_duplicate_id != null).length;
 
+  const newCaCount = (corporateActions ?? []).filter(a => a.is_new).length;
+
   function summaryText() {
     const parts: string[] = [];
     if (newCount > 0) parts.push(`${newCount} new`);
     if (dupCount > 0) parts.push(`${dupCount} duplicate${dupCount !== 1 ? 's' : ''}`);
     if (reviewCount > 0) parts.push(`${reviewCount} need review`);
+    if (newCaCount > 0) parts.push(`${newCaCount} corporate action${newCaCount !== 1 ? 's' : ''}`);
     return parts.join(' · ');
   }
 
@@ -179,6 +183,47 @@ export default function UploadResultModal({ open, uploading, error, transactions
               </tbody>
             </table>
           )}
+          {/* Corporate actions section */}
+          {!uploading && !error && corporateActions && corporateActions.length > 0 && (
+            <div className="border-t border-white/5">
+              <p className="px-6 pt-4 pb-2 text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                Corporate Actions — {newCaCount} applied
+              </p>
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-panel/95 backdrop-blur-sm">
+                  <tr className="text-[9px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5">
+                    <th className="text-left px-6 py-2">Type</th>
+                    <th className="text-left px-3 py-2">Security</th>
+                    <th className="text-left px-3 py-2">Date</th>
+                    <th className="text-left px-3 py-2">Details</th>
+                    <th className="text-center px-6 py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {corporateActions.map(ca => (
+                    <tr key={ca.action_id} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-6 py-2.5"><CorporateActionTypeBadge type={ca.type} /></td>
+                      <td className="px-3 py-2.5 font-black text-slate-100">{ca.symbol}</td>
+                      <td className="px-3 py-2.5 text-slate-400 tabular-nums">{ca.date}</td>
+                      <td className="px-3 py-2.5 text-slate-400 text-[10px]">
+                        {ca.type === 'IC' && ca.new_symbol && `→ ${ca.new_symbol}`}
+                        {(ca.type === 'FS' || ca.type === 'RS') && ca.split_ratio != null && `ratio ${ca.split_ratio.toFixed(4)}`}
+                        {ca.type === 'SD' && ca.quantity != null && `+${ca.quantity} shares`}
+                        {ca.type === 'CD' && ca.amount != null && `${ca.amount.toFixed(2)} ${ca.currency ?? ''}`}
+                      </td>
+                      <td className="px-6 py-2.5 text-center">
+                        <span className={`px-2 py-0.5 rounded-xl text-[9px] font-black uppercase tracking-widest border ${
+                          ca.is_new
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : 'bg-slate-500/10 text-slate-500 border-slate-500/20'
+                        }`}>{ca.is_new ? 'Applied' : 'Already applied'}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -263,6 +308,22 @@ function StatusBadge({ txn, state }: { txn: ImportedTransaction; state: DedupeSt
   return (
     <span className="px-2 py-0.5 rounded-xl text-[9px] font-black uppercase tracking-widest border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
       New
+    </span>
+  );
+}
+
+function CorporateActionTypeBadge({ type }: { type: string }) {
+  const styles: Record<string, string> = {
+    IC: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+    FS: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+    RS: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+    SD: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    CD: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
+  };
+  const cls = styles[type] ?? 'bg-slate-500/10 text-slate-500 border-slate-500/20';
+  return (
+    <span className={`px-2.5 py-0.5 rounded-2xl text-[9px] font-black uppercase tracking-[0.15em] border ${cls}`}>
+      {type}
     </span>
   );
 }

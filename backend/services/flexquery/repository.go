@@ -6,6 +6,9 @@ import (
 	"io"
 	"log"
 	"math"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,11 +28,46 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{DB: db, parser: &Parser{}}
 }
 
+// splitRatioRe matches IB split descriptions like "SPLIT 10 FOR 1" or "1 FOR 25 REVERSE SPLIT".
+var splitRatioRe = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s+FOR\s+(\d+(?:\.\d+)?)`)
+
+// parseSplitRatio extracts the split multiplier from an IB CorporateAction description.
+// For "SPLIT 4 FOR 1" it returns 4.0; for "1 FOR 25 REVERSE SPLIT" it returns 0.04.
+func parseSplitRatio(desc string) (float64, bool) {
+	m := splitRatioRe.FindStringSubmatch(desc)
+	if m == nil {
+		return 0, false
+	}
+	num, err1 := strconv.ParseFloat(m[1], 64)
+	den, err2 := strconv.ParseFloat(m[2], 64)
+	if err1 != nil || err2 != nil || den == 0 {
+		return 0, false
+	}
+	return num / den, true
+}
+
+// icSymbolRe matches IB IC descriptions like "FB(US...) CHANGE TO: META(US...)" → "META".
+var icSymbolRe = regexp.MustCompile(`(?i)(?:CHANGE TO|RENAMED TO|SYMBOL CHANGE TO):\s*([A-Z0-9.\-]+)`)
+
+// parseNewSymbol extracts the post-rename ticker from an IC CorporateAction description.
+func parseNewSymbol(desc string) string {
+	m := icSymbolRe.FindStringSubmatch(desc)
+	if m == nil {
+		return ""
+	}
+	// IB often appends the ISIN in parentheses: "META(US30303M1027)" — strip it.
+	sym := m[1]
+	if idx := strings.Index(sym, "("); idx != -1 {
+		sym = sym[:idx]
+	}
+	return sym
+}
+
 // ParseAndSave reads an IB FlexQuery XML from r, parses it,
 // and saves new transactions into the database, skipping duplicates.
-// It returns the parsed data (for counts), a per-trade import summary for the
-// upload response, and any error.
-func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.FlexQueryData, []models.ImportedTransaction, error) {
+// It returns the parsed data (for counts), an ImportResult containing per-trade and
+// per-corporate-action summaries for the upload response, and any error.
+func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.FlexQueryData, *models.ImportResult, error) {
 	data, err := r.parser.Parse(reader)
 	if err != nil {
 		return nil, nil, err
@@ -41,7 +79,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 		return nil, nil, fmt.Errorf("getting user: %w", err)
 	}
 
-	var imported []models.ImportedTransaction
+	result := &models.ImportResult{}
 
 	// 2. Insert Trades (with deduplication via IB's TransactionID)
 	for _, t := range data.Trades {
@@ -59,7 +97,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			if err == nil {
 				backfillMissingTradeData(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped (id=%s): %s", t.TransactionID, t.Symbol)
-				imported = append(imported, models.ImportedTransaction{
+				result.Transactions = append(result.Transactions, models.ImportedTransaction{
 					ID:             existing.PublicID,
 					Symbol:         t.Symbol,
 					Date:           t.DateTime.Format("2006-01-02"),
@@ -82,7 +120,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			if err == nil {
 				backfillMissingTradeData(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped: %s %v qty=%v price=%v", t.Symbol, t.DateTime, t.Quantity, t.Price)
-				imported = append(imported, models.ImportedTransaction{
+				result.Transactions = append(result.Transactions, models.ImportedTransaction{
 					ID:             existing.PublicID,
 					Symbol:         t.Symbol,
 					Date:           t.DateTime.Format("2006-01-02"),
@@ -156,7 +194,7 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			}
 		}
 
-		imported = append(imported, it)
+		result.Transactions = append(result.Transactions, it)
 	}
 
 	// 3. Insert Cash Transactions (with deduplication via IB's TransactionID)
@@ -199,8 +237,159 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 		}
 	}
 
+	// 4. Apply corporate actions (IC, FS, RS, SD, CD) with idempotency.
+	result.CorporateActions = r.applyCorporateActions(user.ID, data.ParsedCorporateActions)
+
 	data.UserHash = userHash
-	return data, imported, nil
+	return data, result, nil
+}
+
+// applyCorporateActions processes each parsed corporate action for a user, applying DB mutations
+// and recording the action for idempotency. Already-applied actions are returned with IsNew=false.
+func (r *Repository) applyCorporateActions(userID uint, actions []models.ParsedCorporateAction) []models.ImportedCorporateAction {
+	// Process in chronological order so renames precede splits on the same security.
+	sorted := make([]models.ParsedCorporateAction, len(actions))
+	copy(sorted, actions)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].DateTime.Before(sorted[j].DateTime)
+	})
+
+	var results []models.ImportedCorporateAction
+	for _, a := range sorted {
+		// Idempotency check: skip if this action was already applied.
+		var existing models.CorporateActionRecord
+		if err := r.DB.Where("user_id = ? AND action_id = ?", userID, a.ActionID).First(&existing).Error; err == nil {
+			results = append(results, models.ImportedCorporateAction{
+				ActionID:    a.ActionID,
+				Type:        a.Type,
+				Symbol:      a.Symbol,
+				NewSymbol:   existing.NewSymbol,
+				Date:        a.DateTime.Format("2006-01-02"),
+				Description: a.Description,
+				SplitRatio:  existing.SplitRatio,
+				Quantity:    a.Quantity,
+				Amount:      a.Amount,
+				Currency:    a.Currency,
+				IsNew:       false,
+			})
+			continue
+		}
+
+		rec := models.CorporateActionRecord{
+			UserID:      userID,
+			ActionID:    a.ActionID,
+			Type:        a.Type,
+			Symbol:      a.Symbol,
+			Conid:       a.Conid,
+			Currency:    a.Currency,
+			Quantity:    a.Quantity,
+			Amount:      a.Amount,
+			DateTime:    a.DateTime,
+			Description: a.Description,
+		}
+
+		imported := models.ImportedCorporateAction{
+			ActionID:    a.ActionID,
+			Type:        a.Type,
+			Symbol:      a.Symbol,
+			Date:        a.DateTime.Format("2006-01-02"),
+			Description: a.Description,
+			Quantity:    a.Quantity,
+			Amount:      a.Amount,
+			Currency:    a.Currency,
+			IsNew:       true,
+		}
+
+		switch a.Type {
+		case "IC":
+			newSym := parseNewSymbol(a.Description)
+			if newSym != "" {
+				// Only rename transactions that have no conid — conid-bearing rows are
+				// already normalised dynamically by LoadSaved.
+				r.DB.Model(&models.Transaction{}).
+					Where("user_id = ? AND symbol = ? AND conid = '' AND date_time <= ?", userID, a.Symbol, a.DateTime).
+					Update("symbol", newSym)
+				rec.NewSymbol = newSym
+				imported.NewSymbol = newSym
+			} else {
+				log.Printf("corporate action IC: could not parse new symbol from description %q", a.Description)
+			}
+
+		case "FS", "RS":
+			ratio, ok := parseSplitRatio(a.Description)
+			if !ok {
+				log.Printf("corporate action %s: could not parse split ratio from description %q", a.Type, a.Description)
+			} else {
+				// Update quantity and price for all transactions of this security dated before the split.
+				// Match by conid when available; fall back to symbol for non-IB transactions.
+				query := r.DB.Model(&models.Transaction{}).
+					Where("user_id = ? AND date_time < ?", userID, a.DateTime)
+				if a.Conid != "" {
+					query = query.Where("conid = ? OR (conid = '' AND symbol = ?)", a.Conid, a.Symbol)
+				} else {
+					query = query.Where("symbol = ?", a.Symbol)
+				}
+				query.Updates(map[string]interface{}{
+					"quantity": gorm.Expr("quantity * ?", ratio),
+					"price":    gorm.Expr("price / ?", ratio),
+				})
+				rec.SplitRatio = ratio
+				imported.SplitRatio = ratio
+			}
+
+		case "SD":
+			// Insert a stock dividend transaction, deduped by actionID as transaction_id.
+			var count int64
+			r.DB.Model(&models.Transaction{}).Where("user_id = ? AND transaction_id = ?", userID, a.ActionID).Count(&count)
+			if count == 0 {
+				txn := models.Transaction{
+					UserID:        userID,
+					Type:          "Trade",
+					BuySell:       "STOCK_DIVIDEND",
+					TransactionID: a.ActionID,
+					Symbol:        a.Symbol,
+					Conid:         a.Conid,
+					Currency:      a.Currency,
+					DateTime:      a.DateTime,
+					Quantity:      a.Quantity,
+					Price:         0,
+					Proceeds:      0,
+					Commission:    0,
+					Description:   a.Description,
+					EntryMethod:   "flexquery",
+				}
+				if err := r.DB.Create(&txn).Error; err != nil {
+					log.Printf("corporate action SD: failed to insert transaction: %v", err)
+				}
+			}
+
+		case "CD":
+			// Store in the separate cash_dividends table.
+			var count int64
+			r.DB.Model(&models.CashDividendRecord{}).Where("user_id = ? AND action_id = ?", userID, a.ActionID).Count(&count)
+			if count == 0 {
+				cd := models.CashDividendRecord{
+					UserID:      userID,
+					ActionID:    a.ActionID,
+					Symbol:      a.Symbol,
+					Currency:    a.Currency,
+					Amount:      a.Amount,
+					DateTime:    a.DateTime,
+					Description: a.Description,
+				}
+				if err := r.DB.Create(&cd).Error; err != nil {
+					log.Printf("corporate action CD: failed to insert cash dividend: %v", err)
+				}
+			}
+		}
+
+		if err := r.DB.Create(&rec).Error; err != nil {
+			log.Printf("corporate action %s: failed to record: %v", a.Type, err)
+		}
+
+		results = append(results, imported)
+	}
+	return results
 }
 
 // backfillMissingTradeData updates an existing duplicate transaction's metadata
@@ -362,6 +551,21 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 
 	// OpenPositions array is intentionally left empty. The portfolio service
 	// will automatically fallback to reconstructing holdings and cost bases from the trades dataset!
+
+	// Load cash dividends for use in the pending-cash bucket calculation.
+	var cdRows []models.CashDividendRecord
+	if err := r.DB.Where("user_id = ?", user.ID).Find(&cdRows).Error; err == nil {
+		for _, cd := range cdRows {
+			data.CashDividends = append(data.CashDividends, models.CashDividend{
+				ActionID:    cd.ActionID,
+				Symbol:      cd.Symbol,
+				Currency:    cd.Currency,
+				Amount:      cd.Amount,
+				DateTime:    cd.DateTime,
+				Description: cd.Description,
+			})
+		}
+	}
 
 	data.UserHash = userHash
 	return data, nil
