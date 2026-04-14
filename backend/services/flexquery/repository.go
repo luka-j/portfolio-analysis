@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -26,17 +27,21 @@ func NewRepository(db *gorm.DB) *Repository {
 
 // ParseAndSave reads an IB FlexQuery XML from r, parses it,
 // and saves new transactions into the database, skipping duplicates.
-func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.FlexQueryData, error) {
+// It returns the parsed data (for counts), a per-trade import summary for the
+// upload response, and any error.
+func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.FlexQueryData, []models.ImportedTransaction, error) {
 	data, err := r.parser.Parse(reader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 1. Get or create the User
 	var user models.User
 	if err := r.DB.Where(&models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
-		return nil, fmt.Errorf("getting user: %w", err)
+		return nil, nil, fmt.Errorf("getting user: %w", err)
 	}
+
+	var imported []models.ImportedTransaction
 
 	// 2. Insert Trades (with deduplication via IB's TransactionID)
 	for _, t := range data.Trades {
@@ -54,6 +59,18 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			if err == nil {
 				backfillMissingTradeData(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped (id=%s): %s", t.TransactionID, t.Symbol)
+				imported = append(imported, models.ImportedTransaction{
+					ID:             existing.PublicID,
+					Symbol:         t.Symbol,
+					Date:           t.DateTime.Format("2006-01-02"),
+					Side:           t.BuySell,
+					Quantity:       t.Quantity,
+					Price:          t.Price,
+					Currency:       t.Currency,
+					TotalCost:      math.Abs(t.Quantity * t.Price),
+					IsDuplicate:    true,
+					ConfidentDedup: true,
+				})
 				continue
 			}
 		} else {
@@ -65,6 +82,18 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			if err == nil {
 				backfillMissingTradeData(r.DB, &existing, t)
 				log.Printf("Duplicate Trade skipped: %s %v qty=%v price=%v", t.Symbol, t.DateTime, t.Quantity, t.Price)
+				imported = append(imported, models.ImportedTransaction{
+					ID:             existing.PublicID,
+					Symbol:         t.Symbol,
+					Date:           t.DateTime.Format("2006-01-02"),
+					Side:           t.BuySell,
+					Quantity:       t.Quantity,
+					Price:          t.Price,
+					Currency:       t.Currency,
+					TotalCost:      math.Abs(t.Quantity * t.Price),
+					IsDuplicate:    true,
+					ConfidentDedup: false,
+				})
 				continue
 			}
 		}
@@ -88,8 +117,46 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			EntryMethod:     "flexquery",
 		}
 		if err := r.DB.Create(&txn).Error; err != nil {
-			return nil, fmt.Errorf("inserting trade: %w", err)
+			return nil, nil, fmt.Errorf("inserting trade: %w", err)
 		}
+
+		it := models.ImportedTransaction{
+			ID:        txn.PublicID,
+			Symbol:    t.Symbol,
+			Date:      t.DateTime.Format("2006-01-02"),
+			Side:      t.BuySell,
+			Quantity:  t.Quantity,
+			Price:     t.Price,
+			Currency:  t.Currency,
+			TotalCost: math.Abs(t.Quantity * t.Price),
+		}
+
+		// When a TransactionID-based dedup found nothing but a manual entry matches
+		// on float-tolerance, both rows now coexist as a duplicate. Surface the manual
+		// entry as a "suspected duplicate" so the user can resolve it in the UI.
+		if t.TransactionID != "" {
+			// Use a looser price tolerance (±0.02) than the strict dedup gate above.
+			// Manual entries may differ from broker-reported prices by a few cents due
+			// to rounding, and commission is intentionally excluded from this check.
+			// Date is matched at day granularity (not exact timestamp) because manual
+			// entries carry only a date, while FlexQuery timestamps include a time-of-day.
+			const suspectedPriceTol = 0.02
+			dayStart := time.Date(t.DateTime.Year(), t.DateTime.Month(), t.DateTime.Day(), 0, 0, 0, 0, t.DateTime.Location())
+			dayEnd := dayStart.Add(24 * time.Hour)
+			var manual models.Transaction
+			err2 := r.DB.Where(
+				"user_id = ? AND type = ? AND symbol = ? AND date_time >= ? AND date_time < ? "+
+					"AND quantity >= ? AND quantity <= ? AND price >= ? AND price <= ? "+
+					"AND entry_method = 'manual'",
+				user.ID, "Trade", t.Symbol, dayStart, dayEnd,
+				t.Quantity-1e-8, t.Quantity+1e-8, t.Price-suspectedPriceTol, t.Price+suspectedPriceTol,
+			).First(&manual).Error
+			if err2 == nil {
+				it.SuspectedDuplicateID = &manual.PublicID
+			}
+		}
+
+		imported = append(imported, it)
 	}
 
 	// 3. Insert Cash Transactions (with deduplication via IB's TransactionID)
@@ -128,16 +195,12 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 			EntryMethod:   "flexquery",
 		}
 		if err := r.DB.Create(&txn).Error; err != nil {
-			return nil, fmt.Errorf("inserting cash txn: %w", err)
+			return nil, nil, fmt.Errorf("inserting cash txn: %w", err)
 		}
 	}
 
-	// For the response back to caller, we just return what was parsed
-	// (this allows the upload endpoint to say "uploaded N items".
-	// We could also return the full historical dataset, but currently
-	// the handler just counts what was in the file).
 	data.UserHash = userHash
-	return data, nil
+	return data, imported, nil
 }
 
 // backfillMissingTradeData updates an existing duplicate transaction's metadata

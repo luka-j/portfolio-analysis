@@ -3,12 +3,13 @@ import { XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'rec
 import ReactMarkdown from 'react-markdown'
 import NavBar from '../components/NavBar'
 import HoverTooltip from '../components/HoverTooltip'
+import UploadResultModal from '../components/UploadResultModal'
 import { useNavigate } from 'react-router-dom'
 import {
   getPortfolioValueMulti, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
   uploadFlexQuery, uploadEtradeBenefits, uploadEtradeSales,
   getLLMSummary,
-  type DailyValue,
+  type DailyValue, type ImportedTransaction,
 } from '../api'
 import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFromDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
@@ -41,11 +42,14 @@ export default function LandingPage() {
   // chartRefreshing: cached chart data shown, fresh fetch still in flight
   const [chartRefreshing, setChartRefreshing] = useState(false)
   const [error, setError] = useState('')
-  const [uploadMsg, setUploadMsg] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadExpanded, setUploadExpanded] = useState(false)
   // uploadCount increments after every successful upload so the LLM summary re-fetches.
   const [uploadCount, setUploadCount] = useState(0)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadModalTransactions, setUploadModalTransactions] = useState<ImportedTransaction[]>([])
+  const [uploadModalError, setUploadModalError] = useState<string | null>(null)
+  const [pendingFirstUpload, setPendingFirstUpload] = useState(false)
 
   const defaultPeriod = [0, 6].includes(new Date().getDay()) ? '1w' : '1d'
   const [llmPeriod, setLlmPeriod] = usePersistentState('landing_llmPeriod', defaultPeriod)
@@ -57,13 +61,6 @@ export default function LandingPage() {
   const loadGenRef = useRef(0)
   // statsRefreshing: cached stats shown, fresh fetch still in flight
   const [statsRefreshing, setStatsRefreshing] = useState(false)
-
-  // Auto-dismiss the upload status message after 4 seconds.
-  useEffect(() => {
-    if (!uploadMsg) return
-    const t = setTimeout(() => setUploadMsg(''), 4000)
-    return () => clearTimeout(t)
-  }, [uploadMsg])
 
   const navigate = useNavigate()
 
@@ -270,34 +267,43 @@ export default function LandingPage() {
     return () => { cancelled = true }
   }, [llmPeriod, uploadCount, llmForceRefresh, shouldShowLlm])
 
-  type UploadFn = (file: File) => Promise<{ positions_count?: number; trades_count?: number; parsed_count?: number; saved_count?: number }>
-  const createUploadHandler = (uploadFn: UploadFn, label: (r: Awaited<ReturnType<UploadFn>>) => string) =>
+  const handleModalClose = useCallback(async () => {
+    setShowUploadModal(false)
+    setUploadModalTransactions([])
+    setUploadModalError(null)
+    setUploadCount(c => c + 1)
+    if (pendingFirstUpload) {
+      setPendingFirstUpload(false)
+      navigate('/portfolio', { state: { firstUpload: true } })
+    } else {
+      await loadData()
+    }
+  }, [pendingFirstUpload, navigate, loadData])
+
+  type UploadFn = (file: File) => Promise<{ transactions: ImportedTransaction[] }>
+  const createUploadHandler = (uploadFn: UploadFn) =>
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (!file) return
-      const isFirstUpload = hasTransactions === false
+      setPendingFirstUpload(hasTransactions === false)
+      setUploadModalTransactions([])
+      setUploadModalError(null)
+      setShowUploadModal(true)
       setUploading(true)
-      setUploadMsg('')
       try {
         const res = await uploadFn(file)
-        setUploadMsg(label(res))
-        setUploadCount(c => c + 1)
-        if (isFirstUpload) {
-          navigate('/portfolio', { state: { firstUpload: true } })
-        } else {
-          await loadData()
-        }
+        setUploadModalTransactions(res.transactions ?? [])
       } catch (err) {
-        setUploadMsg(err instanceof Error ? err.message : 'Upload failed')
+        setUploadModalError(err instanceof Error ? err.message : 'Upload failed')
       } finally {
         setUploading(false)
         e.target.value = ''
       }
     }
 
-  const handleUpload = createUploadHandler(uploadFlexQuery, r => `Uploaded: ${r.positions_count} positions, ${r.trades_count} trades`)
-  const handleEtradeBenefitsUpload = createUploadHandler(uploadEtradeBenefits, r => `Benefits uploaded: ${r.parsed_count} parsed, ${r.saved_count} saved`)
-  const handleEtradeSalesUpload = createUploadHandler(uploadEtradeSales, r => `Sales uploaded: ${r.parsed_count} parsed, ${r.saved_count} saved`)
+  const handleUpload = createUploadHandler(uploadFlexQuery)
+  const handleEtradeBenefitsUpload = createUploadHandler(uploadEtradeBenefits)
+  const handleEtradeSalesUpload = createUploadHandler(uploadEtradeSales)
 
 
   const chartData = (() => {
@@ -687,27 +693,24 @@ export default function LandingPage() {
             </button>
           </div>
 
-          {/* Status messages — bottom left */}
-          <div className="absolute bottom-4 left-8">
-            {uploading && (
-              <div className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] bg-surface/80 px-6 py-3 rounded-2xl border border-white/5 shadow-2xl backdrop-blur-3xl">
-                <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                Processing upload…
-              </div>
-            )}
-            {uploadMsg && (
-              <div className="px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-emerald-500/10 backdrop-blur-3xl">
-                {uploadMsg}
-              </div>
-            )}
-            {error && (
+          {/* General error — bottom left */}
+          {error && (
+            <div className="absolute bottom-4 left-8">
               <div className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-[0.2em] rounded-2xl animate-fade-in shadow-2xl shadow-red-500/10 backdrop-blur-3xl">
                 {error}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
+
+      <UploadResultModal
+        open={showUploadModal}
+        uploading={uploading}
+        error={uploadModalError}
+        transactions={uploadModalTransactions}
+        onClose={handleModalClose}
+      />
     </div>
   )
 }

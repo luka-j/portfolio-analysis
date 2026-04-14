@@ -320,7 +320,7 @@ func TestParseAndSave_StoresConid(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := NewRepository(db)
-	_, err = repo.ParseAndSave(part, "hashX")
+	_, _, err = repo.ParseAndSave(part, "hashX")
 	require.NoError(t, err)
 
 	var txn models.Transaction
@@ -374,7 +374,7 @@ func TestParseAndSave_BackfillsConidOnReupload(t *testing.T) {
 </FlexQueryResponse>`)
 
 	repo := NewRepository(db)
-	_, err := repo.ParseAndSave(strings.NewReader(xml), "hashBF")
+	_, _, err := repo.ParseAndSave(strings.NewReader(xml), "hashBF")
 	require.NoError(t, err)
 
 	// Should still be exactly one row (deduplicated), now with conid backfilled.
@@ -427,7 +427,7 @@ func TestLoadSaved_DeduplicationByTransactionID(t *testing.T) {
 		part, err := mr.NextPart()
 		require.NoError(t, err)
 
-		_, err = repo.ParseAndSave(part, "hashDup")
+		_, _, err = repo.ParseAndSave(part, "hashDup")
 		require.NoError(t, err)
 	}
 

@@ -151,17 +151,33 @@ export interface StandaloneResponse {
   results: StandaloneResult[];
 }
 
+export interface ImportedTransaction {
+  id: string;
+  symbol: string;
+  date: string; // YYYY-MM-DD
+  side: string; // BUY, SELL, ESPP_VEST, RSU_VEST, etc.
+  quantity: number;
+  price: number;
+  currency: string;
+  total_cost: number; // abs(quantity * price)
+  is_duplicate: boolean;
+  confident_dedup: boolean;
+  suspected_duplicate_id?: string; // PublicID of a manual entry that matches this new row
+}
+
 export interface UploadResponse {
   message: string;
   positions_count: number;
   trades_count: number;
   cash_transactions_count: number;
+  transactions: ImportedTransaction[];
 }
 
 export interface EtradeUploadResponse {
   message: string;
   saved_count: number;
   parsed_count: number;
+  transactions: ImportedTransaction[];
 }
 
 export interface TradeEntry {

@@ -149,7 +149,7 @@ func TestManualEntry_FlexQueryAfterManual_NotDeduplicated(t *testing.T) {
 </FlexQueryResponse>`)
 
 	repo := NewRepository(db)
-	_, err := repo.ParseAndSave(strings.NewReader(fqXML), "me_hash4")
+	_, _, err := repo.ParseAndSave(strings.NewReader(fqXML), "me_hash4")
 	require.NoError(t, err)
 
 	var count int64
@@ -216,7 +216,7 @@ func TestManualEntry_EntryMethodSet(t *testing.T) {
   </FlexStatements>
 </FlexQueryResponse>`)
 	repo := NewRepository(db)
-	_, err := repo.ParseAndSave(strings.NewReader(fqXML), "me_hash6")
+	_, _, err := repo.ParseAndSave(strings.NewReader(fqXML), "me_hash6")
 	require.NoError(t, err)
 
 	var fqTxn models.Transaction

@@ -40,6 +40,22 @@ type Transaction struct {
 	EntryMethod     string `gorm:"index"`               // "manual", "flexquery", "etrade_benefits", "etrade_sales"
 }
 
+// ImportedTransaction is a summary of one trade-type transaction processed during
+// a file upload, returned in the upload API response for user review.
+type ImportedTransaction struct {
+	ID                   string  `json:"id"`                               // PublicID of the row now in DB
+	Symbol               string  `json:"symbol"`
+	Date                 string  `json:"date"`                             // YYYY-MM-DD
+	Side                 string  `json:"side"`                             // BUY, SELL, ESPP_VEST, etc.
+	Quantity             float64 `json:"quantity"`
+	Price                float64 `json:"price"`
+	Currency             string  `json:"currency"`
+	TotalCost            float64 `json:"total_cost"`                       // abs(quantity * price)
+	IsDuplicate          bool    `json:"is_duplicate"`                     // true = skipped, row already existed
+	ConfidentDedup       bool    `json:"confident_dedup"`                  // true = deduped by TransactionID (not float-match)
+	SuspectedDuplicateID *string `json:"suspected_duplicate_id,omitempty"` // PublicID of a manual entry that matches this newly inserted row
+}
+
 // BeforeCreate generates a UUID PublicID for new Transaction rows if one is not already set.
 func (t *Transaction) BeforeCreate(_ *gorm.DB) error {
 	if t.PublicID == "" {

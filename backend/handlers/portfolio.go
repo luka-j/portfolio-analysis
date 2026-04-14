@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -61,7 +63,7 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	data, err := h.Repo.ParseAndSave(file, userHash)
+	data, imported, err := h.Repo.ParseAndSave(file, userHash)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "parse error: " + err.Error()})
 		return
@@ -75,6 +77,7 @@ func (h *PortfolioHandler) Upload(c *gin.Context) {
 		"positions_count":         len(data.OpenPositions),
 		"trades_count":            len(data.Trades),
 		"cash_transactions_count": len(data.CashTransactions),
+		"transactions":            imported,
 	})
 }
 
@@ -100,7 +103,21 @@ func (h *PortfolioHandler) UploadEtradeBenefits(c *gin.Context) {
 		return
 	}
 
-	h.saveEtradeTransactions(c, txns, "etrade_benefits")
+	imported, err := h.saveEtradeTransactions(userHash, txns, "etrade_benefits")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Invalidate LLM cache since portfolio changed
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "upload successful",
+		"saved_count":  countNew(imported),
+		"parsed_count": len(txns),
+		"transactions": imported,
+	})
 }
 
 // UploadEtradeSales handles POST /api/v1/portfolio/upload/etrade/sales
@@ -125,19 +142,43 @@ func (h *PortfolioHandler) UploadEtradeSales(c *gin.Context) {
 		return
 	}
 
-	h.saveEtradeTransactions(c, txns, "etrade_sales")
-}
-
-func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.Transaction, entryMethod string) {
-	userHash := c.GetString(middleware.UserHashKey)
-
-	var user models.User
-	if err := h.Repo.DB.Where(&models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "getting user: " + err.Error()})
+	imported, err := h.saveEtradeTransactions(userHash, txns, "etrade_sales")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	saved := 0
+	// Invalidate LLM cache since portfolio changed
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "upload successful",
+		"saved_count":  countNew(imported),
+		"parsed_count": len(txns),
+		"transactions": imported,
+	})
+}
+
+// countNew returns the number of ImportedTransaction entries that were not duplicates.
+func countNew(txns []models.ImportedTransaction) int {
+	n := 0
+	for _, t := range txns {
+		if !t.IsDuplicate {
+			n++
+		}
+	}
+	return n
+}
+
+// saveEtradeTransactions persists parsed E*Trade transactions for a user, skipping
+// float-match duplicates. It returns a per-transaction import summary and any error.
+func (h *PortfolioHandler) saveEtradeTransactions(userHash string, txns []models.Transaction, entryMethod string) ([]models.ImportedTransaction, error) {
+	var user models.User
+	if err := h.Repo.DB.Where(&models.User{TokenHash: userHash}).FirstOrCreate(&user).Error; err != nil {
+		return nil, fmt.Errorf("getting user: %w", err)
+	}
+
+	var imported []models.ImportedTransaction
 	for _, txn := range txns {
 		var existing models.Transaction
 		err := h.Repo.DB.Where(
@@ -146,26 +187,39 @@ func (h *PortfolioHandler) saveEtradeTransactions(c *gin.Context, txns []models.
 		).First(&existing).Error
 
 		if err == nil {
-			if err := h.Repo.DB.Save(&existing).Error; err == nil {
-				saved++
-			}
+			// Float-match duplicate — skip insertion, report as duplicate.
+			imported = append(imported, models.ImportedTransaction{
+				ID:             existing.PublicID,
+				Symbol:         txn.Symbol,
+				Date:           txn.DateTime.Format("2006-01-02"),
+				Side:           txn.BuySell,
+				Quantity:       txn.Quantity,
+				Price:          txn.Price,
+				Currency:       txn.Currency,
+				TotalCost:      math.Abs(txn.Quantity * txn.Price),
+				IsDuplicate:    true,
+				ConfidentDedup: false,
+			})
 		} else {
 			txn.UserID = user.ID
 			txn.EntryMethod = entryMethod
-			if err := h.Repo.DB.Create(&txn).Error; err == nil {
-				saved++
+			if err := h.Repo.DB.Create(&txn).Error; err != nil {
+				return nil, fmt.Errorf("inserting transaction: %w", err)
 			}
+			imported = append(imported, models.ImportedTransaction{
+				ID:        txn.PublicID,
+				Symbol:    txn.Symbol,
+				Date:      txn.DateTime.Format("2006-01-02"),
+				Side:      txn.BuySell,
+				Quantity:  txn.Quantity,
+				Price:     txn.Price,
+				Currency:  txn.Currency,
+				TotalCost: math.Abs(txn.Quantity * txn.Price),
+			})
 		}
 	}
 
-	// Invalidate LLM cache since portfolio changed
-	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "upload successful",
-		"saved_count":  saved,
-		"parsed_count": len(txns),
-	})
+	return imported, nil
 }
 
 // GetValue handles GET /api/v1/portfolio/value
