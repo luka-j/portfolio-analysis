@@ -1,10 +1,11 @@
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { LLMResponseSection } from '../api'
 
 const markdownComponents = {
   h1: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-5 mb-2">{children}</p>,
   h2: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-5 mb-2">{children}</p>,
-  h3: ({ children }: { children?: React.ReactNode }) => <p className="font-semibold text-white/90 mt-5 mb-2">{children}</p>,
+  h3: ({ children }: { children?: React.ReactNode }) => <h3 className="text-[11px] uppercase font-bold tracking-widest text-indigo-400/50 mt-6 mb-3">{children}</h3>,
   p: ({ children }: { children?: React.ReactNode }) => <p className="mb-3 last:mb-0">{children}</p>,
   ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc list-inside mb-3 space-y-2">{children}</ul>,
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal list-inside mb-3 space-y-2">{children}</ol>,
@@ -12,6 +13,12 @@ const markdownComponents = {
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="text-white font-semibold">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="text-indigo-200">{children}</em>,
   code: ({ children }: { children?: React.ReactNode }) => <code className="bg-white/10 rounded px-1 text-xs font-mono">{children}</code>,
+  table: ({ children }: { children?: React.ReactNode }) => <div className="overflow-x-auto mb-4 border border-white/10 rounded-lg"><table className="w-full text-sm text-left">{children}</table></div>,
+  thead: ({ children }: { children?: React.ReactNode }) => <thead className="text-xs uppercase bg-white/5 text-white/70 border-b border-white/10">{children}</thead>,
+  tbody: ({ children }: { children?: React.ReactNode }) => <tbody className="divide-y divide-white/5">{children}</tbody>,
+  tr: ({ children }: { children?: React.ReactNode }) => <tr className="hover:bg-white/[0.02] transition-colors">{children}</tr>,
+  th: ({ children }: { children?: React.ReactNode }) => <th className="px-4 py-2.5 font-medium whitespace-nowrap">{children}</th>,
+  td: ({ children }: { children?: React.ReactNode }) => <td className="px-4 py-2.5">{children}</td>,
 }
 
 function ThinkingDisclosure({ content }: { content: string }) {
@@ -24,7 +31,7 @@ function ThinkingDisclosure({ content }: { content: string }) {
         AI Thinking Process
       </summary>
       <div className="pl-3 mt-2 ml-1.5 border-l-2 border-indigo-500/20 text-slate-400 text-xs opacity-80 pb-2 cursor-auto">
-        <ReactMarkdown components={markdownComponents}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {content}
         </ReactMarkdown>
       </div>
@@ -52,7 +59,7 @@ export default function AssistantMessage({ content, sections }: { content: strin
                 {section.title}
               </p>
             )}
-            <ReactMarkdown components={markdownComponents}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
               {section.content}
             </ReactMarkdown>
           </div>
@@ -75,7 +82,7 @@ export default function AssistantMessage({ content, sections }: { content: strin
         }
 
         return (
-          <ReactMarkdown key={index} components={markdownComponents}>
+          <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {part}
           </ReactMarkdown>
         )

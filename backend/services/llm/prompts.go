@@ -13,8 +13,12 @@ type CannedPrompt struct {
 	ChatAccessible    bool   // if true, available as a prompt_type on POST /llm/chat
 	Cacheable         bool   // if true, responses are cached 24 h (ChatAccessible prompts only)
 
+	// ForcedTool, when non-empty, sets ToolChoice to force the model to call this tool first.
+	// This guarantees the agent fetches the required data before generating its analysis.
+	ForcedTool string
+
 	// Schema, when non-nil, enables structured JSON output via ResponseSchema.
-	// Only applicable to prompts without Google Search tools.
+	// Only applicable to prompts that do NOT use ForcedTool (tool-first prompts stream freely).
 	Schema *genai.Schema
 
 	// SectionOrder defines the ordered field keys for markdown reconstruction and frontend rendering.
@@ -98,7 +102,9 @@ A holding may appear in both lists if it represents a high-conviction asymmetric
 		Cacheable:         false,
 	},
 	"general_analysis": {
-		Message: `Analyze my current portfolio given current market conditions. What am I effectively betting on?
+		Message: `First, call get_current_allocations() to retrieve my portfolio holdings and weights. Then analyze my current portfolio given current market conditions.
+
+What am I effectively betting on?
 
 Put your reasoning in the ` + "`thinking`" + ` field: identify the major holdings, their primary sector exposure, and the current macroeconomic narratives surrounding them.
 
@@ -109,27 +115,9 @@ Then fill each field with fluent markdown prose:
 - **` + "`fama_french_factor_tilts`" + `**: Provide a qualitative, one-paragraph assessment using the Fama-French five-factor framework (Market, Size, Value/Growth, Profitability, Investment). Do not attempt precise calculations — reason from the holdings' known characteristics (e.g., mega-cap growth tech = strong negative HML, strong positive RMW; broad market ETFs = near-zero SMB). Conclude with one sentence on whether the combined tilt profile is deliberate or incidental.
 - **` + "`implicit_bets`" + `**: Based on my concentration, what specific future events, market shifts, or currency dynamics am I effectively betting heavily on to happen? What am I most vulnerable to (e.g., exposed to a weakening USD)?
 - **` + "`blind_spots`" + `**: What obvious market sectors, geographical regions, defensive assets, or FX hedges am I completely un-hedged against or missing out on entirely?`,
+		ForcedTool:     "get_current_allocations",
 		ChatAccessible: true,
 		Cacheable:      true,
-		Schema: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"thinking":                         stringSchema(),
-				"macro_environment":                stringSchema(),
-				"sector_geographic_concentration":  stringSchema(),
-				"fama_french_factor_tilts":         stringSchema(),
-				"implicit_bets":                    stringSchema(),
-				"blind_spots":                      stringSchema(),
-			},
-			Required: []string{
-				"thinking",
-				"macro_environment",
-				"sector_geographic_concentration",
-				"fama_french_factor_tilts",
-				"implicit_bets",
-				"blind_spots",
-			},
-		},
 		SectionOrder: []string{
 			"thinking",
 			"macro_environment",
@@ -147,7 +135,7 @@ Then fill each field with fluent markdown prose:
 		},
 	},
 	"best_worst_scenarios": {
-		Message: `Analyze my current portfolio's exposure to market volatility.
+		Message: `First, call get_current_allocations() to retrieve my portfolio holdings and weights. Then analyze my current portfolio's exposure to market volatility.
 
 Put your reasoning in the ` + "`thinking`" + ` field: map out specific, realistic macroeconomic and industry-specific catalysts that could drastically affect my major holdings.
 
@@ -157,25 +145,9 @@ Then fill each field with fluent markdown prose:
 - **` + "`worst_case`" + `**: Describe a realistic stress scenario (e.g., specific regulatory shifts, supply chain shocks, currency headwinds, or rate changes) that would cause this portfolio to suffer heavy drawdowns. What is the structural weakness?
 - **` + "`key_indicators`" + `**: List 2–3 specific, measurable macroeconomic or fundamental data points I should monitor closely to see which of the two scenarios is actively unfolding (e.g., upcoming inflation data, central bank meetings like the Fed or ECB, or key sector earnings).
 - **` + "`historical_precedents`" + `**: Identify 2–3 specific historical periods (e.g., the 2000 dot-com bust, 2008 GFC, 2020 COVID crash, 2022 rate-hike cycle) where a portfolio with a similar geographic, sector, and asset-type composition faced comparable conditions. For each, briefly describe how such a portfolio would likely have performed — both during the drawdown and the subsequent recovery — and what the key driver of that outcome was.`,
+		ForcedTool:     "get_current_allocations",
 		ChatAccessible: true,
 		Cacheable:      true,
-		Schema: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"thinking":             stringSchema(),
-				"best_case":            stringSchema(),
-				"worst_case":           stringSchema(),
-				"key_indicators":       stringSchema(),
-				"historical_precedents": stringSchema(),
-			},
-			Required: []string{
-				"thinking",
-				"best_case",
-				"worst_case",
-				"key_indicators",
-				"historical_precedents",
-			},
-		},
 		SectionOrder: []string{
 			"thinking",
 			"best_case",
@@ -207,11 +179,7 @@ Provide a bolded "**Bottom Line**" summary followed by a bulleted breakdown of c
 		Cacheable:         false,
 	},
 	"risk_metrics": {
-		Message: `Please interpret the following portfolio data in plain English, focusing on "The Story of the Money" rather than just the math.
-
-<portfolio_stats>
-{data_json}
-</portfolio_stats>
+		Message: `First, call get_risk_metrics() with the appropriate date range to retrieve the portfolio's statistical metrics. Then interpret the results in plain English, focusing on "The Story of the Money" rather than just the math.
 
 Put your reasoning in the ` + "`thinking`" + ` field: break down each metric and what it implies about the investor's behavior and risk tolerance.
 
@@ -224,29 +192,9 @@ Then fill each field with fluent markdown prose, addressed directly to the clien
 - **` + "`investor_profile`" + `**: Is this portfolio more suited for the aggressive growth investor, defensive value-preservation investor, or neither?
 - **` + "`verdict`" + `**: Is this a "smooth ride" or a "rollercoaster," and am I being rewarded for staying on it?`,
 		SystemInstruction: "Act as a private wealth manager performing a year-end review for a client. Speak directly to the client.",
+		ForcedTool:        "get_risk_metrics",
 		ChatAccessible:    true,
 		Cacheable:         false,
-		Schema: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"thinking":         stringSchema(),
-				"returns_narrative": stringSchema(),
-				"wealth_growth":    stringSchema(),
-				"efficiency_test":  stringSchema(),
-				"stress_test":      stringSchema(),
-				"investor_profile": stringSchema(),
-				"verdict":          stringSchema(),
-			},
-			Required: []string{
-				"thinking",
-				"returns_narrative",
-				"wealth_growth",
-				"efficiency_test",
-				"stress_test",
-				"investor_profile",
-				"verdict",
-			},
-		},
 		SectionOrder: []string{
 			"thinking",
 			"returns_narrative",
@@ -266,13 +214,9 @@ Then fill each field with fluent markdown prose, addressed directly to the clien
 		},
 	},
 	"benchmark_analysis": {
-		Message: `I am comparing my portfolio against {benchmark}.
+		Message: `First, call get_benchmark_metrics() to compare my portfolio against the benchmark {benchmark}. Use the date range and risk-free rate appropriate to the user's request.
 
-<portfolio_benchmark>
-{data_json}
-</portfolio_benchmark>
-
-Put your reasoning in the ` + "`thinking`" + ` field: compare the portfolio metrics against the benchmark's assumed baseline, evaluating the Alpha, Beta, and Tracking Error. Consider what combinations of these metrics imply (e.g., high Tracking Error + negative Alpha = poor active management).
+Then put your reasoning in the ` + "`thinking`" + ` field: compare the portfolio metrics against the benchmark's assumed baseline, evaluating the Alpha, Beta, and Tracking Error. Consider what combinations of these metrics imply (e.g., high Tracking Error + negative Alpha = poor active management).
 
 Then provide a "so what?" analysis in each field:
 
@@ -282,27 +226,9 @@ Then provide a "so what?" analysis in each field:
 - **` + "`investor_profile`" + `**: Is this portfolio better suited for an aggressive growth investor or a defensive value-preservation investor expecting downside protection?
 - **` + "`verdict`" + `**: Give me a blunt, executive summary of whether this portfolio is efficiently managed relative to the benchmark.`,
 		SystemInstruction: "Act as an institutional portfolio analyst reviewing a fund manager's performance against a benchmark index.",
+		ForcedTool:        "get_benchmark_metrics",
 		ChatAccessible:    true,
 		Cacheable:         false,
-		Schema: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"thinking":              stringSchema(),
-				"manager_skill_vs_luck": stringSchema(),
-				"risk_profile":          stringSchema(),
-				"benchmarking":          stringSchema(),
-				"investor_profile":      stringSchema(),
-				"verdict":               stringSchema(),
-			},
-			Required: []string{
-				"thinking",
-				"manager_skill_vs_luck",
-				"risk_profile",
-				"benchmarking",
-				"investor_profile",
-				"verdict",
-			},
-		},
 		SectionOrder: []string{
 			"thinking",
 			"manager_skill_vs_luck",
@@ -324,18 +250,104 @@ Then provide a "so what?" analysis in each field:
 
 First, use the Google Search tool to find scheduled earnings reports, upcoming macroeconomic data releases (e.g., inflation prints, central bank meetings like the Fed/ECB), and pertinent geopolitical events scheduled to occur within the next month that directly affect my major holdings. Use a <thinking> block to synthesize your findings, drop any events outside the 30-day window, and verify you have exact dates where possible.
 
-Then, categorize and summarize the upcoming events that may affect my portfolio. Structure your response using exactly these markdown headers:
-### 📅 Scheduled Earnings & Corporate Events
-List key upcoming earnings or shareholder meetings within the next 30 days for my holdings. Include specific dates. Explain briefly why each is critical.
-### 🏦 Macroeconomic & Central Bank Events
-Identify exact upcoming economic data releases or rate decisions occurring this month that could impact my asset allocation.
-### 🌍 Market & Geopolitical Catalysts
-Highlight broader global events or ongoing developments reaching critical milestones this month that could influence my portfolio composition.
-### ⚠️ Key Portfolio Risks & Opportunities
-Summarize the most significant short-term risks or opportunities based specifically on this 30-day calendar of events.`,
+Then fill each field with fluent markdown prose:
+- **` + "`earnings_events`" + `**: List key upcoming earnings or shareholder meetings within the next 30 days for my holdings. Include specific dates. Explain briefly why each is critical.
+- **` + "`macro_events`" + `**: Identify exact upcoming economic data releases or rate decisions occurring this month that could impact my asset allocation.
+- **` + "`market_catalysts`" + `**: Highlight broader global events or ongoing developments reaching critical milestones this month that could influence my portfolio composition.
+- **` + "`risks_opportunities`" + `**: Summarize the most significant short-term risks or opportunities based specifically on this 30-day calendar of events.`,
 		SystemInstruction: "You are an expert financial analyst. Focus strictly on near-term calendar events (next 30 days). Discard any hypothetical scenarios or long-term trends. Always use exact dates when available.",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		SectionOrder: []string{
+			"thinking",
+			"earnings_events",
+			"macro_events",
+			"market_catalysts",
+			"risks_opportunities",
+		},
+		SectionTitles: map[string]string{
+			"earnings_events":     "📅 Scheduled Earnings & Corporate Events",
+			"macro_events":        "🏦 Macroeconomic & Central Bank Events",
+			"market_catalysts":    "🌍 Market & Geopolitical Catalysts",
+			"risks_opportunities": "⚠️ Key Portfolio Risks & Opportunities",
+		},
+	},
+	"geographic_sector_bottlenecks": {
+		Message: `Analyze my Geographic & Sector Bottlenecks. 
+First, call get_current_allocations() to retrieve my exact holdings. Then, meticulously loop through the major holdings using get_asset_fundamentals() to determine each asset's core country and sector breakdown.
+Synthesize this underlying data in a <thinking> block to identify my true aggregate exposure.
+
+Then fill each field with fluent markdown prose:
+- **` + "`sector_overexposure`" + `**: Identify any sectors where I am heavily concentrated (e.g., Tech, Financials). Discuss what macroeconomic factors these sectors are most vulnerable to.
+- **` + "`geographic_risks`" + `**: Identify the primary countries and regions where my money is tied up. What are the specific geopolitical or currency risks associated with this allocation?
+- **` + "`mitigation`" + `**: Suggest broad themes or asset classes (not specific financial advice or new tickers) I could use to dilute these bottlenecks.`,
+		SystemInstruction: "Act as an expert risk management analyst. Look through surface names into the underlying fundamentals.",
+		ForcedTool:        "get_current_allocations",
+		ChatAccessible:    true,
+		Cacheable:         true,
+		SectionOrder: []string{
+			"thinking",
+			"sector_overexposure",
+			"geographic_risks",
+			"mitigation",
+		},
+		SectionTitles: map[string]string{
+			"sector_overexposure": "🏭 Sector Over-Exposure",
+			"geographic_risks":    "🗺️ Geographic & Geopolitical Risks",
+			"mitigation":          "⚖️ Recommendations for Mitigation",
+		},
+	},
+	"biggest_drag_on_performance": {
+		Message: `Identify the Biggest Drag on Performance in my portfolio.
+First, call get_open_positions_with_cost_basis() to see which positions are currently operating at severe unrealized losses or flatlining relative to their cost basis. Also call get_benchmark_metrics() for at least one broad market benchmark (e.g. 'SPY' or 'VWCE.DE') to contextualize my overall portfolio performance.
+
+In a <thinking> block, compare my underwater positions against the overall portfolio benchmark metrics (Alpha, Beta). Evaluate whether these losers are justifiable cyclical laggards or long-term structural failures.
+
+Then fill each field with fluent markdown prose:
+- **` + "`major_laggards`" + `**: List the 2-3 specific assets currently causing the most performance drag. Quote their average cost vs. current price.
+- **` + "`the_why`" + `**: For each laggard, provide a brief analysis of *why* it's down. Is it a company-specific issue (bad earnings) or a sector-wide macro headwind? You may want to use Google Search to verify recent news.
+- **` + "`tax_loss_context`" + `**: Without giving specific financial advice, present the tax-loss harvesting framework. Discuss what kind of alternative beta or factor tilt I could achieve by re-deploying this capital.`,
+		SystemInstruction: "Act as a ruthless performance analyst parsing through a portfolio's weakest links.",
+		ForcedTool:        "get_open_positions_with_cost_basis",
+		ChatAccessible:    true,
+		Cacheable:         false,
+		SectionOrder: []string{
+			"thinking",
+			"major_laggards",
+			"the_why",
+			"tax_loss_context",
+		},
+		SectionTitles: map[string]string{
+			"major_laggards":   "📉 The Major Laggards",
+			"the_why":          "🧠 The 'Why'",
+			"tax_loss_context": "🔄 Tax-Loss & Reallocation Context",
+		},
+	},
+	"stress_test_beta": {
+		Message: `Conduct a Stress Test vs. The Market (Beta Analysis).
+First, call get_benchmark_metrics() against a global baseline (like 'SPY' or 'VWCE.DE'). Use the date range appropriate to the user's request.
+
+In a <thinking> block, analyze my portfolio Beta. If my Beta is 1.5, I move 50% more violently than the market. Project what a sudden 15% market crash (typical of an interest rate shock or recession) would mathematically do to my portfolio. Identify from get_current_allocations() and get_asset_fundamentals() which holdings are providing the high beta vs the low beta.
+
+Then fill each field with fluent markdown prose:
+- **` + "`drawdown_scenario`" + `**: Based strictly on my portfolio Beta, quantify mechanically how a rapid 15% market drop would manifest in my total percentage drawdown. 
+- **` + "`beta_contributors`" + `**: Identify which categories or specific holdings are likely supercharging my volatility, and which are acting as anchors holding my portfolio steady.
+- **` + "`defensive_evaluation`" + `**: Assess if my portfolio contains adequate 'defensive' properties (e.g. bonds, utilities, cash) to survive a prolonged secular bear market, or if I am fundamentally positioned as a high-growth bull-market participant.`,
+		SystemInstruction: "Act as an institutional risk manager conducting a scenario stress test.",
+		ForcedTool:        "get_benchmark_metrics",
+		ChatAccessible:    true,
+		Cacheable:         false,
+		SectionOrder: []string{
+			"thinking",
+			"drawdown_scenario",
+			"beta_contributors",
+			"defensive_evaluation",
+		},
+		SectionTitles: map[string]string{
+			"drawdown_scenario":    "🌩️ The 15% Drawdown Scenario",
+			"beta_contributors":    "🎢 Beta Contributors & Detractors",
+			"defensive_evaluation": "🛡️ Defensive Evaluation",
+		},
 	},
 }
 

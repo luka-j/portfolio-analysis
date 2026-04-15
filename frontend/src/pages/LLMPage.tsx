@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { usePersistentState } from '../utils/usePersistentState'
 import NavBar from '../components/NavBar'
 import HoverTooltip from '../components/HoverTooltip'
 import WeightsModal, { type WeightRow } from '../components/WeightsModal'
+import ToolsModal, { AVAILABLE_TOOLS } from '../components/ToolsModal'
 import AssistantMessage from '../components/AssistantMessage'
 import { useLocation } from 'react-router-dom'
-import { postLLMChat, getPortfolioValue, type LLMChatRequest, type LLMResponseSection } from '../api'
+import { postLLMChat, getPortfolioValue, type LLMChatRequest, type LLMResponseSection, type LLMToolCallEvent } from '../api'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -47,10 +49,20 @@ export default function LLMPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingLabel, setLoadingLabel] = useState('')
+  const [activeToolCall, setActiveToolCall] = useState<LLMToolCallEvent | null>(null)
+  const toolCallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const toolCallShownAt = useRef<number>(0)
 
   // Settings
   const [model, setModel] = useState<ModelChoice>('flash')
-  const [includePortfolio, setIncludePortfolio] = useState(true)
+  const defaultTools = AVAILABLE_TOOLS.map(t => t.id).filter(id => ![
+    'get_fx_impact',
+    'get_historical_performance_series',
+    'get_open_positions_with_cost_basis',
+    'get_tax_impact'
+  ].includes(id))
+  const [enabledTools, setEnabledTools] = usePersistentState<string[]>('llm_enabled_tools', defaultTools)
+  const [toolsModalOpen, setToolsModalOpen] = useState(false)
   const [weights, setWeights] = useState<WeightRow[]>([])
   const [liveWeights, setLiveWeights] = useState<WeightRow[]>([])
   const [weightsLoading, setWeightsLoading] = useState(false)
@@ -75,7 +87,7 @@ export default function LLMPage() {
       .then(([usd, czk, eur]) => {
         if (usd.value === 0) return
         const rows: WeightRow[] = usd.positions
-          .filter(p => p.value > 0)
+          .filter(p => p.value > 0 && p.symbol !== 'PENDING_CASH')
           .map(p => ({ symbol: p.symbol, weight: parseFloat(((p.value / usd.value) * 100).toFixed(1)) }))
           .sort((a, b) => b.weight - a.weight)
         setLiveWeights(rows)
@@ -87,6 +99,28 @@ export default function LLMPage() {
   }, [])
 
   const autoSentRef = useRef(false)
+
+  // clearToolCall removes the active tool call banner.
+  // If force is true, it clears it immediately. Otherwise it enforces a minimum 3-second display.
+  const clearToolCall = useCallback((force = false) => {
+    if (toolCallTimerRef.current) clearTimeout(toolCallTimerRef.current)
+    if (force) {
+      setActiveToolCall(null)
+      return
+    }
+    const elapsed = Date.now() - toolCallShownAt.current
+    const remaining = Math.max(0, 3000 - elapsed)
+    toolCallTimerRef.current = setTimeout(() => {
+      setActiveToolCall(null)
+    }, remaining)
+  }, [])
+
+  // showToolCall sets the active tool call banner and records the show time.
+  const showToolCall = useCallback((event: LLMToolCallEvent) => {
+    if (toolCallTimerRef.current) clearTimeout(toolCallTimerRef.current)
+    toolCallShownAt.current = Date.now()
+    setActiveToolCall(event)
+  }, [])
   useEffect(() => {
     if (initialPrompt && !autoSentRef.current) {
       autoSentRef.current = true
@@ -114,12 +148,15 @@ export default function LLMPage() {
   const isModified = weights.some((r, i) => liveWeights[i]?.symbol !== r.symbol || liveWeights[i]?.weight !== r.weight)
     || weights.length !== liveWeights.length
 
+  const handleToolToggle = (id: string) => setEnabledTools(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
+  const handleToolToggleAll = (enable: boolean) => setEnabledTools(enable ? AVAILABLE_TOOLS.map(t => t.id) : [])
+
   const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string, extraParams?: Partial<LLMChatRequest>, usePageModel = false) => {
     if (!message && promptType === 'freeform') return
 
     const isCanned = promptType !== 'freeform'
     const priorMessages = messages // capture before state update — becomes history
-    if (isCanned || includePortfolio) setPortfolioShared(true)
+    if (isCanned || enabledTools.length > 0) setPortfolioShared(true)
     setMessages(prev => [...prev, { role: 'user', content: displayMessage || message, originalRequest: { message, promptType, displayMessage, extraParams } }])
     setInput('')
     setLoading(true)
@@ -133,9 +170,9 @@ export default function LLMPage() {
         ...(usePageModel || !isCanned ? { model } : {}),
         ...extraParams,
       }
+      req.enabled_tools = enabledTools
       if (!isCanned) {
-        req.include_portfolio = includePortfolio
-        if (includePortfolio && weights.length > 0) {
+        if (enabledTools.length > 0 && weights.length > 0) {
           req.override_portfolio_weights = weights.map(r => ({ symbol: r.symbol, weight: r.weight }))
         }
         if (priorMessages.length > 0) {
@@ -145,6 +182,7 @@ export default function LLMPage() {
 
       let initialized = false;
       const res = await postLLMChat(req, (chunkText) => {
+        clearToolCall()
         if (!initialized) {
           setLoading(false)
           initialized = true
@@ -156,7 +194,9 @@ export default function LLMPage() {
             return newMessages
           })
         }
-      })
+      }, showToolCall)
+
+      clearToolCall(true)
 
       if (!initialized) {
         setLoading(false)
@@ -170,6 +210,7 @@ export default function LLMPage() {
       }
     } catch (err) {
       setLoading(false)
+      setActiveToolCall(null)
       const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
@@ -200,8 +241,8 @@ export default function LLMPage() {
         ...extraParams,
       }
       if (!isCanned) {
-        req.include_portfolio = includePortfolio
-        if (includePortfolio && weights.length > 0) {
+        req.enabled_tools = enabledTools
+        if (enabledTools.length > 0 && weights.length > 0) {
           req.override_portfolio_weights = weights.map(r => ({ symbol: r.symbol, weight: r.weight }))
         }
         if (priorMessages.length > 0) {
@@ -211,6 +252,7 @@ export default function LLMPage() {
 
       let initialized = false;
       const res = await postLLMChat(req, (chunkText) => {
+        clearToolCall()
         if (!initialized) {
           setLoading(false)
           initialized = true
@@ -222,7 +264,9 @@ export default function LLMPage() {
             return newMessages
           })
         }
-      })
+      }, showToolCall)
+
+      clearToolCall(true)
 
       if (!initialized) {
         setLoading(false)
@@ -236,6 +280,7 @@ export default function LLMPage() {
       }
     } catch (err) {
       setLoading(false)
+      setActiveToolCall(null)
       const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
@@ -244,7 +289,7 @@ export default function LLMPage() {
     }
   }
 
-  const cannedDisabled = loading || !includePortfolio
+  const cannedDisabled = loading
 
   return (
     <div className="min-h-screen md:h-screen bg-bg flex flex-col md:overflow-hidden">
@@ -260,6 +305,15 @@ export default function LLMPage() {
           onRemove={removeWeight}
           onReset={resetWeights}
           onClose={() => setWeightsOpen(false)}
+        />
+      )}
+
+      {toolsModalOpen && (
+        <ToolsModal
+          enabledTools={enabledTools}
+          onToggle={handleToolToggle}
+          onToggleAll={handleToolToggleAll}
+          onClose={() => setToolsModalOpen(false)}
         />
       )}
 
@@ -298,12 +352,28 @@ export default function LLMPage() {
                 display: 'Analyze my current portfolio given current market conditions. What am I effectively betting on?',
                 active: 'text-indigo-300 border-indigo-500/25 bg-indigo-500/8 hover:bg-indigo-500/15 hover:border-indigo-500/40',
                 disabled: 'text-indigo-400/30 border-indigo-500/10',
+                requiredTool: 'get_current_allocations'
               },
               {
-                label: 'Best & Worst Scenarios', promptType: 'best_worst_scenarios',
-                display: 'Analyze my current portfolio. What are the best and worst realistic scenarios?',
+                label: 'Geographic & Sector Bottlenecks', promptType: 'geographic_sector_bottlenecks',
+                display: 'Analyze my Geographic & Sector Bottlenecks.',
+                active: 'text-cyan-300 border-cyan-500/25 bg-cyan-500/8 hover:bg-cyan-500/15 hover:border-cyan-500/40',
+                disabled: 'text-cyan-400/30 border-cyan-500/10',
+                requiredTool: 'get_current_allocations'
+              },
+              {
+                label: 'Biggest Drag on Performance', promptType: 'biggest_drag_on_performance',
+                display: 'Identify the Biggest Drag on Performance in my portfolio.',
+                active: 'text-rose-300 border-rose-500/25 bg-rose-500/8 hover:bg-rose-500/15 hover:border-rose-500/40',
+                disabled: 'text-rose-400/30 border-rose-500/10',
+                requiredTool: 'get_open_positions_with_cost_basis'
+              },
+              {
+                label: 'Stress Test vs Market', promptType: 'stress_test_beta',
+                display: 'Conduct a Stress Test vs. The Market (Beta Analysis).',
                 active: 'text-emerald-300 border-emerald-500/25 bg-emerald-500/8 hover:bg-emerald-500/15 hover:border-emerald-500/40',
                 disabled: 'text-emerald-400/30 border-emerald-500/10',
+                requiredTool: 'get_benchmark_metrics'
               },
               {
                 label: 'Upcoming Events', promptType: 'upcoming_events',
@@ -311,23 +381,27 @@ export default function LLMPage() {
                 active: 'text-amber-300 border-amber-500/25 bg-amber-500/8 hover:bg-amber-500/15 hover:border-amber-500/40',
                 disabled: 'text-amber-400/30 border-amber-500/10',
               },
-              {
-                label: 'Add or Trim?', promptType: 'add_or_trim',
-                display: 'Which of my holdings should I add to, and which should I trim?',
-                active: 'text-rose-300 border-rose-500/25 bg-rose-500/8 hover:bg-rose-500/15 hover:border-rose-500/40',
-                disabled: 'text-rose-400/30 border-rose-500/10',
-              },
-            ] as const).map(({ label, promptType, display, active, disabled }) => (
-              <button
-                key={promptType}
-                onClick={() => handleSend('', promptType, display, undefined, true)}
-                disabled={cannedDisabled}
-                title={!includePortfolio ? 'Enable "Include portfolio" to use canned prompts' : undefined}
-                className={`transition-all text-xs font-medium px-3 py-1.5 rounded-full border ${cannedDisabled ? `${disabled} cursor-not-allowed` : `${active} active:scale-95`}`}
-              >
-                {label}
-              </button>
-            ))}
+            ] as const).map(({ label, promptType, display, active, disabled, requiredTool }) => {
+              const toolMissing = requiredTool && !enabledTools.includes(requiredTool);
+              const chipDisabled = loading || toolMissing;
+              
+              return (
+                <div key={promptType} className="relative group flex items-center">
+                  <button
+                    onClick={() => handleSend('', promptType, display, undefined, true)}
+                    disabled={chipDisabled}
+                    className={`transition-all text-xs font-medium px-3 py-1.5 rounded-full border ${chipDisabled ? `${disabled} cursor-not-allowed` : `${active} active:scale-95`}`}
+                  >
+                    {label}
+                  </button>
+                  {toolMissing && (
+                    <HoverTooltip direction="up" align="center" className="w-max whitespace-nowrap z-50">
+                      Requires '{AVAILABLE_TOOLS.find(t => t.id === requiredTool)?.label || requiredTool}' tool
+                    </HoverTooltip>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -392,16 +466,28 @@ export default function LLMPage() {
             </div>
           ))}
 
-          {/* Loading indicator with context label (#3) */}
-          {loading && (
+          {/* Loading indicator with context label + tool call banner */}
+          {(loading || activeToolCall) && (
             <div className="flex justify-start">
               <div className="px-5 py-4 flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/50 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                {loadingLabel && (
+                {activeToolCall ? (
+                  // Tool execution state — shown for at least 3 seconds
+                  <div className="flex items-center gap-2.5">
+                    <svg className="w-3.5 h-3.5 text-indigo-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <p className="text-xs text-indigo-400">{activeToolCall.label}…</p>
+                  </div>
+                ) : (
+                  // Generic thinking state
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/50 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                )}
+                {(loading && !activeToolCall && loadingLabel) && (
                   <p className="text-xs text-slate-500">{loadingLabel}</p>
                 )}
               </div>
@@ -460,30 +546,30 @@ export default function LLMPage() {
               </div>
             </div>
 
-            {/* Include portfolio */}
-            <label
-              className={`relative group flex items-center gap-2 select-none ${portfolioShared ? 'cursor-default' : 'cursor-pointer'}`}
+            {/* Tools Enabled Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setToolsModalOpen(true)}
+              disabled={portfolioShared}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-colors ${portfolioShared ? 'border-white/5 opacity-50 cursor-default grayscale' : 'border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20'}`}
+              title={portfolioShared ? "Tools cannot be selectively disabled after the conversation has started" : "Configure which tools the LLM can use"}
             >
-              <input
-                type="checkbox"
-                checked={portfolioShared || includePortfolio}
-                disabled={portfolioShared}
-                onChange={e => !portfolioShared && setIncludePortfolio(e.target.checked)}
-                className="accent-indigo-400 w-3 h-3 disabled:opacity-60"
-              />
-              <span className="text-[11px] uppercase font-bold tracking-wide text-slate-500">Include portfolio</span>
-              {portfolioShared && (
-                <HoverTooltip className="w-60">
-                  Portfolio data has already been shared in this conversation and cannot be removed from context
-                </HoverTooltip>
-              )}
-            </label>
+              <div className="flex items-center gap-1.5 opacity-80">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                </svg>
+                <span className="text-[11px] font-bold tracking-wide">
+                  {enabledTools.length === AVAILABLE_TOOLS.length ? 'All tools enabled' : `${enabledTools.length} tools enabled`}
+                </span>
+              </div>
+            </button>
 
             {/* Adjust weights link */}
-            {includePortfolio && (
+            {enabledTools.length > 0 && (
               <button
                 onClick={() => setWeightsOpen(true)}
                 className="flex items-center gap-1 text-[11px] text-indigo-400/60 hover:text-indigo-400 transition-colors"
+                title="Simulate hypothetical portfolio weights"
               >
                 Adjust weights
                 {isModified && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 ml-0.5" />}

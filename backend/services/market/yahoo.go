@@ -420,9 +420,10 @@ func (s *YahooFinanceService) getCurrencyFromYahoo(symbol string) (string, error
 	// Persist so subsequent calls are served from DB.
 	if s.DB != nil && currency != "" {
 		s.DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "symbol"}},
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "symbol"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{"currency": currency}),
 		}).Create(&models.AssetFundamental{
+			UserID:      0, // The global user is represented by 0 or the background task
 			Symbol:      symbol,
 			Currency:    currency,
 			LastUpdated: time.Now().UTC(),

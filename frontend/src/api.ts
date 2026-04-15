@@ -271,7 +271,7 @@ export interface LLMChatRequest {
   model?: 'flash' | 'pro';
   force_refresh?: boolean;
   // Freeform-only
-  include_portfolio?: boolean;
+  enabled_tools?: string[];
   override_portfolio_weights?: { symbol: string; weight: number }[];
   history?: { role: 'user' | 'assistant'; content: string }[];
   // ticker_analysis
@@ -291,6 +291,11 @@ export interface LLMResponseSection {
   key: string;
   title: string;
   content: string;
+}
+
+export interface LLMToolCallEvent {
+  tool: string;
+  label: string;
 }
 
 export interface LLMChatResponse {
@@ -510,7 +515,11 @@ export async function getLLMSummary(period = '1d', forceRefresh = false): Promis
   return request<LLMSummaryResponse>(`/llm/summary?period=${period}${extra}`);
 }
 
-export async function postLLMChat(req: LLMChatRequest, onChunk?: (text: string) => void): Promise<LLMChatResponse> {
+export async function postLLMChat(
+  req: LLMChatRequest,
+  onChunk?: (text: string) => void,
+  onToolCall?: (event: LLMToolCallEvent) => void,
+): Promise<LLMChatResponse> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -579,6 +588,8 @@ export async function postLLMChat(req: LLMChatRequest, onChunk?: (text: string) 
           const data = JSON.parse(dataStr);
           if (eventType === 'error') {
             throw new Error(data.error);
+          } else if (eventType === 'tool_call') {
+            if (onToolCall) onToolCall(data as LLMToolCallEvent);
           } else if (eventType === 'chunk') {
             streamedContent += data;
             if (onChunk) onChunk(streamedContent);

@@ -143,7 +143,7 @@ func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, 
 
 	symbols := make([]string, 0, len(result.Positions))
 	for _, pos := range result.Positions {
-		if pos.Value != 0 {
+		if pos.Value != 0 && pos.Symbol != "PENDING_CASH" {
 			symbols = append(symbols, pos.Symbol)
 		}
 	}
@@ -151,7 +151,7 @@ func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, 
 
 	var items []PortfolioContextItem
 	for _, pos := range result.Positions {
-		if pos.Value == 0 {
+		if pos.Value == 0 || pos.Symbol == "PENDING_CASH" {
 			continue
 		}
 		e := fd[pos.Symbol]
@@ -335,18 +335,23 @@ func reconstructMarkdown(cp CannedPrompt, fields map[string]string) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// AnalyzePortfolioStream executes portfolio analysis with optional multi-turn history.
-// It streams the response back to the provided callback and returns the full response
+// maxToolRounds is the maximum number of tool-call/response cycles per request.
+const maxToolRounds = 8
+
+// AnalyzePortfolioStream executes portfolio analysis with optional multi-turn history and autonomous tool calling.
+// It streams text chunks to onChunk, emits tool_call events via onToolCall, and returns the final response
 // along with parsed sections (non-nil only for schema-backed canned prompts).
 func (s *Service) AnalyzePortfolioStream(
 	ctx context.Context,
 	data *models.FlexQueryData,
 	currency, cannedType, message, model string,
-	includePortfolio bool,
+	enabledTools []string,
 	customWeights []CustomWeight,
 	history []ConversationTurn,
 	acctModel string,
+	executor ToolExecutor,
 	onChunk func(string) error,
+	onToolCall func(toolName string) error,
 ) (response string, sections []ResponseSection, err error) {
 	if !s.isAvailable() {
 		return "", nil, ErrNotConfigured
@@ -354,19 +359,25 @@ func (s *Service) AnalyzePortfolioStream(
 
 	isCanned := cannedType != ""
 
-	// Resolve portfolio data (either custom or live) and serialize to JSON
+	// Resolve portfolio data (either custom or live) and serialize to JSON.
+	// For the agentic chat (non-canned), we no longer inject raw portfolio JSON into the system prompt —
+	// the model will call get_current_allocations() if it needs the data.
+	// For canned prompts that historically needed the portfolio context in the system instruction,
+	// we retain the injection (they are single-turn and use ForcedTool to prime the tool call anyway).
 	var portfolioJSON string
-	if isCanned || includePortfolio {
-		if !isCanned && customWeights != nil {
+	if isCanned {
+		// Canned prompts still get the portfolio JSON injected as a system part for backward compatibility.
+		if customWeights != nil {
 			portfolioJSON = s.buildPortfolioJSONFromCustom(customWeights)
 		} else {
 			parsedAcct := models.ParseAccountingModel(acctModel)
 			portfolioJSON = s.getPortfolioJSON(data, currency, parsedAcct)
 		}
 	}
+	// For freeform, includePortfolio == true means we tell the model about its available tools
+	// to call get_current_allocations on its own, rather than injecting the full JSON.
 
-	// Build system instruction — persona + portfolio context supplied as separate Parts
-	// (Task 5: system context segregation).
+	// Build system instruction.
 	var defaultSystemInstruction = "You are an expert, professional financial analyst.\n" +
 		"Focus on macroeconomic factors that affect the specific assets in the user's portfolio. " +
 		"Notice specifically if a ticker they hold has seen significant news lately."
@@ -376,11 +387,16 @@ func (s *Service) AnalyzePortfolioStream(
 		sysBase = CannedPrompts[cannedType].SystemInstruction
 	}
 
-	instructionText := sysBase + "\n\n" + defaultConstraints
-	systemParts := buildSystemParts(instructionText, portfolioJSON)
+	// For agentic freeform: add tool-use guidance to the system instruction.
+	toolHint := ""
+	if !isCanned && len(enabledTools) > 0 && executor != nil {
+		toolHint = fmt.Sprintf("\n\nYou have access to the following dynamic tools: %s.\n"+
+			"Always call the relevant tool(s) before answering quantitative questions about the portfolio. Do not guess metrics.",
+			strings.Join(enabledTools, ", "))
+	}
 
-	// message is already fully rendered by the handler (canned or freeform).
-	currentMessage := message
+	instructionText := sysBase + toolHint + "\n\n" + defaultConstraints
+	systemParts := buildSystemParts(instructionText, portfolioJSON)
 
 	// Build contents: prior history turns + current user message.
 	// Canned prompts are always single-turn (history ignored).
@@ -399,25 +415,68 @@ func (s *Service) AnalyzePortfolioStream(
 	}
 	contents = append(contents, &genai.Content{
 		Role:  genai.RoleUser,
-		Parts: []*genai.Part{{Text: currentMessage}},
+		Parts: []*genai.Part{{Text: message}},
 	})
 
-	log.Printf("DEBUG: AnalyzePortfolioStream [model=%s cannedType=%s historyTurns=%d includePortfolio=%v]",
-		model, cannedType, len(history), includePortfolio)
+	log.Printf("DEBUG: AnalyzePortfolioStream [model=%s cannedType=%s historyTurns=%d enabledToolsCount=%d executor=%v]",
+		model, cannedType, len(history), len(enabledTools), executor != nil)
 
+	// Build tool list: dynamically filter portfolio tools + Google Search
 	var tools []*genai.Tool
-	if cannedType == "upcoming_events" || cannedType == "ticker_analysis" || cannedType == "long_market_summary" || cannedType == "add_or_trim" {
-		tools = []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}
+	hasFuncs := false
+	if executor != nil && len(enabledTools) > 0 {
+		pt := PortfolioTools()
+		var activeFuncs []*genai.FunctionDeclaration
+		for _, tf := range pt.FunctionDeclarations {
+			for _, allowed := range enabledTools {
+				if tf.Name == allowed {
+					activeFuncs = append(activeFuncs, tf)
+					break
+				}
+			}
+		}
+		if len(activeFuncs) > 0 {
+			tools = append(tools, &genai.Tool{FunctionDeclarations: activeFuncs})
+			hasFuncs = true
+		}
+	}
+
+	hasGoogleSearch := false
+	if cannedType == "upcoming_events" || cannedType == "ticker_analysis" || cannedType == "long_market_summary" || cannedType == "add_or_trim" || cannedType == "biggest_drag_on_performance" {
+		tools = append(tools, &genai.Tool{GoogleSearch: &genai.GoogleSearch{}})
+		hasGoogleSearch = true
+	}
+
+	// For canned prompts with a ForcedTool, configure ToolChoice to force that tool first.
+	var toolConfig *genai.ToolConfig
+	if isCanned {
+		if cp := CannedPrompts[cannedType]; cp.ForcedTool != "" && executor != nil {
+			toolConfig = &genai.ToolConfig{
+				FunctionCallingConfig: &genai.FunctionCallingConfig{
+					Mode:                  genai.FunctionCallingConfigModeAny,
+					AllowedFunctionNames:  []string{cp.ForcedTool},
+				},
+			}
+		}
+	}
+
+	if hasFuncs && hasGoogleSearch {
+		if toolConfig == nil {
+			toolConfig = &genai.ToolConfig{}
+		}
+		t := true
+		toolConfig.IncludeServerSideToolInvocations = &t
 	}
 
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{Parts: systemParts},
 		Tools:             tools,
+		ToolConfig:        toolConfig,
 	}
 
 	// Task 4: for schema-backed canned prompts, use structured JSON output.
 	// Streaming chunks are suppressed; the full response is parsed after accumulation.
-	isStructured := isCanned && CannedPrompts[cannedType].Schema != nil
+	isStructured := isCanned && CannedPrompts[cannedType].Schema != nil && CannedPrompts[cannedType].ForcedTool == ""
 	if isStructured {
 		cfg.ResponseSchema = CannedPrompts[cannedType].Schema
 		cfg.ResponseMIMEType = "application/json"
@@ -428,31 +487,101 @@ func (s *Service) AnalyzePortfolioStream(
 		return "", nil, fmt.Errorf("creating genai client: %w", err)
 	}
 
-	iter := client.Models.GenerateContentStream(ctx, model, contents, cfg)
+	// --- Multi-turn agentic tool loop ---
 	var fullResponse strings.Builder
 
-	for resp, iterErr := range iter {
-		if iterErr != nil {
-			return fullResponse.String(), nil, fmt.Errorf("generating content stream: %w", iterErr)
-		}
-		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
-			var chunkStr strings.Builder
-			for _, pt := range resp.Candidates[0].Content.Parts {
-				chunkStr.WriteString(pt.Text)
+	for round := 0; round < maxToolRounds; round++ {
+		iter := client.Models.GenerateContentStream(ctx, model, contents, cfg)
+
+		// Collect the complete response for this round.
+		var roundText strings.Builder
+		var functionCalls []*genai.FunctionCall
+		var functionCallParts []*genai.Part
+		finishedWithToolCall := false
+
+		for resp, iterErr := range iter {
+			if iterErr != nil {
+				return fullResponse.String(), nil, fmt.Errorf("generating content stream: %w", iterErr)
 			}
-			chunk := chunkStr.String()
-			if chunk != "" {
-				fullResponse.WriteString(chunk)
-				// For structured prompts, suppress streaming — the JSON fragments are not
-				// meaningful to display incrementally; the frontend shows a loading state instead.
-				if !isStructured && onChunk != nil {
-					if cbErr := onChunk(chunk); cbErr != nil {
-						log.Printf("WARN: stream chunk callback failed, client disconnected: %v", cbErr)
-						return fullResponse.String(), nil, nil
-					}
+			if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+				continue
+			}
+			for _, pt := range resp.Candidates[0].Content.Parts {
+				if pt.Text != "" {
+					roundText.WriteString(pt.Text)
+				}
+				if pt.FunctionCall != nil {
+					functionCalls = append(functionCalls, pt.FunctionCall)
+					functionCallParts = append(functionCallParts, pt)
+					finishedWithToolCall = true
 				}
 			}
 		}
+
+		// Stream any text the model produced before the tool call.
+		if chunk := roundText.String(); chunk != "" {
+			fullResponse.WriteString(chunk)
+			if !isStructured && onChunk != nil {
+				if cbErr := onChunk(fullResponse.String()); cbErr != nil {
+					log.Printf("WARN: stream chunk callback failed, client disconnected: %v", cbErr)
+					return fullResponse.String(), nil, nil
+				}
+			}
+		}
+
+		if !finishedWithToolCall || len(functionCalls) == 0 {
+			// No more tool calls — model has finished.
+			break
+		}
+
+		// Append the model's tool-call turn to the conversation.
+		var modelTurnParts []*genai.Part
+		if roundText.Len() > 0 {
+			modelTurnParts = append(modelTurnParts, &genai.Part{Text: roundText.String()})
+		}
+		modelTurnParts = append(modelTurnParts, functionCallParts...)
+		contents = append(contents, &genai.Content{Role: genai.RoleModel, Parts: modelTurnParts})
+
+		// After the first tool call round, clear any ForcedTool so the model can proceed freely.
+		if cfg.ToolConfig != nil && cfg.ToolConfig.FunctionCallingConfig != nil {
+			cfg.ToolConfig.FunctionCallingConfig = nil
+		}
+
+		// Execute each function call and collect responses.
+		responseParts := make([]*genai.Part, 0, len(functionCalls))
+		for _, fc := range functionCalls {
+			log.Printf("INFO: tool_call [name=%s args=%v]", fc.Name, fc.Args)
+
+			// Notify the frontend a tool is running.
+			if onToolCall != nil {
+				if cbErr := onToolCall(fc.Name); cbErr != nil {
+					log.Printf("WARN: tool_call SSE callback failed: %v", cbErr)
+				}
+			}
+
+			var result map[string]any
+			var toolErr error
+			if executor != nil {
+				result, toolErr = executor(ctx, fc)
+			} else {
+				toolErr = fmt.Errorf("no executor configured")
+			}
+
+			if toolErr != nil {
+				log.Printf("WARN: tool %s execution error: %v", fc.Name, toolErr)
+				result = map[string]any{"error": toolErr.Error()}
+			}
+
+			responseParts = append(responseParts, &genai.Part{
+				FunctionResponse: &genai.FunctionResponse{
+					Name:     fc.Name,
+					Response: result,
+				},
+			})
+		}
+
+		// Append all tool responses as a single user turn.
+		contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: responseParts})
 	}
 
 	rawText := fullResponse.String()
