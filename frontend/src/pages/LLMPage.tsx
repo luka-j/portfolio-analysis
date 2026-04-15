@@ -289,7 +289,7 @@ export default function LLMPage() {
     }
   }
 
-  const cannedDisabled = loading
+
 
   return (
     <div className="min-h-screen md:h-screen bg-bg flex flex-col md:overflow-hidden">
@@ -380,6 +380,7 @@ export default function LLMPage() {
                 display: 'What upcoming events (earnings, macroeconomic data, world events) might impact my portfolio?',
                 active: 'text-amber-300 border-amber-500/25 bg-amber-500/8 hover:bg-amber-500/15 hover:border-amber-500/40',
                 disabled: 'text-amber-400/30 border-amber-500/10',
+                requiredTool: undefined
               },
             ] as const).map(({ label, promptType, display, active, disabled, requiredTool }) => {
               const toolMissing = requiredTool && !enabledTools.includes(requiredTool);
