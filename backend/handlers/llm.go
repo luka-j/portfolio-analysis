@@ -255,7 +255,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 130*time.Second)
 	defer cancel()
-	response, err := h.LLM.AnalyzePortfolioStream(
+	response, sections, err := h.LLM.AnalyzePortfolioStream(
 		reqCtx, data, req.Currency, cannedType, message,
 		modelKey, includePortfolio, overrideWeights, history, req.AccountingModel,
 		func(chunk string) error {
@@ -286,18 +286,22 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		cacheEntry.Model = modelKey
 		cacheEntry.Response = response
 		cacheEntry.CreatedAt = time.Now()
-		
+
 		err = h.DB.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
 			DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
 		}).Create(&cacheEntry).Error
-		
+
 		if err != nil {
 			log.Printf("WARN: Chat failed to save cache [user=%s prompt_type=%s]: %v", userHash[:8], req.PromptType, err)
 		}
 	}
 
-	c.SSEvent("done", gin.H{"response": response})
+	donePayload := gin.H{"response": response}
+	if sections != nil {
+		donePayload["sections"] = sections
+	}
+	c.SSEvent("done", donePayload)
 	c.Writer.Flush()
 }
 

@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown'
+import type { LLMResponseSection } from '../api'
 
 const markdownComponents = {
   h1: ({ children }: { children?: React.ReactNode }) => <p className="font-bold text-white mt-5 mb-2">{children}</p>,
@@ -13,8 +14,54 @@ const markdownComponents = {
   code: ({ children }: { children?: React.ReactNode }) => <code className="bg-white/10 rounded px-1 text-xs font-mono">{children}</code>,
 }
 
-/** Renders an assistant message, collapsing <thinking> blocks into a disclosure. */
-export default function AssistantMessage({ content }: { content: string }) {
+function ThinkingDisclosure({ content }: { content: string }) {
+  return (
+    <details className="mb-3 group cursor-pointer">
+      <summary className="text-xs text-indigo-400/60 hover:text-indigo-400 select-none mb-1 transition-colors outline-none flex items-center gap-1.5 font-medium list-none [&::-webkit-details-marker]:hidden">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-70 group-open:rotate-90 transition-transform">
+          <path d="M4 2l4 4-4 4"/>
+        </svg>
+        AI Thinking Process
+      </summary>
+      <div className="pl-3 mt-2 ml-1.5 border-l-2 border-indigo-500/20 text-slate-400 text-xs opacity-80 pb-2 cursor-auto">
+        <ReactMarkdown components={markdownComponents}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    </details>
+  )
+}
+
+/** Renders an assistant message. When structured sections are present (schema-backed prompts),
+ * each section is rendered individually with its title. Otherwise falls back to parsing
+ * the raw markdown string, collapsing any <thinking> blocks into a disclosure. */
+export default function AssistantMessage({ content, sections }: { content: string; sections?: LLMResponseSection[] }) {
+  if (sections && sections.length > 0) {
+    const thinkingSection = sections.find(s => s.key === 'thinking')
+    const bodySections = sections.filter(s => s.key !== 'thinking')
+
+    return (
+      <>
+        {thinkingSection && thinkingSection.content && (
+          <ThinkingDisclosure content={thinkingSection.content} />
+        )}
+        {bodySections.map((section, idx) => (
+          <div key={section.key} className={idx > 0 ? 'border-t border-white/6 pt-5 mt-1' : ''}>
+            {section.title && (
+              <p className="text-[11px] uppercase font-bold tracking-widest text-indigo-400/50 mb-3">
+                {section.title}
+              </p>
+            )}
+            <ReactMarkdown components={markdownComponents}>
+              {section.content}
+            </ReactMarkdown>
+          </div>
+        ))}
+      </>
+    )
+  }
+
+  // Fallback: parse raw markdown, splitting out <thinking> blocks.
   const parts = content.split(/(<thinking>[\s\S]*?(?:<\/thinking>|$))/i)
 
   return (
@@ -24,21 +71,7 @@ export default function AssistantMessage({ content }: { content: string }) {
         if (part.toLowerCase().startsWith('<thinking>')) {
           const innerContent = part.replace(/^<thinking>/i, '').replace(/<\/thinking>$/i, '').trim()
           if (!innerContent) return null
-          return (
-            <details key={index} className="mb-3 group cursor-pointer">
-              <summary className="text-xs text-indigo-400/60 hover:text-indigo-400 select-none mb-1 transition-colors outline-none flex items-center gap-1.5 font-medium list-none [&::-webkit-details-marker]:hidden">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-70 group-open:rotate-90 transition-transform">
-                  <path d="M4 2l4 4-4 4"/>
-                </svg>
-                AI Thinking Process
-              </summary>
-              <div className="pl-3 mt-2 ml-1.5 border-l-2 border-indigo-500/20 text-slate-400 text-xs opacity-80 pb-2 cursor-auto">
-                <ReactMarkdown components={markdownComponents}>
-                  {innerContent}
-                </ReactMarkdown>
-              </div>
-            </details>
-          )
+          return <ThinkingDisclosure key={index} content={innerContent} />
         }
 
         return (

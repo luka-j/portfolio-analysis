@@ -41,6 +41,13 @@ type ConversationTurn struct {
 	Content string `json:"content"`
 }
 
+// ResponseSection is a single named section from a structured (schema-backed) LLM response.
+type ResponseSection struct {
+	Key     string `json:"key"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
 // Service provides LLM interactions via Gemini.
 type Service struct {
 	APIKey           string
@@ -270,15 +277,16 @@ func (s *Service) GetMarketSummary(ctx context.Context, data *models.FlexQueryDa
 
 	cp := CannedPrompts["market_summary"]
 	prompt := cp.Render(map[string]string{"period": periodText})
+
+	// Task 5: supply portfolio data as a discrete Part separate from the behavioural instruction.
+	systemParts := []*genai.Part{{Text: cp.SystemInstruction}}
 	if portfolioJSON != "" {
-		prompt += fmt.Sprintf("\n\nHere is the user's current portfolio data:\n<portfolio_data>\n%s\n</portfolio_data>", portfolioJSON)
+		systemParts = append(systemParts, &genai.Part{Text: portfolioJSON})
 	}
 
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{
-			Parts: []*genai.Part{
-				{Text: cp.SystemInstruction},
-			},
+			Parts: systemParts,
 		},
 		Tools: []*genai.Tool{
 			{GoogleSearch: &genai.GoogleSearch{}},
@@ -288,8 +296,48 @@ func (s *Service) GetMarketSummary(ctx context.Context, data *models.FlexQueryDa
 	return s.callGemini(ctx, s.FlashModel, "summary", genai.Text(prompt), cfg)
 }
 
+// buildSystemParts constructs the SystemInstruction Parts slice, keeping behavioural rules
+// and portfolio data as discrete elements (Task 5: system context segregation).
+func buildSystemParts(instructionText, portfolioJSON string) []*genai.Part {
+	parts := []*genai.Part{{Text: instructionText}}
+	if portfolioJSON != "" {
+		parts = append(parts, &genai.Part{Text: portfolioJSON})
+	}
+	return parts
+}
+
+// reconstructMarkdown rebuilds a markdown string from a parsed structured response.
+// The thinking field is wrapped in <thinking> tags; other sections use ### headers.
+func reconstructMarkdown(cp CannedPrompt, fields map[string]string) string {
+	var sb strings.Builder
+	if thinking := fields["thinking"]; thinking != "" {
+		sb.WriteString("<thinking>\n")
+		sb.WriteString(thinking)
+		sb.WriteString("\n</thinking>\n\n")
+	}
+	for _, key := range cp.SectionOrder {
+		if key == "thinking" {
+			continue
+		}
+		content := fields[key]
+		if content == "" {
+			continue
+		}
+		title := cp.SectionTitles[key]
+		if title != "" {
+			sb.WriteString("### ")
+			sb.WriteString(title)
+			sb.WriteString("\n")
+		}
+		sb.WriteString(content)
+		sb.WriteString("\n\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 // AnalyzePortfolioStream executes portfolio analysis with optional multi-turn history.
-// It streams the response back to the provided callback and returns the full response at the end.
+// It streams the response back to the provided callback and returns the full response
+// along with parsed sections (non-nil only for schema-backed canned prompts).
 func (s *Service) AnalyzePortfolioStream(
 	ctx context.Context,
 	data *models.FlexQueryData,
@@ -299,9 +347,9 @@ func (s *Service) AnalyzePortfolioStream(
 	history []ConversationTurn,
 	acctModel string,
 	onChunk func(string) error,
-) (string, error) {
+) (response string, sections []ResponseSection, err error) {
 	if !s.isAvailable() {
-		return "", ErrNotConfigured
+		return "", nil, ErrNotConfigured
 	}
 
 	isCanned := cannedType != ""
@@ -317,8 +365,8 @@ func (s *Service) AnalyzePortfolioStream(
 		}
 	}
 
-	// Build system instruction — persona + portfolio context baked in once,
-	// so it does not need to be repeated across conversation turns.
+	// Build system instruction — persona + portfolio context supplied as separate Parts
+	// (Task 5: system context segregation).
 	var defaultSystemInstruction = "You are an expert, professional financial analyst.\n" +
 		"Focus on macroeconomic factors that affect the specific assets in the user's portfolio. " +
 		"Notice specifically if a ticker they hold has seen significant news lately."
@@ -328,11 +376,8 @@ func (s *Service) AnalyzePortfolioStream(
 		sysBase = CannedPrompts[cannedType].SystemInstruction
 	}
 
-	sysText := sysBase + "\n\n" + defaultConstraints
-
-	if portfolioJSON != "" {
-		sysText += "\n\nHere is the user's current portfolio data:\n<portfolio_data>\n" + portfolioJSON + "\n</portfolio_data>"
-	}
+	instructionText := sysBase + "\n\n" + defaultConstraints
+	systemParts := buildSystemParts(instructionText, portfolioJSON)
 
 	// message is already fully rendered by the handler (canned or freeform).
 	currentMessage := message
@@ -366,24 +411,29 @@ func (s *Service) AnalyzePortfolioStream(
 	}
 
 	cfg := &genai.GenerateContentConfig{
-		SystemInstruction: &genai.Content{
-			Parts: []*genai.Part{{Text: sysText}},
-		},
-		Tools: tools,
+		SystemInstruction: &genai.Content{Parts: systemParts},
+		Tools:             tools,
 	}
 
-	// Wait, we need to iterate the stream
+	// Task 4: for schema-backed canned prompts, use structured JSON output.
+	// Streaming chunks are suppressed; the full response is parsed after accumulation.
+	isStructured := isCanned && CannedPrompts[cannedType].Schema != nil
+	if isStructured {
+		cfg.ResponseSchema = CannedPrompts[cannedType].Schema
+		cfg.ResponseMIMEType = "application/json"
+	}
+
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: s.APIKey, HTTPClient: s.HTTPClient})
 	if err != nil {
-		return "", fmt.Errorf("creating genai client: %w", err)
+		return "", nil, fmt.Errorf("creating genai client: %w", err)
 	}
 
 	iter := client.Models.GenerateContentStream(ctx, model, contents, cfg)
 	var fullResponse strings.Builder
 
-	for resp, err := range iter {
-		if err != nil {
-			return fullResponse.String(), fmt.Errorf("generating content stream: %w", err)
+	for resp, iterErr := range iter {
+		if iterErr != nil {
+			return fullResponse.String(), nil, fmt.Errorf("generating content stream: %w", iterErr)
 		}
 		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 			var chunkStr strings.Builder
@@ -393,15 +443,52 @@ func (s *Service) AnalyzePortfolioStream(
 			chunk := chunkStr.String()
 			if chunk != "" {
 				fullResponse.WriteString(chunk)
-				if onChunk != nil {
-					if err := onChunk(chunk); err != nil {
-						log.Printf("WARN: stream chunk callback failed, client disconnected: %v", err)
-						return fullResponse.String(), nil
+				// For structured prompts, suppress streaming — the JSON fragments are not
+				// meaningful to display incrementally; the frontend shows a loading state instead.
+				if !isStructured && onChunk != nil {
+					if cbErr := onChunk(chunk); cbErr != nil {
+						log.Printf("WARN: stream chunk callback failed, client disconnected: %v", cbErr)
+						return fullResponse.String(), nil, nil
 					}
 				}
 			}
 		}
 	}
 
-	return fullResponse.String(), nil
+	rawText := fullResponse.String()
+
+	if !isStructured {
+		return rawText, nil, nil
+	}
+
+	// Parse the JSON response and build the sections slice.
+	cp := CannedPrompts[cannedType]
+	var fields map[string]string
+	if jsonErr := json.Unmarshal([]byte(rawText), &fields); jsonErr != nil {
+		log.Printf("WARN: structured response JSON parse failed [cannedType=%s]: %v — falling back to raw text", cannedType, jsonErr)
+		return rawText, nil, nil
+	}
+
+	// Build ordered sections (exclude "thinking" — it becomes the collapsible disclosure).
+	for _, key := range cp.SectionOrder {
+		if key == "thinking" {
+			continue
+		}
+		content := fields[key]
+		sections = append(sections, ResponseSection{
+			Key:     key,
+			Title:   cp.SectionTitles[key],
+			Content: content,
+		})
+	}
+
+	// Prepend thinking section if present (frontend renders it as a collapsible).
+	if thinking := fields["thinking"]; thinking != "" {
+		sections = append([]ResponseSection{{Key: "thinking", Title: "Thinking", Content: thinking}}, sections...)
+	}
+
+	// Reconstruct markdown for cache storage and fallback rendering.
+	reconstructed := reconstructMarkdown(cp, fields)
+
+	return reconstructed, sections, nil
 }

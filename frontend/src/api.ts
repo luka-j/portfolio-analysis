@@ -287,9 +287,16 @@ export interface LLMChatRequest {
   period?: string;
 }
 
+export interface LLMResponseSection {
+  key: string;
+  title: string;
+  content: string;
+}
+
 export interface LLMChatResponse {
   response: string;
   cached?: boolean;
+  sections?: LLMResponseSection[];
 }
 
 // ---------- API Calls ----------
