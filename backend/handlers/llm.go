@@ -175,7 +175,19 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	modelKey := h.LLM.ResolveModel(req.Model)
+	// Resolve the effective model key then the full model name once, so the same
+	// value is used for the cache key, the log, and the LLM call.
+	// Canned prompts fall back to the service's configured default when the caller
+	// does not specify; freeform defaults to "flash".
+	effectiveKey := req.Model
+	if effectiveKey != "flash" && effectiveKey != "pro" {
+		if cannedType != "" {
+			effectiveKey = h.LLM.DefaultModelKey
+		} else {
+			effectiveKey = "flash"
+		}
+	}
+	modelKey := h.LLM.ResolveModel(effectiveKey)
 
 	// includePortfolio and override weights only apply to freeform.
 	includePortfolio := true
@@ -196,10 +208,22 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 
 	// Cache retrieval for cacheable canned prompts (keyed by user, prompt type, and model).
 	var cacheEntry models.LLMCache
+	cacheKey := req.PromptType
+	if req.Symbol != "" {
+		cacheKey += ":" + req.Symbol
+	}
+	if req.BenchmarkSymbol != "" {
+		cacheKey += ":" + req.BenchmarkSymbol
+	}
+
 	if cannedType != "" && llm.CannedPrompts[cannedType].Cacheable {
-		cacheFound := h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, req.PromptType, modelKey).First(&cacheEntry).Error == nil
+		cacheFound := h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, cacheKey, modelKey).First(&cacheEntry).Error == nil
 		if cacheFound && !req.ForceRefresh && time.Since(cacheEntry.CreatedAt) < 8*time.Hour {
-			c.JSON(http.StatusOK, gin.H{"response": cacheEntry.Response, "cached": true})
+			c.Writer.Header().Set("Content-Type", "text/event-stream")
+			c.Writer.Header().Set("Cache-Control", "no-cache")
+			c.Writer.Header().Set("Connection", "keep-alive")
+			c.SSEvent("message", gin.H{"response": cacheEntry.Response, "cached": true})
+			c.Writer.Flush()
 			return
 		}
 	}
@@ -208,6 +232,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	// simple canned prompts expand their template; freeform uses req.Message verbatim.
 	message := req.Message
 	if cannedType != "" {
+		var err error
 		message, err = h.renderCannedPrompt(req, data)
 		if err != nil {
 			log.Printf("ERROR: renderCannedPrompt failed [user=%s type=%s]: %v", userHash[:8], cannedType, err)
@@ -215,6 +240,10 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 			return
 		}
 	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
 
 	// Call LLM
 	log.Printf("INFO: AnalyzePortfolio calling LLM [user=%s prompt_type=%s model=%s currency=%s includePortfolio=%v overrideWeights=%v]",
@@ -226,29 +255,34 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 130*time.Second)
 	defer cancel()
-	response, err := h.LLM.AnalyzePortfolio(
+	response, err := h.LLM.AnalyzePortfolioStream(
 		reqCtx, data, req.Currency, cannedType, message,
-		req.Model, includePortfolio, overrideWeights, history, req.AccountingModel,
+		modelKey, includePortfolio, overrideWeights, history, req.AccountingModel,
+		func(chunk string) error {
+			c.SSEvent("chunk", chunk)
+			c.Writer.Flush()
+			return nil
+		},
 	)
 	if err != nil {
 		if errors.Is(err, llm.ErrNotConfigured) {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error(), "code": "NOT_CONFIGURED"})
+			c.SSEvent("error", gin.H{"error": err.Error(), "code": "NOT_CONFIGURED"})
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			log.Printf("WARN: AnalyzePortfolio timed out [user=%s prompt_type=%s]", userHash[:8], req.PromptType)
-			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Model timed out. The servers may be overloaded, try again later or with a different model."})
+			c.SSEvent("error", gin.H{"error": "Model timed out. The servers may be overloaded, try again later or with a different model."})
 			return
 		}
 		log.Printf("ERROR: AnalyzePortfolio failed [user=%s prompt_type=%s currency=%s]: %v", userHash[:8], req.PromptType, req.Currency, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "generating analysis: " + err.Error()})
+		c.SSEvent("error", gin.H{"error": "generating analysis: " + err.Error()})
 		return
 	}
 
 	// Upsert Cache for cacheable canned prompts
 	if cannedType != "" && llm.CannedPrompts[cannedType].Cacheable {
 		cacheEntry.UserHash = userHash
-		cacheEntry.PromptType = req.PromptType
+		cacheEntry.PromptType = cacheKey
 		cacheEntry.Model = modelKey
 		cacheEntry.Response = response
 		cacheEntry.CreatedAt = time.Now()
@@ -263,7 +297,8 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"response": response})
+	c.SSEvent("done", gin.H{"response": response})
+	c.Writer.Flush()
 }
 
 // renderCannedPrompt builds the fully-rendered message for a canned prompt type.

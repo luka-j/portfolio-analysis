@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import NavBar from '../components/NavBar'
 import HoverTooltip from '../components/HoverTooltip'
 import WeightsModal, { type WeightRow } from '../components/WeightsModal'
@@ -124,16 +124,38 @@ export default function LLMPage() {
         }
       }
 
-      const res = await postLLMChat(req)
-      setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
+      let initialized = false;
+      const res = await postLLMChat(req, (chunkText) => {
+        if (!initialized) {
+          setLoading(false)
+          initialized = true
+          setMessages(prev => [...prev, { role: 'assistant', content: chunkText, cached: false }])
+        } else {
+          setMessages(prev => {
+            const newMessages = [...prev]
+            newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: chunkText }
+            return newMessages
+          })
+        }
+      })
+      
+      if (!initialized) {
+        setLoading(false)
+        setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
+      } else {
+        setMessages(prev => {
+          const newMessages = [...prev]
+          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: res.response, cached: res.cached }
+          return newMessages
+        })
+      }
     } catch (err) {
+      setLoading(false)
       const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
         : error?.message || 'Failed to generate response.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -167,16 +189,38 @@ export default function LLMPage() {
         }
       }
 
-      const res = await postLLMChat(req)
-      setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
+      let initialized = false;
+      const res = await postLLMChat(req, (chunkText) => {
+        if (!initialized) {
+          setLoading(false)
+          initialized = true
+          setMessages(prev => [...prev, { role: 'assistant', content: chunkText, cached: false }])
+        } else {
+          setMessages(prev => {
+            const newMessages = [...prev]
+            newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: chunkText }
+            return newMessages
+          })
+        }
+      })
+      
+      if (!initialized) {
+        setLoading(false)
+        setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
+      } else {
+        setMessages(prev => {
+          const newMessages = [...prev]
+          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: res.response, cached: res.cached }
+          return newMessages
+        })
+      }
     } catch (err) {
+      setLoading(false)
       const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
         : error?.message || 'Failed to regenerate response.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
-    } finally {
-      setLoading(false)
     }
   }
 

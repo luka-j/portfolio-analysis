@@ -503,12 +503,94 @@ export async function getLLMSummary(period = '1d', forceRefresh = false): Promis
   return request<LLMSummaryResponse>(`/llm/summary?period=${period}${extra}`);
 }
 
-export async function postLLMChat(req: LLMChatRequest): Promise<LLMChatResponse> {
-  return request<LLMChatResponse>('/llm/chat', {
+export async function postLLMChat(req: LLMChatRequest, onChunk?: (text: string) => void): Promise<LLMChatResponse> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) headers['X-Auth-Token'] = token;
+
+  const resp = await fetch(`${API_BASE}/llm/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(req),
   });
+
+  if (resp.status === 401) {
+    clearToken();
+    window.dispatchEvent(new CustomEvent('portfolio:unauthorized'));
+    throw new Error('Unauthorized');
+  }
+
+  if (!resp.ok) {
+    let errorMsg = `Request failed (${resp.status})`;
+    try {
+      const errorText = await resp.text();
+      try {
+        const body = JSON.parse(errorText);
+        errorMsg = body.error || errorMsg;
+      } catch {
+        errorMsg = errorText || errorMsg;
+      }
+    } catch {}
+    throw new Error(errorMsg);
+  }
+
+  const reader = resp.body?.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullResponse: LLMChatResponse = { response: '' };
+  let streamedContent = '';
+
+  if (!reader) return fullResponse;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';
+    
+    for (const part of parts) {
+      if (!part.trim()) continue;
+      
+      const lines = part.split('\n');
+      let eventType = 'message';
+      let dataStr = '';
+      
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          eventType = line.substring(6).trim();
+        } else if (line.startsWith('data:')) {
+          dataStr += line.substring(5).trim();
+        }
+      }
+      
+      if (dataStr) {
+        try {
+          const data = JSON.parse(dataStr);
+          if (eventType === 'error') {
+            throw new Error(data.error);
+          } else if (eventType === 'chunk') {
+            streamedContent += data;
+            if (onChunk) onChunk(streamedContent);
+          } else if (eventType === 'message' || eventType === 'done') {
+            fullResponse = data;
+            if (eventType === 'message' && data.response && onChunk) {
+              onChunk(data.response);
+            }
+          }
+        } catch (e) {
+          if (e instanceof Error && !e.message.startsWith('Unexpected') && eventType === 'error') {
+            throw e;
+          }
+        }
+      }
+    }
+  }
+  
+  return fullResponse;
 }
 
 // ---- Manual Transaction Entry ----

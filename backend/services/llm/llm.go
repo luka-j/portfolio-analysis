@@ -78,9 +78,10 @@ func (s *Service) isAvailable() bool {
 	return s.APIKey != ""
 }
 
-// ResolveModel maps "flash"/"pro" to the configured model name. Empty string → ProModel.
-func (s *Service) ResolveModel(override string) string {
-	if override == "flash" {
+// ResolveModel maps "flash" or "pro" to the configured model name.
+// Any value other than "flash" resolves to ProModel.
+func (s *Service) ResolveModel(key string) string {
+	if key == "flash" {
 		return s.FlashModel
 	}
 	return s.ProModel
@@ -287,20 +288,17 @@ func (s *Service) GetMarketSummary(ctx context.Context, data *models.FlexQueryDa
 	return s.callGemini(ctx, s.FlashModel, "summary", genai.Text(prompt), cfg)
 }
 
-// AnalyzePortfolio executes portfolio analysis with optional multi-turn history.
-// modelOverride: "flash" or "pro" (empty → ProModel).
-// includePortfolio: if false, omit portfolio context (freeform only; canned always includes).
-// customWeights: if non-nil, use instead of live portfolio (freeform only).
-// history: prior conversation turns (freeform only; canned is always single-turn).
-// message must already be the fully rendered prompt text (the handler pre-renders canned prompts).
-func (s *Service) AnalyzePortfolio(
+// AnalyzePortfolioStream executes portfolio analysis with optional multi-turn history.
+// It streams the response back to the provided callback and returns the full response at the end.
+func (s *Service) AnalyzePortfolioStream(
 	ctx context.Context,
 	data *models.FlexQueryData,
-	currency, cannedType, message, modelOverride string,
+	currency, cannedType, message, model string,
 	includePortfolio bool,
 	customWeights []CustomWeight,
 	history []ConversationTurn,
 	acctModel string,
+	onChunk func(string) error,
 ) (string, error) {
 	if !s.isAvailable() {
 		return "", ErrNotConfigured
@@ -359,22 +357,51 @@ func (s *Service) AnalyzePortfolio(
 		Parts: []*genai.Part{{Text: currentMessage}},
 	})
 
-	modelKey := modelOverride
-	if isCanned && modelKey != "flash" && modelKey != "pro" {
-		modelKey = s.DefaultModelKey
-	}
-	model := s.ResolveModel(modelKey)
-	log.Printf("DEBUG: AnalyzePortfolio [model=%s cannedType=%s historyTurns=%d includePortfolio=%v]",
+	log.Printf("DEBUG: AnalyzePortfolioStream [model=%s cannedType=%s historyTurns=%d includePortfolio=%v]",
 		model, cannedType, len(history), includePortfolio)
+
+	var tools []*genai.Tool
+	if cannedType == "upcoming_events" || cannedType == "ticker_analysis" || cannedType == "long_market_summary" || cannedType == "add_or_trim" {
+		tools = []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}
+	}
 
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{
 			Parts: []*genai.Part{{Text: sysText}},
 		},
-		Tools: []*genai.Tool{
-			{GoogleSearch: &genai.GoogleSearch{}},
-		},
+		Tools: tools,
 	}
 
-	return s.callGemini(ctx, model, "analysis", contents, cfg)
+	// Wait, we need to iterate the stream
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: s.APIKey, HTTPClient: s.HTTPClient})
+	if err != nil {
+		return "", fmt.Errorf("creating genai client: %w", err)
+	}
+
+	iter := client.Models.GenerateContentStream(ctx, model, contents, cfg)
+	var fullResponse strings.Builder
+
+	for resp, err := range iter {
+		if err != nil {
+			return fullResponse.String(), fmt.Errorf("generating content stream: %w", err)
+		}
+		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+			var chunkStr strings.Builder
+			for _, pt := range resp.Candidates[0].Content.Parts {
+				chunkStr.WriteString(pt.Text)
+			}
+			chunk := chunkStr.String()
+			if chunk != "" {
+				fullResponse.WriteString(chunk)
+				if onChunk != nil {
+					if err := onChunk(chunk); err != nil {
+						log.Printf("WARN: stream chunk callback failed, client disconnected: %v", err)
+						return fullResponse.String(), nil
+					}
+				}
+			}
+		}
+	}
+
+	return fullResponse.String(), nil
 }
