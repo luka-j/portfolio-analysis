@@ -719,7 +719,7 @@ func (s *Service) getDailyValuesUncached(
 			}
 			return s.FXService.Convert(amount, cur, currency, date, cachedOnly)
 		}
-		br, err := cashbucket.Process(tradeFlows, nil, nil, s.CashBucketExpiryDays, to, bucketConvertFn)
+		br, err := cashbucket.Process(tradeFlows, nil, makeDividendSlice(data.CashDividends), s.CashBucketExpiryDays, to, bucketConvertFn)
 		if err != nil {
 			return nil, fmt.Errorf("GetDailyValues bucket balance: %w", err)
 		}
@@ -989,7 +989,7 @@ func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency stri
 		return s.FXService.Convert(amount, from, currency, date, cachedOnly)
 	}
 
-	result, err := cashbucket.Process(rawTradeFlows, dividendFlows, nil, s.CashBucketExpiryDays, asOf, convertFn)
+	result, err := cashbucket.Process(rawTradeFlows, dividendFlows, makeDividendSlice(data.CashDividends), s.CashBucketExpiryDays, asOf, convertFn)
 	if err != nil {
 		return nil, fmt.Errorf("cashbucket.Process: %w", err)
 	}
@@ -1196,6 +1196,15 @@ func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Tim
 }
 
 
+// makeDividendSlice converts FlexQueryData cash dividends to cashbucket.Dividend structs.
+func makeDividendSlice(cds []models.CashDividend) []cashbucket.Dividend {
+	divs := make([]cashbucket.Dividend, len(cds))
+	for i, cd := range cds {
+		divs[i] = cashbucket.Dividend{DateTime: cd.DateTime, Amount: cd.Amount, Currency: cd.Currency}
+	}
+	return divs
+}
+
 // computePendingCash returns the current aggregate value of all active (non-expired) cash buckets.
 func (s *Service) computePendingCash(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) (float64, error) {
 	return s.computePendingCashMemo(data, currency, acctModel, newFXMemo(s.FXService, cachedOnly), asOf)
@@ -1226,12 +1235,7 @@ func (s *Service) computePendingCashMemo(data *models.FlexQueryData, currency st
 		return memo.Convert(amount, from, currency, date)
 	}
 
-	divs := make([]cashbucket.Dividend, len(data.CashDividends))
-	for i, cd := range data.CashDividends {
-		divs[i] = cashbucket.Dividend{DateTime: cd.DateTime, Amount: cd.Amount, Currency: cd.Currency}
-	}
-
-	result, err := cashbucket.Process(trades, nil, divs, s.CashBucketExpiryDays, asOf, convertFn)
+	result, err := cashbucket.Process(trades, nil, makeDividendSlice(data.CashDividends), s.CashBucketExpiryDays, asOf, convertFn)
 	if err != nil {
 		return 0, fmt.Errorf("computePendingCash: %w", err)
 	}

@@ -167,3 +167,62 @@ func TestMatchNoTrades(t *testing.T) {
 		t.Error("expected empty results for nil trades")
 	}
 }
+
+// TestMatch_StockDividend_ZeroCostLot verifies that STOCK_DIVIDEND shares create a zero-price lot
+// that participates in FIFO matching in chronological order after any earlier buy lots.
+func TestMatch_StockDividend_ZeroCostLot(t *testing.T) {
+	// BUY 10@$100, then receive 5 as stock dividend, then sell 15 all at once.
+	div := models.Trade{BuySell: "STOCK_DIVIDEND", Quantity: 5, Price: 0, DateTime: t2, Currency: "USD"}
+	trades := []models.Trade{
+		mkTrade("BUY", 10, 100, 0, t1),
+		div,
+		mkTrade("SELL", -15, 120, 0, t3),
+	}
+
+	openLots, matched := Match(trades)
+
+	// All 15 shares consumed — no open lots remain.
+	if len(openLots) != 0 {
+		t.Errorf("expected 0 open lots, got %d", len(openLots))
+	}
+	// FIFO: first 10 matched against the buy lot at $100, next 5 against the dividend lot at $0.
+	if len(matched) != 2 {
+		t.Fatalf("expected 2 matched chunks (buy lot + dividend lot), got %d", len(matched))
+	}
+	if matched[0].Qty != 10 || matched[0].CostPrice != 100 {
+		t.Errorf("chunk 0: want qty=10 cost=100, got qty=%v cost=%v", matched[0].Qty, matched[0].CostPrice)
+	}
+	if matched[1].Qty != 5 || matched[1].CostPrice != 0 {
+		t.Errorf("chunk 1 (dividend): want qty=5 cost=0, got qty=%v cost=%v", matched[1].Qty, matched[1].CostPrice)
+	}
+}
+
+// TestMatch_StockDividend_PartialSell verifies a partial sell after a stock dividend uses the
+// buy lot first (FIFO), leaving the zero-cost dividend lot open.
+func TestMatch_StockDividend_PartialSell(t *testing.T) {
+	div := models.Trade{BuySell: "STOCK_DIVIDEND", Quantity: 5, Price: 0, DateTime: t2, Currency: "USD"}
+	trades := []models.Trade{
+		mkTrade("BUY", 10, 100, 0, t1),
+		div,
+		mkTrade("SELL", -5, 120, 0, t3),
+	}
+
+	openLots, matched := Match(trades)
+
+	// 5 sold from the buy lot, 5 buy + 5 dividend remain open.
+	if len(matched) != 1 {
+		t.Fatalf("expected 1 matched chunk, got %d", len(matched))
+	}
+	if matched[0].CostPrice != 100 {
+		t.Errorf("cost price: want 100 (from buy lot), got %v", matched[0].CostPrice)
+	}
+	if len(openLots) != 2 {
+		t.Fatalf("expected 2 open lots remaining, got %d", len(openLots))
+	}
+	if openLots[0].Qty != 5 || openLots[0].Price != 100 {
+		t.Errorf("remaining buy lot: want qty=5 price=100, got %+v", openLots[0])
+	}
+	if openLots[1].Qty != 5 || openLots[1].Price != 0 {
+		t.Errorf("remaining dividend lot: want qty=5 price=0, got %+v", openLots[1])
+	}
+}

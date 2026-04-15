@@ -152,6 +152,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	db.AutoMigrate(
 		&models.User{}, &models.Transaction{}, &models.MarketData{},
 		&models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{},
+		&models.CorporateActionRecord{}, &models.CashDividendRecord{},
 	)
 
 	mockMarket := newMockMarketProvider()
@@ -457,7 +458,7 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 	dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared", filepath.Base(tmpDir))
 	db, err := gorm.Open(sqlite.Open(dbName), &gorm.Config{})
 	require.NoError(t, err)
-	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{})
+	db.AutoMigrate(&models.User{}, &models.Transaction{}, &models.MarketData{}, &models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{}, &models.CorporateActionRecord{}, &models.CashDividendRecord{})
 
 	fxSvc := fx.NewService(m, nil)
 	repo := flexquery.NewRepository(db)
@@ -760,6 +761,7 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	db.AutoMigrate(
 		&models.User{}, &models.Transaction{}, &models.MarketData{},
 		&models.AssetFundamental{}, &models.EtfBreakdown{}, &models.LLMCache{},
+		&models.CorporateActionRecord{}, &models.CashDividendRecord{},
 	)
 
 	mockMarket := newMockMarketProvider()

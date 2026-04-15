@@ -44,6 +44,16 @@ func Match(trades []models.Trade) ([]Lot, []MatchedSell) {
 		if t.BuySell == "TRANSFER_IN" {
 			continue
 		}
+		// STOCK_DIVIDEND shares are received at zero cost. They are added as zero-price lots so that
+		// holdings counts and FIFO lot ordering stay consistent. When sold, their cost is 0 (100%
+		// of proceeds is gain). A future enhancement could distribute cost proportionally across
+		// existing lots for jurisdictions that require a pro-rated cost basis.
+		if t.BuySell == "STOCK_DIVIDEND" {
+			openLots = append(openLots, Lot{
+				Qty: t.Quantity, Price: 0, Date: t.DateTime, Curr: t.Currency,
+			})
+			continue
+		}
 		if t.Quantity > 0 {
 			openLots = append(openLots, Lot{
 				Qty: t.Quantity, Price: t.Price, Date: t.DateTime, Curr: t.Currency,

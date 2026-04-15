@@ -805,6 +805,187 @@ func TestCorporateAction_CD_Idempotent(t *testing.T) {
 	assert.Equal(t, int64(1), cdCount)
 }
 
+// ---------- IC with unparseable description (test gap 10) ----------
+
+// TestCorporateAction_IC_UnparseableDescription verifies that an IC action whose description
+// contains no recognisable "CHANGE TO:" pattern is skipped WITHOUT writing a CorporateActionRecord.
+// This keeps the action retryable on the next upload rather than silently blocking it forever.
+func TestCorporateAction_IC_UnparseableDescription(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "ic-bad-desc",
+		Type:        "IC",
+		Symbol:      "OLD",
+		DateTime:    dt,
+		Description: "some garbled text with no change pattern",
+	}}
+
+	results := repo.applyCorporateActions(user.ID, actions)
+
+	// Skipped actions do not appear in results at all.
+	assert.Empty(t, results, "unparseable IC should not appear in results")
+
+	// No CorporateActionRecord should be written — keeps the action retryable.
+	var caCount int64
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "ic-bad-desc").Count(&caCount)
+	assert.Equal(t, int64(0), caCount, "no record should be written for an unparseable IC")
+
+	// A second call with the same action should behave identically (not blocked).
+	results2 := repo.applyCorporateActions(user.ID, actions)
+	assert.Empty(t, results2)
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "ic-bad-desc").Count(&caCount)
+	assert.Equal(t, int64(0), caCount)
+}
+
+// TestCorporateAction_FS_UnparseableDescription verifies the same retry behaviour for a
+// forward split whose description contains no recognisable ratio.
+func TestCorporateAction_FS_UnparseableDescription(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	dt := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "fs-bad-desc",
+		Type:        "FS",
+		Symbol:      "TSLA",
+		DateTime:    dt,
+		Description: "no ratio information here",
+	}}
+
+	results := repo.applyCorporateActions(user.ID, actions)
+	assert.Empty(t, results)
+
+	var caCount int64
+	repo.DB.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "fs-bad-desc").Count(&caCount)
+	assert.Equal(t, int64(0), caCount)
+}
+
+// ---------- FS with mixed conid / no-conid trades (test gap 9) ----------
+
+// TestCorporateAction_ForwardSplit_MixedConidAndNoConid verifies that when a FS action carries a
+// conid, it scales both conid-bearing trades and no-conid trades for the same symbol, while leaving
+// no-conid trades for a different symbol untouched.
+func TestCorporateAction_ForwardSplit_MixedConidAndNoConid(t *testing.T) {
+	repo, user := newRepoWithDB(t)
+	splitDt := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	preDt := splitDt.Add(-24 * time.Hour)
+
+	// Trade 1: conid-bearing, same security — must be scaled.
+	conidTrade := seedBuyTrade(t, repo.DB, user.ID, "NVDA", "555", preDt, 100, 10.0)
+	// Trade 2: no conid, same symbol — must also be scaled (symbol fallback).
+	noConidTrade := seedBuyTrade(t, repo.DB, user.ID, "NVDA", "", preDt, 50, 10.0)
+	// Trade 3: no conid, different symbol — must NOT be touched.
+	otherTrade := seedBuyTrade(t, repo.DB, user.ID, "AAPL", "", preDt, 20, 15.0)
+
+	actions := []models.ParsedCorporateAction{{
+		ActionID:    "fs-mixed",
+		Type:        "FS",
+		Symbol:      "NVDA",
+		Conid:       "555",
+		DateTime:    splitDt,
+		Description: "NVDA SPLIT 4 FOR 1",
+	}}
+	results := repo.applyCorporateActions(user.ID, actions)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].IsNew)
+	assert.InDelta(t, 4.0, results[0].SplitRatio, 1e-9)
+
+	var t1, t2, t3 models.Transaction
+	require.NoError(t, repo.DB.First(&t1, conidTrade.ID).Error)
+	require.NoError(t, repo.DB.First(&t2, noConidTrade.ID).Error)
+	require.NoError(t, repo.DB.First(&t3, otherTrade.ID).Error)
+
+	// Conid-bearing NVDA trade: scaled.
+	assert.InDelta(t, 400.0, t1.Quantity, 1e-9, "conid trade qty should be scaled 4×")
+	assert.InDelta(t, 2.5, t1.Price, 1e-9, "conid trade price should be divided by 4")
+
+	// No-conid NVDA trade: also scaled via symbol fallback.
+	assert.InDelta(t, 200.0, t2.Quantity, 1e-9, "no-conid NVDA trade qty should be scaled 4×")
+	assert.InDelta(t, 2.5, t2.Price, 1e-9, "no-conid NVDA trade price should be divided by 4")
+
+	// AAPL trade: untouched.
+	assert.InDelta(t, 20.0, t3.Quantity, 1e-9, "AAPL trade should not be scaled")
+	assert.InDelta(t, 15.0, t3.Price, 1e-9, "AAPL price should not change")
+}
+
+// ---------- ParseAndSave end-to-end with inline XML (test gap 8) ----------
+
+// TestParseAndSave_CorporateAction_ForwardSplit feeds a full FlexQuery XML document
+// containing a trade and a FS CorporateAction through ParseAndSave and verifies that
+// the pre-split trade seeded in the DB is scaled and the import result is populated.
+func TestParseAndSave_CorporateAction_ForwardSplit(t *testing.T) {
+	db := setupTestDB(t)
+	user := createUserWithHash(t, db, "hash-ca-fs")
+
+	splitDt := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	preDt := splitDt.Add(-24 * time.Hour)
+
+	// Seed a pre-split buy trade directly in the DB (simulating a prior upload).
+	preTrade := models.Transaction{
+		UserID:        user.ID,
+		Type:          "Trade",
+		TransactionID: "T-presplit",
+		Symbol:        "NVDA",
+		Conid:         "555",
+		Currency:      "USD",
+		DateTime:      preDt,
+		Quantity:      100,
+		Price:         10.0,
+		BuySell:       "BUY",
+		EntryMethod:   "flexquery",
+	}
+	require.NoError(t, db.Create(&preTrade).Error)
+
+	xml := strings.TrimSpace(`
+<?xml version="1.0" encoding="UTF-8"?>
+<FlexQueryResponse>
+  <FlexStatements count="1">
+    <FlexStatement accountId="U999">
+      <Trades/>
+      <Transfers/>
+      <OpenPositions/>
+      <CashTransactions/>
+      <CorporateActions>
+        <CorporateAction type="FS" symbol="NVDA" conid="555" currency="USD"
+                         quantity="300" amount="0"
+                         dateTime="2024-06-01" reportDate="2024-06-01"
+                         description="NVDA SPLIT 4 FOR 1"
+                         actionID="ca-fs-xml-001" />
+      </CorporateActions>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>`)
+
+	repo := NewRepository(db)
+	_, result, err := repo.ParseAndSave(strings.NewReader(xml), "hash-ca-fs")
+	require.NoError(t, err)
+
+	require.Len(t, result.CorporateActions, 1)
+	ca := result.CorporateActions[0]
+	assert.Equal(t, "FS", ca.Type)
+	assert.Equal(t, "NVDA", ca.Symbol)
+	assert.True(t, ca.IsNew)
+	assert.InDelta(t, 4.0, ca.SplitRatio, 1e-9)
+
+	// Pre-split trade should have been scaled 4×.
+	var updated models.Transaction
+	require.NoError(t, db.First(&updated, preTrade.ID).Error)
+	assert.InDelta(t, 400.0, updated.Quantity, 1e-9, "pre-split qty should be 100*4")
+	assert.InDelta(t, 2.5, updated.Price, 1e-9, "pre-split price should be 10/4")
+
+	// CorporateActionRecord must exist for idempotency.
+	var caCount int64
+	db.Model(&models.CorporateActionRecord{}).Where("action_id = ?", "ca-fs-xml-001").Count(&caCount)
+	assert.Equal(t, int64(1), caCount)
+
+	// Re-upload the same XML — action should be reported as already applied (IsNew=false).
+	_, result2, err := repo.ParseAndSave(strings.NewReader(xml), "hash-ca-fs")
+	require.NoError(t, err)
+	require.Len(t, result2.CorporateActions, 1)
+	assert.False(t, result2.CorporateActions[0].IsNew, "second upload should report IsNew=false")
+}
+
 // ---------- LoadSaved cash dividends test ----------
 
 func TestLoadSaved_PopulatesCashDividends(t *testing.T) {

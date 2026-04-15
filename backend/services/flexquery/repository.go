@@ -50,17 +50,14 @@ func parseSplitRatio(desc string) (float64, bool) {
 var icSymbolRe = regexp.MustCompile(`(?i)(?:CHANGE TO|RENAMED TO|SYMBOL CHANGE TO):\s*([A-Z0-9.\-]+)`)
 
 // parseNewSymbol extracts the post-rename ticker from an IC CorporateAction description.
+// The regex character class [A-Z0-9.\-] already stops before '(', so the captured group
+// never contains an ISIN suffix.
 func parseNewSymbol(desc string) string {
 	m := icSymbolRe.FindStringSubmatch(desc)
 	if m == nil {
 		return ""
 	}
-	// IB often appends the ISIN in parentheses: "META(US30303M1027)" — strip it.
-	sym := m[1]
-	if idx := strings.Index(sym, "("); idx != -1 {
-		sym = sym[:idx]
-	}
-	return sym
+	return m[1]
 }
 
 // ParseAndSave reads an IB FlexQuery XML from r, parses it,
@@ -246,6 +243,13 @@ func (r *Repository) ParseAndSave(reader io.Reader, userHash string) (*models.Fl
 
 // applyCorporateActions processes each parsed corporate action for a user, applying DB mutations
 // and recording the action for idempotency. Already-applied actions are returned with IsNew=false.
+//
+// Each new action is applied atomically: the CorporateActionRecord is written first inside a
+// DB transaction, then the side-effects (rename/split/insert) follow. This guarantees that a
+// crash or transient error between the two writes cannot leave the action applied but untracked.
+//
+// Actions whose description cannot be parsed (IC with no recognisable new ticker, FS/RS with no
+// ratio) are logged and skipped WITHOUT writing a record, so the next upload can retry them.
 func (r *Repository) applyCorporateActions(userID uint, actions []models.ParsedCorporateAction) []models.ImportedCorporateAction {
 	// Process in chronological order so renames precede splits on the same security.
 	sorted := make([]models.ParsedCorporateAction, len(actions))
@@ -275,6 +279,9 @@ func (r *Repository) applyCorporateActions(userID uint, actions []models.ParsedC
 			continue
 		}
 
+		// Validate and pre-compute derived fields before touching the DB.
+		// On parse failure we skip WITHOUT writing a CorporateActionRecord so the next
+		// upload can retry (instead of permanently silencing the action).
 		rec := models.CorporateActionRecord{
 			UserID:      userID,
 			ActionID:    a.ActionID,
@@ -287,7 +294,6 @@ func (r *Repository) applyCorporateActions(userID uint, actions []models.ParsedC
 			DateTime:    a.DateTime,
 			Description: a.Description,
 		}
-
 		imported := models.ImportedCorporateAction{
 			ActionID:    a.ActionID,
 			Type:        a.Type,
@@ -303,46 +309,55 @@ func (r *Repository) applyCorporateActions(userID uint, actions []models.ParsedC
 		switch a.Type {
 		case "IC":
 			newSym := parseNewSymbol(a.Description)
-			if newSym != "" {
-				// Only rename transactions that have no conid — conid-bearing rows are
-				// already normalised dynamically by LoadSaved.
-				r.DB.Model(&models.Transaction{}).
-					Where("user_id = ? AND symbol = ? AND conid = '' AND date_time <= ?", userID, a.Symbol, a.DateTime).
-					Update("symbol", newSym)
-				rec.NewSymbol = newSym
-				imported.NewSymbol = newSym
-			} else {
-				log.Printf("corporate action IC: could not parse new symbol from description %q", a.Description)
+			if newSym == "" {
+				log.Printf("corporate action IC: could not parse new symbol from %q; will retry on next upload", a.Description)
+				continue
 			}
-
+			rec.NewSymbol = newSym
+			imported.NewSymbol = newSym
 		case "FS", "RS":
 			ratio, ok := parseSplitRatio(a.Description)
 			if !ok {
-				log.Printf("corporate action %s: could not parse split ratio from description %q", a.Type, a.Description)
-			} else {
-				// Update quantity and price for all transactions of this security dated before the split.
-				// Match by conid when available; fall back to symbol for non-IB transactions.
-				query := r.DB.Model(&models.Transaction{}).
+				log.Printf("corporate action %s: could not parse split ratio from %q; will retry on next upload", a.Type, a.Description)
+				continue
+			}
+			rec.SplitRatio = ratio
+			imported.SplitRatio = ratio
+		}
+
+		// Apply inside a single transaction: record first, then side-effects.
+		// The unique index on (user_id, action_id) acts as an additional guard against
+		// concurrent duplicate uploads — if two uploads race, one transaction will fail
+		// on the Create and the other will succeed cleanly.
+		txErr := r.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&rec).Error; err != nil {
+				return fmt.Errorf("recording action: %w", err)
+			}
+			switch a.Type {
+			case "IC":
+				// Only rename transactions that have no conid — conid-bearing rows are
+				// already normalised dynamically by LoadSaved. Use strict < so a transaction
+				// timestamped at the exact rename moment is treated as already post-event,
+				// consistent with the FS/RS boundary.
+				return tx.Model(&models.Transaction{}).
+					Where("user_id = ? AND symbol = ? AND conid = '' AND date_time < ?", userID, a.Symbol, a.DateTime).
+					Update("symbol", rec.NewSymbol).Error
+			case "FS", "RS":
+				// Update quantity and price for all transactions of this security dated before
+				// the split. Match by conid when available; fall back to symbol for non-IB rows.
+				q := tx.Model(&models.Transaction{}).
 					Where("user_id = ? AND date_time < ?", userID, a.DateTime)
 				if a.Conid != "" {
-					query = query.Where("conid = ? OR (conid = '' AND symbol = ?)", a.Conid, a.Symbol)
+					q = q.Where("conid = ? OR (conid = '' AND symbol = ?)", a.Conid, a.Symbol)
 				} else {
-					query = query.Where("symbol = ?", a.Symbol)
+					q = q.Where("symbol = ?", a.Symbol)
 				}
-				query.Updates(map[string]interface{}{
-					"quantity": gorm.Expr("quantity * ?", ratio),
-					"price":    gorm.Expr("price / ?", ratio),
-				})
-				rec.SplitRatio = ratio
-				imported.SplitRatio = ratio
-			}
-
-		case "SD":
-			// Insert a stock dividend transaction, deduped by actionID as transaction_id.
-			var count int64
-			r.DB.Model(&models.Transaction{}).Where("user_id = ? AND transaction_id = ?", userID, a.ActionID).Count(&count)
-			if count == 0 {
-				txn := models.Transaction{
+				return q.Updates(map[string]interface{}{
+					"quantity": gorm.Expr("quantity * ?", rec.SplitRatio),
+					"price":    gorm.Expr("price / ?", rec.SplitRatio),
+				}).Error
+			case "SD":
+				return tx.Create(&models.Transaction{
 					UserID:        userID,
 					Type:          "Trade",
 					BuySell:       "STOCK_DIVIDEND",
@@ -352,23 +367,11 @@ func (r *Repository) applyCorporateActions(userID uint, actions []models.ParsedC
 					Currency:      a.Currency,
 					DateTime:      a.DateTime,
 					Quantity:      a.Quantity,
-					Price:         0,
-					Proceeds:      0,
-					Commission:    0,
 					Description:   a.Description,
 					EntryMethod:   "flexquery",
-				}
-				if err := r.DB.Create(&txn).Error; err != nil {
-					log.Printf("corporate action SD: failed to insert transaction: %v", err)
-				}
-			}
-
-		case "CD":
-			// Store in the separate cash_dividends table.
-			var count int64
-			r.DB.Model(&models.CashDividendRecord{}).Where("user_id = ? AND action_id = ?", userID, a.ActionID).Count(&count)
-			if count == 0 {
-				cd := models.CashDividendRecord{
+				}).Error
+			case "CD":
+				return tx.Create(&models.CashDividendRecord{
 					UserID:      userID,
 					ActionID:    a.ActionID,
 					Symbol:      a.Symbol,
@@ -376,15 +379,13 @@ func (r *Repository) applyCorporateActions(userID uint, actions []models.ParsedC
 					Amount:      a.Amount,
 					DateTime:    a.DateTime,
 					Description: a.Description,
-				}
-				if err := r.DB.Create(&cd).Error; err != nil {
-					log.Printf("corporate action CD: failed to insert cash dividend: %v", err)
-				}
+				}).Error
 			}
-		}
-
-		if err := r.DB.Create(&rec).Error; err != nil {
-			log.Printf("corporate action %s: failed to record: %v", a.Type, err)
+			return nil
+		})
+		if txErr != nil {
+			log.Printf("corporate action %s/%s: %v", a.Type, a.ActionID, txErr)
+			continue
 		}
 
 		results = append(results, imported)
@@ -554,17 +555,18 @@ func (r *Repository) LoadSaved(userHash string) (*models.FlexQueryData, error) {
 
 	// Load cash dividends for use in the pending-cash bucket calculation.
 	var cdRows []models.CashDividendRecord
-	if err := r.DB.Where("user_id = ?", user.ID).Find(&cdRows).Error; err == nil {
-		for _, cd := range cdRows {
-			data.CashDividends = append(data.CashDividends, models.CashDividend{
-				ActionID:    cd.ActionID,
-				Symbol:      cd.Symbol,
-				Currency:    cd.Currency,
-				Amount:      cd.Amount,
-				DateTime:    cd.DateTime,
-				Description: cd.Description,
-			})
-		}
+	if err := r.DB.Where("user_id = ?", user.ID).Find(&cdRows).Error; err != nil {
+		return nil, fmt.Errorf("loading cash dividends: %w", err)
+	}
+	for _, cd := range cdRows {
+		data.CashDividends = append(data.CashDividends, models.CashDividend{
+			ActionID:    cd.ActionID,
+			Symbol:      cd.Symbol,
+			Currency:    cd.Currency,
+			Amount:      cd.Amount,
+			DateTime:    cd.DateTime,
+			Description: cd.Description,
+		})
 	}
 
 	data.UserHash = userHash
