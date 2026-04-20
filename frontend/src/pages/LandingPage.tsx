@@ -11,7 +11,7 @@ import {
   getLLMSummary,
   type DailyValue, type ImportedTransaction, type ImportedCorporateAction,
 } from '../api'
-import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFromDate } from '../utils/format'
+import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFromDate, RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
 
@@ -568,17 +568,9 @@ export default function LandingPage() {
                     tickFormatter={(val) => privacy && chartMode === 'value' ? '—' : chartMode === 'value' ? formatCurrencyCompact(val, currency) : `${val.toFixed(1)}%`}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(26,29,46,0.98)',
-                      border: '1px solid rgba(99,102,241,0.3)',
-                      borderRadius: '24px',
-                      fontSize: '11px',
-                      color: '#e2e8f0',
-                      backdropFilter: 'blur(32px)',
-                      boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-                    }}
-                    itemStyle={{ fontWeight: 'black', textTransform: 'uppercase', letterSpacing: '0.1em' }}
-                    labelStyle={{ color: '#6366f1', marginBottom: '6px', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.25em', fontWeight: '900', opacity: 0.8 }}
+                    contentStyle={RECHARTS_TOOLTIP_STYLE}
+                    labelStyle={RECHARTS_LABEL_STYLE}
+                    itemStyle={{ ...RECHARTS_ITEM_STYLE, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em' }}
                     formatter={(value) => [
                       privacy && chartMode === 'value'
                         ? '———'

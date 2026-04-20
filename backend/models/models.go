@@ -351,3 +351,64 @@ type BreakdownResponse struct {
 	Currency string             `json:"currency"`
 	Sections []BreakdownSection `json:"sections"`
 }
+
+// DrawdownPoint is a single day in a drawdown time series.
+type DrawdownPoint struct {
+	Date        string  `json:"date"`
+	DrawdownPct float64 `json:"drawdown_pct"` // fraction below peak, e.g. -0.15 = -15%
+	Peak        float64 `json:"peak"`
+	Wealth      float64 `json:"wealth"`
+}
+
+// DrawdownResponse is the response for GET /portfolio/drawdown.
+type DrawdownResponse struct {
+	Currency        string          `json:"currency"`
+	AccountingModel string          `json:"accounting_model"`
+	Series          []DrawdownPoint `json:"series"`
+}
+
+// RollingPoint is a single observation in a rolling-metric time series.
+type RollingPoint struct {
+	Date  string  `json:"date"`
+	Value float64 `json:"value"`
+}
+
+// RollingSeriesResult is the rolling metric series for one symbol (or "Portfolio").
+type RollingSeriesResult struct {
+	Symbol string         `json:"symbol"`
+	Error  string         `json:"error,omitempty"`
+	Series []RollingPoint `json:"series"`
+}
+
+// RollingResponse is the response for GET /portfolio/rolling.
+type RollingResponse struct {
+	Currency        string                `json:"currency"`
+	AccountingModel string                `json:"accounting_model"`
+	Metric          string                `json:"metric"`
+	Window          int                   `json:"window"`
+	Results         []RollingSeriesResult `json:"results"`
+}
+
+// AttributionResult holds return-attribution data for one position.
+type AttributionResult struct {
+	Symbol      string  `json:"symbol"`
+	AvgWeight   float64 `json:"avg_weight"`   // time-weighted average portfolio weight 0–1
+	Return      float64 `json:"return"`       // price return over the period
+	Contribution float64 `json:"contribution"` // avg_weight × return
+}
+
+// AttributionResponse is the response for GET /portfolio/attribution.
+type AttributionResponse struct {
+	Currency        string              `json:"currency"`
+	AccountingModel string              `json:"accounting_model"`
+	TotalTWR        float64             `json:"total_twr"`
+	Positions       []AttributionResult `json:"positions"`
+}
+
+// CorrelationMatrixResponse is the response for GET /portfolio/correlations.
+type CorrelationMatrixResponse struct {
+	Currency        string      `json:"currency"`
+	AccountingModel string      `json:"accounting_model"`
+	Symbols         []string    `json:"symbols"`
+	Matrix          [][]float64 `json:"matrix"`
+}

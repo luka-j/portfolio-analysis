@@ -63,7 +63,7 @@ export function getFromDate(months: number): string {
 export const RECHARTS_TOOLTIP_STYLE: Record<string, unknown> = {
   backgroundColor: 'rgba(26,29,46,0.98)',
   border: '1px solid rgba(99,102,241,0.3)',
-  borderRadius: '24px',
+  borderRadius: '12px',
   fontSize: '11px',
   color: '#e2e8f0',
   backdropFilter: 'blur(32px)',
@@ -79,5 +79,11 @@ export const RECHARTS_LABEL_STYLE: Record<string, unknown> = {
   letterSpacing: '0.25em',
   fontWeight: '900',
   opacity: 0.8,
+}
+
+/** Shared Recharts Tooltip itemStyle — ensures readable text on dark backgrounds. */
+export const RECHARTS_ITEM_STYLE: Record<string, unknown> = {
+  color: '#e2e8f0',
+  fontSize: '11px',
 }
 export const CURRENCIES_WITH_ORIGINAL = ['CZK', 'USD', 'EUR', 'Original'] as const

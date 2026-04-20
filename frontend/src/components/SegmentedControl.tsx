@@ -5,6 +5,7 @@ export interface SegmentOption<T> {
   value: T
   tooltip?: string
   tooltipAlign?: 'center' | 'right'
+  disabled?: boolean
 }
 
 interface Props<T extends string | number> {
@@ -24,9 +25,11 @@ export default function SegmentedControl<T extends string | number>({
         {options.map(opt => (
           <div key={String(opt.value)} className="relative group">
             <button
-              onClick={() => onChange(opt.value)}
+              onClick={() => !opt.disabled && onChange(opt.value)}
               className={`px-3 md:px-6 py-2 rounded-xl text-sm font-medium transition-all ${
-                value === opt.value ? 'glass active text-indigo-300' : 'text-slate-500 hover:text-slate-300'
+                value === opt.value ? 'glass active text-indigo-300'
+                : opt.disabled ? 'text-slate-500 opacity-40 cursor-not-allowed'
+                : 'text-slate-500 hover:text-slate-300'
               }`}
             >
               {opt.label}

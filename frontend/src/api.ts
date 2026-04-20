@@ -547,7 +547,7 @@ export async function postLLMChat(
       } catch {
         errorMsg = errorText || errorMsg;
       }
-    } catch {}
+    } catch { /* use existing errorMsg */ }
     throw new Error(errorMsg);
   }
 
@@ -660,5 +660,104 @@ export async function getSecurityChart(
   return request<SecurityChartResponse>(
     `/market/security-chart?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&ma_days=${maDays}${currencyParam}`,
     { signal },
+  );
+}
+
+// ---- Drawdown ----
+
+export interface DrawdownPoint {
+  date: string;
+  drawdown_pct: number;
+  peak: number;
+  wealth: number;
+}
+
+export interface DrawdownResponse {
+  currency: string;
+  accounting_model: string;
+  series: DrawdownPoint[];
+}
+
+export async function getDrawdownSeries(
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false
+): Promise<DrawdownResponse> {
+  return request<DrawdownResponse>(
+    `/portfolio/drawdown?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`
+  );
+}
+
+// ---- Rolling Metrics ----
+
+export interface RollingPoint {
+  date: string;
+  value: number;
+}
+
+export interface RollingSeriesResult {
+  symbol: string;
+  error?: string;
+  series: RollingPoint[];
+}
+
+export interface RollingResponse {
+  currency: string;
+  accounting_model: string;
+  metric: string;
+  window: number;
+  results: RollingSeriesResult[];
+}
+
+export async function getRollingMetric(
+  metric: 'sharpe' | 'volatility' | 'beta' | 'sortino',
+  window: number,
+  from: string, to: string, currency: string,
+  accountingModel = 'historical',
+  riskFreeRate = 0.05,
+  benchmark?: string,
+): Promise<RollingResponse> {
+  const benchParam = benchmark ? `&benchmark=${encodeURIComponent(benchmark)}` : '';
+  return request<RollingResponse>(
+    `/portfolio/rolling?metric=${metric}&window=${window}&from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${benchParam}`
+  );
+}
+
+// ---- Attribution ----
+
+export interface AttributionResult {
+  symbol: string;
+  avg_weight: number;
+  return: number;
+  contribution: number;
+}
+
+export interface AttributionResponse {
+  currency: string;
+  accounting_model: string;
+  total_twr: number;
+  positions: AttributionResult[];
+}
+
+export async function getAttribution(
+  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05
+): Promise<AttributionResponse> {
+  return request<AttributionResponse>(
+    `/portfolio/attribution?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}`
+  );
+}
+
+// ---- Correlation Matrix ----
+
+export interface CorrelationMatrixResponse {
+  currency: string;
+  accounting_model: string;
+  symbols: string[];
+  matrix: number[][];
+}
+
+export async function getCorrelations(
+  from: string, to: string, currency: string, accountingModel = 'historical'
+): Promise<CorrelationMatrixResponse> {
+  return request<CorrelationMatrixResponse>(
+    `/portfolio/correlations?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}`
   );
 }

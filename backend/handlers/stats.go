@@ -491,3 +491,370 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 		Results:         results,
 	})
 }
+
+// GetDrawdown handles GET /api/v1/portfolio/drawdown.
+// Returns a per-day drawdown series for the portfolio over the requested period.
+func (h *StatsHandler) GetDrawdown(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	data, err := h.Repo.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	currency := c.Query("currency")
+	if currency == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency parameter is required"})
+		return
+	}
+
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
+	cachedOnly := parseCachedOnly(c)
+
+	from, to, err := parseDateRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	earliest, _ := DateRangeFromData(data)
+	if !earliest.IsZero() && from.Before(earliest) {
+		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	portfolioReturns, _, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
+		return
+	}
+
+	ddSeries := stats.CalculateDrawdownSeries(portfolioReturns, endDates)
+
+	series := make([]models.DrawdownPoint, len(ddSeries))
+	for i, pt := range ddSeries {
+		series[i] = models.DrawdownPoint{
+			Date:        pt.Date,
+			DrawdownPct: pt.DrawdownPct,
+			Peak:        pt.Peak,
+			Wealth:      pt.Wealth,
+		}
+	}
+
+	c.JSON(http.StatusOK, models.DrawdownResponse{
+		Currency:        currency,
+		AccountingModel: string(acctModel),
+		Series:          series,
+	})
+}
+
+// GetRolling handles GET /api/v1/portfolio/rolling.
+// Query params: metric=sharpe|volatility|beta, window=21|63|126, benchmark=SYM (required for beta).
+func (h *StatsHandler) GetRolling(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	data, err := h.Repo.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	currency := c.Query("currency")
+	if currency == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency parameter is required"})
+		return
+	}
+
+	metric := c.DefaultQuery("metric", "sharpe")
+	if metric != "sharpe" && metric != "volatility" && metric != "beta" && metric != "sortino" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "metric must be sharpe, volatility, beta, or sortino"})
+		return
+	}
+
+	window := 63
+	if wStr := c.Query("window"); wStr != "" {
+		if w, err := strconv.Atoi(wStr); err == nil && w > 0 {
+			window = w
+		}
+	}
+
+	riskFreeRate := 0.05
+	if rfStr := c.Query("risk_free_rate"); rfStr != "" {
+		if rf, err := strconv.ParseFloat(rfStr, 64); err == nil {
+			riskFreeRate = rf
+		}
+	}
+
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
+	cachedOnly := parseCachedOnly(c)
+
+	from, to, err := parseDateRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	earliest, _ := DateRangeFromData(data)
+	if !earliest.IsZero() && from.Before(earliest) {
+		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
+		return
+	}
+
+	var rollingResults []models.RollingSeriesResult
+
+	if metric == "beta" {
+		benchSym := strings.TrimSpace(c.Query("benchmark"))
+		if benchSym == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "benchmark parameter is required for metric=beta"})
+			return
+		}
+
+		// We only need the aligned price data — recompute rolling below from raw prices.
+
+		// Re-align portfolio and benchmark returns for rolling.
+		prices, priceErr := h.MarketProvider.GetHistory(benchSym, from.AddDate(0, 0, -7), to, cachedOnly)
+		if priceErr != nil {
+			rollingResults = append(rollingResults, models.RollingSeriesResult{
+				Symbol: benchSym,
+				Error:  "could not fetch price data: " + priceErr.Error(),
+			})
+		} else {
+			var fxRates map[string]float64
+			if (acctModel == models.AccountingModelHistorical || acctModel == "") && h.CurrencyGetter != nil {
+				if nativeCcy, err := h.CurrencyGetter.GetCurrency(benchSym); err == nil {
+					fxRates = buildFXRateMap(h.MarketProvider, nativeCcy, currency, from.AddDate(0, 0, -7), to)
+				}
+			}
+
+			benchPriceMap := make(map[string]float64)
+			var lastBenchPrice float64
+			for _, p := range prices {
+				adj := p.AdjClose
+				if adj == 0 {
+					adj = p.Close
+				}
+				ds := p.Date.Format("2006-01-02")
+				if fxRates != nil {
+					if r, ok2 := fxRates[ds]; ok2 && r != 0 {
+						adj *= r
+					}
+				}
+				benchPriceMap[ds] = adj
+			}
+			for d := from.AddDate(0, 0, -7); !d.After(to); d = d.AddDate(0, 0, 1) {
+				ds := d.Format("2006-01-02")
+				if p, ok2 := benchPriceMap[ds]; ok2 {
+					lastBenchPrice = p
+				} else if lastBenchPrice != 0 {
+					benchPriceMap[ds] = lastBenchPrice
+				}
+			}
+
+			// Build aligned return series (portfolio, benchmark, dates).
+			type alignedEntry struct {
+				date string
+				pRet float64
+				bRet float64
+			}
+			var aligned []alignedEntry
+			for i := 0; i < len(portfolioReturns); i++ {
+				prevPrice, ok1 := benchPriceMap[startDates[i]]
+				curPrice, ok2 := benchPriceMap[endDates[i]]
+				if ok1 && ok2 && prevPrice != 0 {
+					aligned = append(aligned, alignedEntry{
+						date: endDates[i],
+						pRet: portfolioReturns[i],
+						bRet: (curPrice - prevPrice) / prevPrice,
+					})
+				}
+			}
+
+			pAligned := make([]float64, len(aligned))
+			bAligned := make([]float64, len(aligned))
+			dAligned := make([]string, len(aligned))
+			for i, a := range aligned {
+				pAligned[i] = a.pRet
+				bAligned[i] = a.bRet
+				dAligned[i] = a.date
+			}
+
+			pts := stats.CalculateRollingBeta(pAligned, bAligned, dAligned, window, riskFreeRate)
+			series := make([]models.RollingPoint, len(pts))
+			for i, pt := range pts {
+				series[i] = models.RollingPoint{Date: pt.Date, Value: pt.Value}
+			}
+			rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Series: series})
+		}
+	} else {
+		pts := stats.CalculateRollingStandalone(portfolioReturns, endDates, window, metric, riskFreeRate)
+		series := make([]models.RollingPoint, len(pts))
+		for i, pt := range pts {
+			series[i] = models.RollingPoint{Date: pt.Date, Value: pt.Value}
+		}
+		rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: "Portfolio", Series: series})
+	}
+
+	c.JSON(http.StatusOK, models.RollingResponse{
+		Currency:        currency,
+		AccountingModel: string(acctModel),
+		Metric:          metric,
+		Window:          window,
+		Results:         rollingResults,
+	})
+}
+
+// GetAttribution handles GET /api/v1/portfolio/attribution.
+// Returns per-position contribution to portfolio return over the period.
+func (h *StatsHandler) GetAttribution(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	data, err := h.Repo.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	currency := c.Query("currency")
+	if currency == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency parameter is required"})
+		return
+	}
+
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
+	cachedOnly := parseCachedOnly(c)
+
+	from, to, err := parseDateRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	earliest, _ := DateRangeFromData(data)
+	if !earliest.IsZero() && from.Before(earliest) {
+		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	riskFreeRate := 0.05
+	if rfStr := c.Query("risk_free_rate"); rfStr != "" {
+		if rf, err := strconv.ParseFloat(rfStr, 64); err == nil {
+			riskFreeRate = rf
+		}
+	}
+
+	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel, cachedOnly)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing per-position values: " + err.Error()})
+		return
+	}
+
+	attrResults := stats.CalculateAttribution(perPos.BySymbol, perPos.Totals)
+
+	positions := make([]models.AttributionResult, len(attrResults))
+	for i, r := range attrResults {
+		positions[i] = models.AttributionResult{
+			Symbol:       r.Symbol,
+			AvgWeight:    r.AvgWeight,
+			Return:       r.Return,
+			Contribution: r.Contribution,
+		}
+	}
+
+	// Portfolio TWR for reconciliation.
+	portfolioReturns, _, _, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	totalTWR := 0.0
+	if err == nil {
+		if sm := stats.CalculateStandaloneMetrics(portfolioReturns, riskFreeRate); true {
+			_ = sm
+		}
+		// Simple TWR: product of (1+r) - 1
+		cum := 1.0
+		for _, r := range portfolioReturns {
+			cum *= (1 + r)
+		}
+		totalTWR = cum - 1
+	}
+
+	c.JSON(http.StatusOK, models.AttributionResponse{
+		Currency:        currency,
+		AccountingModel: string(acctModel),
+		TotalTWR:        totalTWR,
+		Positions:       positions,
+	})
+}
+
+// GetCorrelations handles GET /api/v1/portfolio/correlations.
+// Returns pairwise Pearson correlations for all current holdings.
+func (h *StatsHandler) GetCorrelations(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	data, err := h.Repo.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	currency := c.Query("currency")
+	if currency == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency parameter is required"})
+		return
+	}
+
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
+	cachedOnly := parseCachedOnly(c)
+
+	from, to, err := parseDateRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	earliest, _ := DateRangeFromData(data)
+	if !earliest.IsZero() && from.Before(earliest) {
+		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel, cachedOnly)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing per-position values: " + err.Error()})
+		return
+	}
+
+	// Convert per-position daily values → daily returns.
+	perSymbolReturns := make(map[string][]float64, len(perPos.BySymbol))
+	for sym, vals := range perPos.BySymbol {
+		rets := make([]float64, len(vals)-1)
+		for i := 1; i < len(vals); i++ {
+			prev := vals[i-1]
+			if prev > 1e-8 {
+				rets[i-1] = (vals[i] - prev) / prev
+			}
+		}
+		perSymbolReturns[sym] = rets
+	}
+
+	result := stats.CalculateCorrelationMatrix(perSymbolReturns, 10)
+
+	c.JSON(http.StatusOK, models.CorrelationMatrixResponse{
+		Currency:        currency,
+		AccountingModel: string(acctModel),
+		Symbols:         result.Symbols,
+		Matrix:          result.Matrix,
+	})
+}

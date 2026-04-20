@@ -1047,6 +1047,209 @@ func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time
 }
 
 
+// PerPositionDailyValues holds per-symbol daily value slices aligned to the same date grid.
+type PerPositionDailyValues struct {
+	Dates      []string             // trading dates in [from, to]
+	BySymbol   map[string][]float64 // posKey → daily value in display currency (len == len(Dates))
+	Totals     []float64            // portfolio daily total (sum across all positions, no pending cash)
+}
+
+// GetDailyValuesPerPosition returns per-position daily values in the display currency.
+// It mirrors the inner per-symbol loop from getDailyValuesUncached but accumulates into
+// a map instead of a single total. Pending cash is excluded — only equity positions appear.
+func (s *Service) GetDailyValuesPerPosition(
+	data *models.FlexQueryData,
+	from, to time.Time,
+	currency string,
+	acctModel models.AccountingModel,
+	cachedOnly bool,
+) (*PerPositionDailyValues, error) {
+	if acctModel == models.AccountingModelOriginal {
+		currencies := make(map[string]bool)
+		for _, t := range data.Trades {
+			if !isFXTrade(t) && t.BuySell != "TRANSFER_IN" && t.Currency != "" {
+				currencies[t.Currency] = true
+			}
+		}
+		if len(currencies) > 1 {
+			return nil, fmt.Errorf("cannot compute per-position values for multi-currency portfolio with 'original' accounting model")
+		}
+	}
+
+	validDates, err := s.MarketProvider.TradingDates(from, to)
+	if err != nil {
+		return nil, fmt.Errorf("GetDailyValuesPerPosition: trading dates: %w", err)
+	}
+	if len(validDates) == 0 {
+		return &PerPositionDailyValues{Dates: []string{}, BySymbol: map[string][]float64{}, Totals: []float64{}}, nil
+	}
+
+	// Pre-fetch FX histories for historical mode (same logic as getDailyValuesUncached).
+	fxData := make(map[string][]models.PricePoint)
+	if acctModel == models.AccountingModelHistorical || acctModel == "" {
+		nativeCurrencies := make(map[string]bool)
+		for _, t := range data.Trades {
+			if !isFXTrade(t) && t.Currency != "" && t.Currency != currency {
+				nativeCurrencies[t.Currency] = true
+			}
+		}
+		for fromCur := range nativeCurrencies {
+			pairKey := fromCur + currency
+			fxSymbol := fmt.Sprintf("%s%s=X", fromCur, currency)
+			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
+			if err != nil {
+				log.Printf("Warning: pre-fetching FX %s for per-position: %v\n", fxSymbol, err)
+				continue
+			}
+			fxData[pairKey] = pts
+		}
+	}
+
+	yMap := s.getYahooSymbolMap(data)
+	tradesByKey := make(map[string][]models.Trade)
+	for _, t := range data.Trades {
+		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
+			continue
+		}
+		k := posKey(t.Symbol, t.ListingExchange)
+		tradesByKey[k] = append(tradesByKey[k], t)
+	}
+	for k := range tradesByKey {
+		sort.Slice(tradesByKey[k], func(i, j int) bool {
+			return tradesByKey[k][i].DateTime.Before(tradesByKey[k][j].DateTime)
+		})
+	}
+
+	type symbolFetch struct {
+		k           string
+		querySymbol string
+		prices      []models.PricePoint
+		err         error
+	}
+	fetches := make([]*symbolFetch, 0, len(tradesByKey))
+	for k := range tradesByKey {
+		qs := k
+		if idx := strings.Index(k, "@"); idx != -1 {
+			qs = k[:idx]
+		}
+		if ys, ok := yMap[k]; ok && ys != "" {
+			qs = ys
+		}
+		fetches = append(fetches, &symbolFetch{k: k, querySymbol: qs})
+	}
+
+	var wg sync.WaitGroup
+	for _, f := range fetches {
+		wg.Add(1)
+		go func(req *symbolFetch) {
+			defer wg.Done()
+			req.prices, req.err = s.MarketProvider.GetHistory(req.querySymbol, from, to, cachedOnly)
+		}(f)
+	}
+	wg.Wait()
+
+	n := len(validDates)
+	dates := make([]string, n)
+	for i, d := range validDates {
+		dates[i] = d.Format("2006-01-02")
+	}
+	totals := make([]float64, n)
+	bySymbol := make(map[string][]float64, len(fetches))
+
+	fromMidnight := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+
+	for _, f := range fetches {
+		k := f.k
+		trades := tradesByKey[k]
+		prices := f.prices
+
+		if f.err != nil {
+			log.Printf("Warning: fetching %s historical data for per-position: %v\n", f.querySymbol, f.err)
+		}
+
+		nativeCurrency := ""
+		for _, t := range trades {
+			if t.Currency != "" {
+				nativeCurrency = t.Currency
+				break
+			}
+		}
+
+		qty := 0.0
+		ti := 0
+		for ti < len(trades) && trades[ti].DateTime.Before(fromMidnight) {
+			qty += trades[ti].Quantity
+			ti++
+		}
+
+		vals := make([]float64, n)
+		for i, d := range validDates {
+			endOfDay := time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 999999999, d.Location())
+			for ti < len(trades) && !trades[ti].DateTime.After(endOfDay) {
+				qty += trades[ti].Quantity
+				ti++
+			}
+			if qty > -1e-5 && qty < 1e-5 {
+				continue
+			}
+			price := priceAt(prices, d)
+			if price == 0 {
+				continue
+			}
+			nativeVal := qty * price
+
+			var displayVal float64
+			switch acctModel {
+			case models.AccountingModelOriginal:
+				displayVal = nativeVal
+			case models.AccountingModelSpot:
+				if nativeCurrency == currency || nativeCurrency == "" {
+					displayVal = nativeVal
+				} else {
+					v, err := s.FXService.ConvertSpot(nativeVal, nativeCurrency, currency, cachedOnly)
+					if err != nil {
+						continue
+					}
+					displayVal = v
+				}
+			default: // historical
+				if nativeCurrency == currency || nativeCurrency == "" {
+					displayVal = nativeVal
+				} else {
+					pairKey := nativeCurrency + currency
+					if pts, ok := fxData[pairKey]; ok {
+						if rate := fxRateAt(pts, d); rate != 0 {
+							displayVal = nativeVal * rate
+						} else {
+							v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d, cachedOnly)
+							if err != nil {
+								continue
+							}
+							displayVal = v
+						}
+					} else {
+						v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d, cachedOnly)
+						if err != nil {
+							continue
+						}
+						displayVal = v
+					}
+				}
+			}
+
+			vals[i] = displayVal
+			totals[i] += displayVal
+		}
+		bySymbol[k] = vals
+	}
+
+	return &PerPositionDailyValues{
+		Dates:    dates,
+		BySymbol: bySymbol,
+		Totals:   totals,
+	}, nil
+}
+
 // GetCumulativeTWR computes the day-by-day cumulative Time-Weighted Return series
 // over [from, to].  Each data point expresses the portfolio's growth factor (as a
 // percentage) relative to the first day, properly adjusted for external cash flows
