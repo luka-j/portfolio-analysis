@@ -688,8 +688,26 @@ func (h *LLMHandler) toolGetPositionsWithCostBasis(_ context.Context, data *mode
 		return nil, fmt.Errorf("computing portfolio value: %w", err)
 	}
 
+	symbols := make([]string, 0, len(result.Positions))
+	for _, p := range result.Positions {
+		if p.Value != 0 && p.Symbol != "PENDING_CASH" {
+			symbols = append(symbols, p.Symbol)
+		}
+	}
+	var nameRows []models.AssetFundamental
+	nameMap := make(map[string]string, len(symbols))
+	if h.DB != nil && len(symbols) > 0 {
+		h.DB.Select("symbol, name").Where("symbol IN ?", symbols).Find(&nameRows)
+		for _, r := range nameRows {
+			if r.Name != "" {
+				nameMap[r.Symbol] = r.Name
+			}
+		}
+	}
+
 	type posDetail struct {
 		Symbol       string  `json:"symbol"`
+		Name         string  `json:"name,omitempty"`
 		Quantity     float64 `json:"quantity"`
 		Price        float64 `json:"price"`
 		CostBasis    float64 `json:"cost_basis"`
@@ -704,6 +722,7 @@ func (h *LLMHandler) toolGetPositionsWithCostBasis(_ context.Context, data *mode
 		}
 		positions = append(positions, posDetail{
 			Symbol:       p.Symbol,
+			Name:         nameMap[p.Symbol],
 			Quantity:     p.Quantity,
 			Price:        p.Price,
 			CostBasis:    p.CostBasis,
