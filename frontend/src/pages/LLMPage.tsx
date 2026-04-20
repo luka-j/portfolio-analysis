@@ -289,6 +289,13 @@ export default function LLMPage() {
                 requiredTool: 'get_current_allocations'
               },
               {
+                label: 'Add or Trim?', promptType: 'add_or_trim',
+                display: 'Where should I add weight and where should I trim in my current portfolio?',
+                active: 'text-violet-300 border-violet-500/25 bg-violet-500/8 hover:bg-violet-500/15 hover:border-violet-500/40',
+                disabled: 'text-violet-400/30 border-violet-500/10',
+                requiredTool: 'get_current_allocations'
+              },
+              {
                 label: 'Geographic & Sector Bottlenecks', promptType: 'geographic_sector_bottlenecks',
                 display: 'Analyze my Geographic & Sector Bottlenecks.',
                 active: 'text-cyan-300 border-cyan-500/25 bg-cyan-500/8 hover:bg-cyan-500/15 hover:border-cyan-500/40',

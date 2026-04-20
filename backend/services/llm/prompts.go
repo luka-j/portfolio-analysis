@@ -86,20 +86,30 @@ Keep each bullet point under 30 words.`,
 		ChatAccessible:    false,
 	},
 	"add_or_trim": {
-		Message: `You are helping me decide where to allocate new money and where to reduce existing positions within my current portfolio. Do NOT suggest adding any new securities — only work with what I already hold.
+		Message: `First, call get_current_allocations() to retrieve my portfolio holdings and weights. Then use Google Search to find current news, recent earnings, analyst sentiment, and valuation context for my holdings. You may also call get_open_positions_with_cost_basis() to see unrealized gains/losses when evaluating trim candidates — a position deep in the green may warrant profit-taking, while one deep in the red raises tax-loss or recovery questions.
 
-Use the Google Search tool to find current news, recent earnings, analyst sentiment, and valuation context for my holdings. Use a <thinking> block, and begin it by listing every ticker from the portfolio data alongside its full name exactly as provided — do not paraphrase or infer names. Use this list as your reference throughout; if a search result describes a security whose name does not match the provided name for that ticker, discard it and search more specifically. Then evaluate each position's upside and downside case, and identify any that are already overrepresented relative to their risk/reward.
+Put your reasoning in the ` + "`thinking`" + ` field: begin by listing every ticker alongside its full name exactly as provided in the portfolio data — do not paraphrase or infer names. Use this list as your reference throughout; if a search result describes a security whose name does not match the provided name for that ticker, discard it and search more specifically. Then evaluate each position's upside and downside case, weighting by current allocation size, and identify any that are already overrepresented relative to their risk/reward.
 
-Then structure your response using exactly these markdown headers:
-### ✅ Add Weight To
-Pick exactly three holdings from my portfolio with the most compelling case for putting more money in right now. For each, write 2–4 sentences covering: the core upside catalyst, why it complements the rest of the portfolio (diversification, factor tilt, or thematic fit), and any key risk to monitor. Lead each entry with the ticker in bold.
-### ✂️ Trim or Avoid
-Pick exactly three holdings from my portfolio where the case for adding more money is weakest — either due to a credible downside story, stretched valuation, or because the position is already overrepresented relative to the rest of the portfolio. For each, write 2–4 sentences covering: the core concern, what conditions would make this thesis wrong (i.e. when you'd change your mind), and whether this is a full exit candidate or just a "don't add" signal. Lead each entry with the ticker in bold.
+Then fill each field with fluent markdown prose:
+
+- **` + "`add_weight`" + `**: Pick exactly three holdings from my portfolio with the most compelling case for putting more money in right now. For each, write 2–4 sentences covering: the core upside catalyst, why it complements the rest of the portfolio (diversification, factor tilt, or thematic fit), and any key risk to monitor. Lead each entry with the ticker in bold.
+
+- **` + "`trim_or_avoid`" + `**: Pick exactly three holdings from my portfolio where the case for adding more money is weakest — either due to a credible downside story, stretched valuation, or because the position is already overrepresented relative to the rest of the portfolio. For each, write 2–4 sentences covering: the core concern, what conditions would make this thesis wrong, and whether this is a full exit candidate or just a "don't add" signal. Lead each entry with the ticker in bold.
 
 A holding may appear in both lists if it represents a high-conviction asymmetric bet — compelling upside but with an equally credible downside that warrants caution before sizing up.`,
 		SystemInstruction: "You are an expert equity analyst helping a client make capital allocation decisions within their existing portfolio. Ground your recommendations in current, real-world data from your search results. Be direct and opinionated — avoid hedging every sentence.",
+		ForcedTool:        "get_current_allocations",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		SectionOrder: []string{
+			"thinking",
+			"add_weight",
+			"trim_or_avoid",
+		},
+		SectionTitles: map[string]string{
+			"add_weight":    "✅ Add Weight To",
+			"trim_or_avoid": "✂️ Trim or Avoid",
+		},
 	},
 	"general_analysis": {
 		Message: `First, call get_current_allocations() to retrieve my portfolio holdings and weights. Then analyze my current portfolio given current market conditions.
