@@ -272,7 +272,6 @@ export interface LLMChatRequest {
   force_refresh?: boolean;
   // Freeform-only
   enabled_tools?: string[];
-  override_portfolio_weights?: { symbol: string; weight: number }[];
   history?: { role: 'user' | 'assistant'; content: string }[];
   // ticker_analysis
   symbol?: string;

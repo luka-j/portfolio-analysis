@@ -2,11 +2,10 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { usePersistentState } from '../utils/usePersistentState'
 import NavBar from '../components/NavBar'
 import HoverTooltip from '../components/HoverTooltip'
-import WeightsModal, { type WeightRow } from '../components/WeightsModal'
 import ToolsModal, { AVAILABLE_TOOLS } from '../components/ToolsModal'
 import AssistantMessage from '../components/AssistantMessage'
 import { useLocation } from 'react-router-dom'
-import { postLLMChat, getPortfolioValue, type LLMChatRequest, type LLMResponseSection, type LLMToolCallEvent } from '../api'
+import { postLLMChat, type LLMChatRequest, type LLMResponseSection, type LLMToolCallEvent } from '../api'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -63,11 +62,6 @@ export default function LLMPage() {
   ].includes(id))
   const [enabledTools, setEnabledTools] = usePersistentState<string[]>('llm_enabled_tools', defaultTools)
   const [toolsModalOpen, setToolsModalOpen] = useState(false)
-  const [weights, setWeights] = useState<WeightRow[]>([])
-  const [liveWeights, setLiveWeights] = useState<WeightRow[]>([])
-  const [weightsLoading, setWeightsLoading] = useState(false)
-  const [weightsOpen, setWeightsOpen] = useState(false)
-  const [portfolioTotals, setPortfolioTotals] = useState<{ CZK: number; USD: number; EUR: number } | null>(null)
   const [portfolioShared, setPortfolioShared] = useState(initialMessages.length > 0)
 
   const endRef = useRef<HTMLDivElement>(null)
@@ -75,28 +69,6 @@ export default function LLMPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  // Fetch live portfolio weights on mount
-  useEffect(() => {
-    setWeightsLoading(true)
-    Promise.all([
-      getPortfolioValue('USD', 'spot'),
-      getPortfolioValue('CZK', 'spot'),
-      getPortfolioValue('EUR', 'spot'),
-    ])
-      .then(([usd, czk, eur]) => {
-        if (usd.value === 0) return
-        const rows: WeightRow[] = usd.positions
-          .filter(p => p.value > 0 && p.symbol !== 'PENDING_CASH')
-          .map(p => ({ symbol: p.symbol, weight: parseFloat(((p.value / usd.value) * 100).toFixed(1)) }))
-          .sort((a, b) => b.weight - a.weight)
-        setLiveWeights(rows)
-        setWeights(rows)
-        setPortfolioTotals({ USD: usd.value, CZK: czk.value, EUR: eur.value })
-      })
-      .catch(() => {})
-      .finally(() => setWeightsLoading(false))
-  }, [])
 
   const autoSentRef = useRef(false)
 
@@ -129,25 +101,6 @@ export default function LLMPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const resetWeights = () => setWeights(liveWeights.map(r => ({ ...r })))
-
-  const handleWeightChange = (idx: number, val: string) => {
-    const n = parseFloat(val)
-    if (isNaN(n)) return
-    setWeights(prev => prev.map((r, i) => i === idx ? { ...r, weight: n } : r))
-  }
-
-  const handleWeightStep = (idx: number, delta: number) => {
-    setWeights(prev => prev.map((r, i) =>
-      i === idx ? { ...r, weight: Math.max(0, Math.round((r.weight + delta) * 10) / 10) } : r
-    ))
-  }
-
-  const removeWeight = (idx: number) => setWeights(prev => prev.filter((_, i) => i !== idx))
-
-  const isModified = weights.some((r, i) => liveWeights[i]?.symbol !== r.symbol || liveWeights[i]?.weight !== r.weight)
-    || weights.length !== liveWeights.length
-
   const handleToolToggle = (id: string) => setEnabledTools(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
   const handleToolToggleAll = (enable: boolean) => setEnabledTools(enable ? AVAILABLE_TOOLS.map(t => t.id) : [])
 
@@ -172,9 +125,6 @@ export default function LLMPage() {
       }
       req.enabled_tools = enabledTools
       if (!isCanned) {
-        if (enabledTools.length > 0 && weights.length > 0) {
-          req.override_portfolio_weights = weights.map(r => ({ symbol: r.symbol, weight: r.weight }))
-        }
         if (priorMessages.length > 0) {
           req.history = priorMessages.map(m => ({ role: m.role, content: m.content }))
         }
@@ -242,9 +192,6 @@ export default function LLMPage() {
       }
       if (!isCanned) {
         req.enabled_tools = enabledTools
-        if (enabledTools.length > 0 && weights.length > 0) {
-          req.override_portfolio_weights = weights.map(r => ({ symbol: r.symbol, weight: r.weight }))
-        }
         if (priorMessages.length > 0) {
           req.history = priorMessages.map(m => ({ role: m.role, content: m.content }))
         }
@@ -294,19 +241,6 @@ export default function LLMPage() {
   return (
     <div className="min-h-screen md:h-screen bg-bg flex flex-col md:overflow-hidden">
       <NavBar />
-
-      {weightsOpen && (
-        <WeightsModal
-          weights={weights}
-          weightsLoading={weightsLoading}
-          portfolioTotals={portfolioTotals}
-          onWeightChange={handleWeightChange}
-          onWeightStep={handleWeightStep}
-          onRemove={removeWeight}
-          onReset={resetWeights}
-          onClose={() => setWeightsOpen(false)}
-        />
-      )}
 
       {toolsModalOpen && (
         <ToolsModal
@@ -565,17 +499,6 @@ export default function LLMPage() {
               </div>
             </button>
 
-            {/* Adjust weights link */}
-            {enabledTools.length > 0 && (
-              <button
-                onClick={() => setWeightsOpen(true)}
-                className="flex items-center gap-1 text-[11px] text-indigo-400/60 hover:text-indigo-400 transition-colors"
-                title="Simulate hypothetical portfolio weights"
-              >
-                Adjust weights
-                {isModified && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 ml-0.5" />}
-              </button>
-            )}
           </div>
 
           {/* Disclosure */}

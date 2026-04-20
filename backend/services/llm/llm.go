@@ -21,12 +21,6 @@ import (
 // ErrNotConfigured is returned when the Gemini API key is not set.
 var ErrNotConfigured = errors.New("LLM service unavailable: GEMINI_API_KEY not set")
 
-// CustomWeight represents a symbol and its portfolio weight (percentage).
-type CustomWeight struct {
-	Symbol string  `json:"symbol"`
-	Weight float64 `json:"weight"`
-}
-
 // PortfolioContextItem represents a single portfolio holding in the LLM context.
 type PortfolioContextItem struct {
 	Symbol    string  `json:"symbol"`
@@ -175,37 +169,6 @@ func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, 
 	return string(b)
 }
 
-// buildPortfolioJSONFromCustom builds a compact JSON string from caller-provided weights with name lookup.
-func (s *Service) buildPortfolioJSONFromCustom(weights []CustomWeight) string {
-	symbols := make([]string, len(weights))
-	for i, w := range weights {
-		symbols[i] = w.Symbol
-	}
-	fd := s.lookupFundamentals(symbols)
-
-	var items []PortfolioContextItem
-	for _, w := range weights {
-		e := fd[w.Symbol]
-		items = append(items, PortfolioContextItem{
-			Symbol:    w.Symbol,
-			Name:      e.Name,
-			ISIN:      e.ISIN,
-			WeightPct: math.Round(w.Weight*10) / 10,
-		})
-	}
-
-	if len(items) == 0 {
-		return ""
-	}
-
-	b, err := json.Marshal(items)
-	if err != nil {
-		log.Printf("WARN: buildPortfolioJSONFromCustom failed to marshal JSON: %v", err)
-		return ""
-	}
-	return string(b)
-}
-
 // callGemini sends a multi-turn content slice to Gemini and returns the text response.
 // callType labels the metric ("summary" or "analysis").
 func (s *Service) callGemini(ctx context.Context, model, callType string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (string, error) {
@@ -346,7 +309,6 @@ func (s *Service) AnalyzePortfolioStream(
 	data *models.FlexQueryData,
 	currency, cannedType, message, model string,
 	enabledTools []string,
-	customWeights []CustomWeight,
 	history []ConversationTurn,
 	acctModel string,
 	executor ToolExecutor,
@@ -367,12 +329,8 @@ func (s *Service) AnalyzePortfolioStream(
 	var portfolioJSON string
 	if isCanned {
 		// Canned prompts still get the portfolio JSON injected as a system part for backward compatibility.
-		if customWeights != nil {
-			portfolioJSON = s.buildPortfolioJSONFromCustom(customWeights)
-		} else {
-			parsedAcct := models.ParseAccountingModel(acctModel)
-			portfolioJSON = s.getPortfolioJSON(data, currency, parsedAcct)
-		}
+		parsedAcct := models.ParseAccountingModel(acctModel)
+		portfolioJSON = s.getPortfolioJSON(data, currency, parsedAcct)
 	}
 	// For freeform, includePortfolio == true means we tell the model about its available tools
 	// to call get_current_allocations on its own, rather than injecting the full JSON.

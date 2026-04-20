@@ -138,9 +138,8 @@ type ChatRequest struct {
 	Model      string `json:"model"` // "flash" | "pro" (default "pro")
 
 	// Freeform-only fields (ignored for canned prompts).
-	EnabledTools             []string               `json:"enabled_tools"`              // dynamically allowed tool names
-	OverridePortfolioWeights []llm.CustomWeight     `json:"override_portfolio_weights"` // overrides live portfolio weights
-	History                  []llm.ConversationTurn `json:"history"`                    // prior conversation turns
+	EnabledTools []string               `json:"enabled_tools"` // dynamically allowed tool names
+	History      []llm.ConversationTurn `json:"history"`       // prior conversation turns
 
 	// ticker_analysis
 	Symbol string `json:"symbol"` // ticker symbol to analyse
@@ -208,12 +207,6 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	}
 	modelKey := h.LLM.ResolveModel(effectiveKey)
 
-	// override weights only apply to freeform.
-	var overrideWeights []llm.CustomWeight
-	if cannedType == "" && req.OverridePortfolioWeights != nil {
-		overrideWeights = req.OverridePortfolioWeights
-	}
-
 	data, err := h.Repo.LoadSaved(userHash)
 	if err != nil {
 		log.Printf("ERROR: Chat LoadSaved failed [user=%s]: %v", userHash[:8], err)
@@ -265,8 +258,8 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	executor := h.buildExecutor(data, req)
 
 	// Call LLM
-	log.Printf("INFO: AnalyzePortfolio calling LLM [user=%s prompt_type=%s model=%s currency=%s enabledToolsCount=%d overrideWeights=%v]",
-		userHash[:8], req.PromptType, modelKey, req.Currency, len(req.EnabledTools), overrideWeights != nil)
+	log.Printf("INFO: AnalyzePortfolio calling LLM [user=%s prompt_type=%s model=%s currency=%s enabledToolsCount=%d]",
+		userHash[:8], req.PromptType, modelKey, req.Currency, len(req.EnabledTools))
 	var history []llm.ConversationTurn
 	if cannedType == "" {
 		history = req.History
@@ -277,7 +270,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 
 	response, sections, err := h.LLM.AnalyzePortfolioStream(
 		reqCtx, data, req.Currency, cannedType, message,
-		modelKey, req.EnabledTools, overrideWeights, history, req.AccountingModel,
+		modelKey, req.EnabledTools, history, req.AccountingModel,
 		executor,
 		func(chunk string) error {
 			c.SSEvent("chunk", chunk)
