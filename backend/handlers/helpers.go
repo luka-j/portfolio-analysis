@@ -98,6 +98,71 @@ func parseCachedOnly(c *gin.Context) bool {
 	return c.Query("cachedOnly") == "true"
 }
 
+// buildBenchmarkPriceMap fetches the benchmark's historical prices, converts to the display
+// currency (under historical accounting), and forward-fills over weekends/holidays so that
+// the returned map can be indexed by any calendar date in [from, to].
+//
+// Returns an error only if the price fetch fails; an empty map is returned when the symbol
+// has no data.
+func buildBenchmarkPriceMap(
+	mp market.Provider, cg market.CurrencyGetter,
+	symbol string, from, to time.Time,
+	currency string, acctModel models.AccountingModel,
+	cachedOnly bool,
+) (map[string]float64, error) {
+	prices, err := mp.GetHistory(symbol, from.AddDate(0, 0, -7), to, cachedOnly)
+	if err != nil {
+		return nil, err
+	}
+
+	var fxRates map[string]float64
+	if (acctModel == models.AccountingModelHistorical || acctModel == "") && cg != nil {
+		if nativeCcy, err2 := cg.GetCurrency(symbol); err2 == nil {
+			fxRates = buildFXRateMap(mp, nativeCcy, currency, from.AddDate(0, 0, -7), to)
+		}
+	}
+
+	priceMap := make(map[string]float64)
+	for _, p := range prices {
+		adj := p.AdjClose
+		if adj == 0 {
+			adj = p.Close
+		}
+		ds := p.Date.Format("2006-01-02")
+		if fxRates != nil {
+			if r, ok := fxRates[ds]; ok && r != 0 {
+				adj *= r
+			}
+		}
+		priceMap[ds] = adj
+	}
+	var last float64
+	for d := from.AddDate(0, 0, -7); !d.After(to); d = d.AddDate(0, 0, 1) {
+		ds := d.Format("2006-01-02")
+		if p, ok := priceMap[ds]; ok {
+			last = p
+		} else if last != 0 {
+			priceMap[ds] = last
+		}
+	}
+	return priceMap, nil
+}
+
+// alignBenchmarkReturns builds a return series for the benchmark aligned to the given
+// (startDates[i], endDates[i]) intervals. Intervals with missing prices are skipped;
+// the returned slice may be shorter than the input.
+func alignBenchmarkReturns(priceMap map[string]float64, startDates, endDates []string) (returns []float64, dates []string) {
+	for i := range startDates {
+		prev, ok1 := priceMap[startDates[i]]
+		cur, ok2 := priceMap[endDates[i]]
+		if ok1 && ok2 && prev != 0 {
+			returns = append(returns, cur/prev-1)
+			dates = append(dates, endDates[i])
+		}
+	}
+	return
+}
+
 // buildFXRateMap pre-fetches historical exchange rates for nativeCcy→displayCcy and returns
 // a date-keyed map of rates, forward-filled over weekends/holidays. Returns nil when no
 // conversion is needed (same currency) or when the fetch fails.

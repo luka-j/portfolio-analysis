@@ -526,14 +526,13 @@ func (h *StatsHandler) GetDrawdown(c *gin.Context) {
 		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
-	portfolioReturns, _, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
 		return
 	}
 
 	ddSeries := stats.CalculateDrawdownSeries(portfolioReturns, endDates)
-
 	series := make([]models.DrawdownPoint, len(ddSeries))
 	for i, pt := range ddSeries {
 		series[i] = models.DrawdownPoint{
@@ -544,10 +543,38 @@ func (h *StatsHandler) GetDrawdown(c *gin.Context) {
 		}
 	}
 
+	results := []models.DrawdownResult{{Symbol: "Portfolio", Series: series}}
+
+	if symStr := strings.TrimSpace(c.Query("symbols")); symStr != "" {
+		for _, sym := range strings.Split(symStr, ",") {
+			sym = strings.TrimSpace(sym)
+			if sym == "" {
+				continue
+			}
+			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel, cachedOnly)
+			if err != nil {
+				results = append(results, models.DrawdownResult{Symbol: sym, Error: "could not fetch price data: " + err.Error()})
+				continue
+			}
+			rets, dts := alignBenchmarkReturns(priceMap, startDates, endDates)
+			if len(rets) == 0 {
+				results = append(results, models.DrawdownResult{Symbol: sym, Error: "no overlapping price data"})
+				continue
+			}
+			dd := stats.CalculateDrawdownSeries(rets, dts)
+			ss := make([]models.DrawdownPoint, len(dd))
+			for i, pt := range dd {
+				ss[i] = models.DrawdownPoint{Date: pt.Date, DrawdownPct: pt.DrawdownPct, Peak: pt.Peak, Wealth: pt.Wealth}
+			}
+			results = append(results, models.DrawdownResult{Symbol: sym, Series: ss})
+		}
+	}
+
 	c.JSON(http.StatusOK, models.DrawdownResponse{
 		Currency:        currency,
 		AccountingModel: string(acctModel),
-		Series:          series,
+		Series:          series, // backward-compat: portfolio-only series
+		Results:         results,
 	})
 }
 
@@ -703,6 +730,32 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 			series[i] = models.RollingPoint{Date: pt.Date, Value: pt.Value}
 		}
 		rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: "Portfolio", Series: series})
+
+		// Optional: per-symbol rolling series for benchmarks.
+		if symStr := strings.TrimSpace(c.Query("symbols")); symStr != "" {
+			for _, sym := range strings.Split(symStr, ",") {
+				sym = strings.TrimSpace(sym)
+				if sym == "" {
+					continue
+				}
+				priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel, cachedOnly)
+				if err != nil {
+					rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: sym, Error: "could not fetch price data: " + err.Error()})
+					continue
+				}
+				rets, dts := alignBenchmarkReturns(priceMap, startDates, endDates)
+				if len(rets) == 0 {
+					rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: sym, Error: "no overlapping price data"})
+					continue
+				}
+				pts := stats.CalculateRollingStandalone(rets, dts, window, metric, riskFreeRate)
+				series := make([]models.RollingPoint, len(pts))
+				for i, pt := range pts {
+					series[i] = models.RollingPoint{Date: pt.Date, Value: pt.Value}
+				}
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: sym, Series: series})
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, models.RollingResponse{
@@ -761,7 +814,7 @@ func (h *StatsHandler) GetAttribution(c *gin.Context) {
 		return
 	}
 
-	attrResults := stats.CalculateAttribution(perPos.BySymbol, perPos.Totals)
+	attrResults := stats.CalculateAttribution(perPos.BySymbol, perPos.CashFlowsBySymbol, perPos.Totals)
 
 	positions := make([]models.AttributionResult, len(attrResults))
 	for i, r := range attrResults {
@@ -793,6 +846,93 @@ func (h *StatsHandler) GetAttribution(c *gin.Context) {
 		AccountingModel: string(acctModel),
 		TotalTWR:        totalTWR,
 		Positions:       positions,
+	})
+}
+
+// GetCumulative handles GET /api/v1/portfolio/cumulative.
+// Returns cumulative-return series (in percent) for the portfolio and each requested benchmark symbol.
+// Portfolio series is chained from daily TWR returns (cash-flow-adjusted). Benchmarks are chained from
+// their (FX-converted) daily price returns aligned to the portfolio's return dates.
+func (h *StatsHandler) GetCumulative(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+
+	data, err := h.Repo.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	currency := c.Query("currency")
+	if currency == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "currency parameter is required"})
+		return
+	}
+
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
+	cachedOnly := parseCachedOnly(c)
+
+	from, to, err := parseDateRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	earliest, _ := DateRangeFromData(data)
+	if !earliest.IsZero() && from.Before(earliest) {
+		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
+		return
+	}
+
+	firstDate := ""
+	if len(startDates) > 0 {
+		firstDate = startDates[0]
+	}
+
+	pPts := stats.CalculateCumulativeReturnSeries(portfolioReturns, endDates, firstDate)
+	pSeries := make([]models.CumulativePoint, len(pPts))
+	for i, pt := range pPts {
+		pSeries[i] = models.CumulativePoint{Date: pt.Date, Value: pt.Value}
+	}
+
+	results := []models.CumulativeSeriesResult{{Symbol: "Portfolio", Series: pSeries}}
+
+	if symStr := strings.TrimSpace(c.Query("symbols")); symStr != "" {
+		for _, sym := range strings.Split(symStr, ",") {
+			sym = strings.TrimSpace(sym)
+			if sym == "" {
+				continue
+			}
+			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel, cachedOnly)
+			if err != nil {
+				results = append(results, models.CumulativeSeriesResult{Symbol: sym, Error: "could not fetch price data: " + err.Error()})
+				continue
+			}
+			rets, dts := alignBenchmarkReturns(priceMap, startDates, endDates)
+			if len(rets) == 0 {
+				results = append(results, models.CumulativeSeriesResult{Symbol: sym, Error: "no overlapping price data"})
+				continue
+			}
+			cPts := stats.CalculateCumulativeReturnSeries(rets, dts, firstDate)
+			series := make([]models.CumulativePoint, len(cPts))
+			for i, pt := range cPts {
+				series[i] = models.CumulativePoint{Date: pt.Date, Value: pt.Value}
+			}
+			results = append(results, models.CumulativeSeriesResult{Symbol: sym, Series: series})
+		}
+	}
+
+	c.JSON(http.StatusOK, models.CumulativeResponse{
+		Currency:        currency,
+		AccountingModel: string(acctModel),
+		Results:         results,
 	})
 }
 
@@ -836,20 +976,44 @@ func (h *StatsHandler) GetCorrelations(c *gin.Context) {
 		return
 	}
 
-	// Convert per-position daily values → daily returns.
+	// Convert per-position daily values → cash-flow-adjusted daily returns and active-day masks.
+	//
+	// A day is "active" (mask == true) when the position was held at the start of that day
+	// (prev > 1e-8). The mask feeds CalculateCorrelationMatrix so pairwise Pearson is computed
+	// only over the overlapping window where both symbols were simultaneously held.
+	//
+	// CashFlowsBySymbol[sym][i] holds the signed cost of trades executed on validDates[i]:
+	// positive for buys (capital injected), negative for sells (capital removed). On a trade
+	// day the raw delta (vals[i] - vals[i-1]) blends price movement with a quantity change.
+	// We strip the cash impact from vals[i] before dividing so the return reflects pure price
+	// movement — the same TWR adjustment GetDailyReturns applies at the portfolio level.
 	perSymbolReturns := make(map[string][]float64, len(perPos.BySymbol))
+	perSymbolMask := make(map[string][]bool, len(perPos.BySymbol))
 	for sym, vals := range perPos.BySymbol {
+		if len(vals) < 2 {
+			continue
+		}
+		cfs := perPos.CashFlowsBySymbol[sym] // length n, indexed same as vals
 		rets := make([]float64, len(vals)-1)
+		mask := make([]bool, len(vals)-1)
 		for i := 1; i < len(vals); i++ {
 			prev := vals[i-1]
 			if prev > 1e-8 {
-				rets[i-1] = (vals[i] - prev) / prev
+				cfAmount := 0.0
+				if i < len(cfs) {
+					cfAmount = cfs[i]
+				}
+				// (vals[i] - cfAmount) removes the quantity-change contribution,
+				// leaving only the price-return component of the position's value move.
+				rets[i-1] = (vals[i] - cfAmount - prev) / prev
+				mask[i-1] = true
 			}
 		}
 		perSymbolReturns[sym] = rets
+		perSymbolMask[sym] = mask
 	}
 
-	result := stats.CalculateCorrelationMatrix(perSymbolReturns, 10)
+	result := stats.CalculateCorrelationMatrix(perSymbolReturns, perSymbolMask, 10)
 
 	c.JSON(http.StatusOK, models.CorrelationMatrixResponse{
 		Currency:        currency,

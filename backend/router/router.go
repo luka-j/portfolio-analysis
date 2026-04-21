@@ -105,6 +105,7 @@ func SetupRouter(
 	api.GET("/portfolio/rolling", sh.GetRolling)
 	api.GET("/portfolio/attribution", sh.GetAttribution)
 	api.GET("/portfolio/correlations", sh.GetCorrelations)
+	api.GET("/portfolio/cumulative", sh.GetCumulative)
 
 	// Tax endpoints.
 	th := &handlers.TaxHandler{Repo: repo, TaxSvc: taxSvc}

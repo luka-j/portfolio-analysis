@@ -9,28 +9,33 @@ type CorrelationMatrixResult struct {
 }
 
 // CalculateCorrelationMatrix computes pairwise Pearson correlations for the given
-// per-symbol daily return series. Symbols with fewer than minObs non-zero observations
-// are excluded. The diagonal is always 1. The matrix is symmetric.
-func CalculateCorrelationMatrix(perSymbolReturns map[string][]float64, minObs int) CorrelationMatrixResult {
+// per-symbol daily return series. For each pair only days where both symbols are
+// simultaneously active (mask == true) are used, so positions held for different
+// periods are correlated only over their overlapping window instead of being padded
+// with zeros. Symbols with fewer than minObs active observations are excluded.
+// The diagonal is always 1. The matrix is symmetric.
+func CalculateCorrelationMatrix(perSymbolReturns map[string][]float64, perSymbolMask map[string][]bool, minObs int) CorrelationMatrixResult {
 	if minObs <= 0 {
 		minObs = 10
 	}
 
-	// Filter and collect symbols that have enough data.
+	// Filter and collect symbols that have enough active observations.
 	type symEntry struct {
 		key     string
 		returns []float64
+		mask    []bool
 	}
 	var entries []symEntry
 	for sym, rets := range perSymbolReturns {
+		mask := perSymbolMask[sym]
 		count := 0
-		for _, r := range rets {
-			if r != 0 {
+		for _, m := range mask {
+			if m {
 				count++
 			}
 		}
 		if count >= minObs {
-			entries = append(entries, symEntry{key: sym, returns: rets})
+			entries = append(entries, symEntry{key: sym, returns: rets, mask: mask})
 		}
 	}
 	if len(entries) == 0 {
@@ -58,7 +63,7 @@ func CalculateCorrelationMatrix(perSymbolReturns map[string][]float64, minObs in
 
 	for i := 0; i < n; i++ {
 		for j := i + 1; j < n; j++ {
-			c := pearson(entries[i].returns, entries[j].returns)
+			c := pearsonMasked(entries[i].returns, entries[j].returns, entries[i].mask, entries[j].mask)
 			matrix[i][j] = c
 			matrix[j][i] = c
 		}
@@ -67,21 +72,24 @@ func CalculateCorrelationMatrix(perSymbolReturns map[string][]float64, minObs in
 	return CorrelationMatrixResult{Symbols: symbols, Matrix: matrix}
 }
 
-// dailyReturnsFromValues converts a slice of daily values to daily returns.
-// Returns an empty slice when there are fewer than 2 values.
-func dailyReturnsFromValues(vals []float64) []float64 {
-	if len(vals) < 2 {
-		return nil
+// pearsonMasked computes Pearson correlation using only indices where both mx[i]
+// and my[i] are true (the overlapping active window). Returns 0 when fewer than
+// 2 overlapping observations exist or either sub-series has zero variance.
+func pearsonMasked(xs, ys []float64, mx, my []bool) float64 {
+	n := len(xs)
+	if n != len(ys) || n != len(mx) || n != len(my) || n == 0 {
+		return 0
 	}
-	out := make([]float64, len(vals)-1)
-	for i := 1; i < len(vals); i++ {
-		prev := vals[i-1]
-		cur := vals[i]
-		if prev > 1e-8 {
-			out[i-1] = (cur - prev) / prev
+	// Collect the intersection in-place to avoid allocating two full-length slices.
+	xsub := xs[:0:0]
+	ysub := ys[:0:0]
+	for i := 0; i < n; i++ {
+		if mx[i] && my[i] {
+			xsub = append(xsub, xs[i])
+			ysub = append(ysub, ys[i])
 		}
 	}
-	return out
+	return pearson(xsub, ysub)
 }
 
 // pearson computes the Pearson correlation coefficient for two equal-length slices.

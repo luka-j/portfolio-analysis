@@ -360,11 +360,19 @@ type DrawdownPoint struct {
 	Wealth      float64 `json:"wealth"`
 }
 
+// DrawdownResult is the drawdown series for one symbol (or "Portfolio").
+type DrawdownResult struct {
+	Symbol string          `json:"symbol"`
+	Error  string          `json:"error,omitempty"`
+	Series []DrawdownPoint `json:"series"`
+}
+
 // DrawdownResponse is the response for GET /portfolio/drawdown.
 type DrawdownResponse struct {
-	Currency        string          `json:"currency"`
-	AccountingModel string          `json:"accounting_model"`
-	Series          []DrawdownPoint `json:"series"`
+	Currency        string           `json:"currency"`
+	AccountingModel string           `json:"accounting_model"`
+	Series          []DrawdownPoint  `json:"series"` // backward-compat: portfolio-only series
+	Results         []DrawdownResult `json:"results"`
 }
 
 // RollingPoint is a single observation in a rolling-metric time series.
@@ -403,6 +411,26 @@ type AttributionResponse struct {
 	AccountingModel string              `json:"accounting_model"`
 	TotalTWR        float64             `json:"total_twr"`
 	Positions       []AttributionResult `json:"positions"`
+}
+
+// CumulativePoint is a single observation in a cumulative-return time series.
+type CumulativePoint struct {
+	Date  string  `json:"date"`
+	Value float64 `json:"value"` // cumulative return, in percent
+}
+
+// CumulativeSeriesResult is the cumulative series for one symbol (or "Portfolio" / "Portfolio-MWR").
+type CumulativeSeriesResult struct {
+	Symbol string            `json:"symbol"`
+	Error  string            `json:"error,omitempty"`
+	Series []CumulativePoint `json:"series"`
+}
+
+// CumulativeResponse is the response for GET /portfolio/cumulative.
+type CumulativeResponse struct {
+	Currency        string                   `json:"currency"`
+	AccountingModel string                   `json:"accounting_model"`
+	Results         []CumulativeSeriesResult `json:"results"`
 }
 
 // CorrelationMatrixResponse is the response for GET /portfolio/correlations.

@@ -1049,9 +1049,10 @@ func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time
 
 // PerPositionDailyValues holds per-symbol daily value slices aligned to the same date grid.
 type PerPositionDailyValues struct {
-	Dates      []string             // trading dates in [from, to]
-	BySymbol   map[string][]float64 // posKey → daily value in display currency (len == len(Dates))
-	Totals     []float64            // portfolio daily total (sum across all positions, no pending cash)
+	Dates           []string             // trading dates in [from, to]
+	BySymbol        map[string][]float64 // posKey → daily value in display currency (len == len(Dates))
+	CashFlowsBySymbol map[string][]float64 // posKey → per-day signed cash impact of trades (buys > 0, sells < 0), display currency
+	Totals          []float64            // portfolio daily total (sum across all positions, no pending cash)
 }
 
 // GetDailyValuesPerPosition returns per-position daily values in the display currency.
@@ -1155,8 +1156,80 @@ func (s *Service) GetDailyValuesPerPosition(
 	}
 	totals := make([]float64, n)
 	bySymbol := make(map[string][]float64, len(fetches))
+	cashFlowsBySymbol := make(map[string][]float64, len(fetches))
 
 	fromMidnight := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+
+	// fxRateAtDisplay returns the native→display conversion rate on day d, or 1 when native==display.
+	fxRateAtDisplay := func(nativeCcy string, d time.Time) float64 {
+		if nativeCcy == "" || nativeCcy == currency {
+			return 1
+		}
+		switch acctModel {
+		case models.AccountingModelOriginal:
+			return 1
+		case models.AccountingModelSpot:
+			r, err := s.FXService.ConvertSpot(1, nativeCcy, currency, cachedOnly)
+			if err != nil {
+				return 0
+			}
+			return r
+		default:
+			pairKey := nativeCcy + currency
+			if pts, ok := fxData[pairKey]; ok {
+				if rate := fxRateAt(pts, d); rate != 0 {
+					return rate
+				}
+			}
+			r, err := s.FXService.Convert(1, nativeCcy, currency, d, cachedOnly)
+			if err != nil {
+				return 0
+			}
+			return r
+		}
+	}
+
+	// buildDailyCashflows computes signed per-day cash impact of trades (buys=+cost, sells=-proceeds)
+	// in the display currency, aligned to validDates.
+	buildDailyCashflows := func(trades []models.Trade, nativeCcy string) []float64 {
+		cfs := make([]float64, n)
+		if len(trades) == 0 {
+			return cfs
+		}
+		// Index validDates by YYYY-MM-DD.
+		dateIdx := make(map[string]int, n)
+		for i, d := range validDates {
+			dateIdx[d.Format("2006-01-02")] = i
+		}
+		for _, t := range trades {
+			if t.DateTime.Before(fromMidnight) {
+				continue
+			}
+			tradeDay := time.Date(t.DateTime.Year(), t.DateTime.Month(), t.DateTime.Day(), 0, 0, 0, 0, t.DateTime.Location())
+			ds := tradeDay.Format("2006-01-02")
+			idx, ok := dateIdx[ds]
+			if !ok {
+				// Non-trading day: attribute to next trading day in range.
+				for i, d := range validDates {
+					if !d.Before(tradeDay) {
+						idx = i
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					continue
+				}
+			}
+			nativeCost := t.Quantity * t.Price
+			rate := fxRateAtDisplay(nativeCcy, tradeDay)
+			if rate == 0 {
+				continue
+			}
+			cfs[idx] += nativeCost * rate
+		}
+		return cfs
+	}
 
 	for _, f := range fetches {
 		k := f.k
@@ -1241,12 +1314,14 @@ func (s *Service) GetDailyValuesPerPosition(
 			totals[i] += displayVal
 		}
 		bySymbol[k] = vals
+		cashFlowsBySymbol[k] = buildDailyCashflows(trades, nativeCurrency)
 	}
 
 	return &PerPositionDailyValues{
-		Dates:    dates,
-		BySymbol: bySymbol,
-		Totals:   totals,
+		Dates:             dates,
+		BySymbol:          bySymbol,
+		CashFlowsBySymbol: cashFlowsBySymbol,
+		Totals:            totals,
 	}, nil
 }
 

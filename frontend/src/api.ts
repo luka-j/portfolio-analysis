@@ -672,17 +672,26 @@ export interface DrawdownPoint {
   wealth: number;
 }
 
-export interface DrawdownResponse {
-  currency: string;
-  accounting_model: string;
+export interface DrawdownResult {
+  symbol: string;
+  error?: string;
   series: DrawdownPoint[];
 }
 
+export interface DrawdownResponse {
+  currency: string;
+  accounting_model: string;
+  series: DrawdownPoint[];    // backward-compat: portfolio-only
+  results: DrawdownResult[];  // portfolio + optional benchmarks
+}
+
 export async function getDrawdownSeries(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false,
+  symbols?: string,
 ): Promise<DrawdownResponse> {
+  const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
   return request<DrawdownResponse>(
-    `/portfolio/drawdown?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`
+    `/portfolio/drawdown?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${symParam}`
   );
 }
 
@@ -714,10 +723,12 @@ export async function getRollingMetric(
   accountingModel = 'historical',
   riskFreeRate = 0.05,
   benchmark?: string,
+  symbols?: string,
 ): Promise<RollingResponse> {
   const benchParam = benchmark ? `&benchmark=${encodeURIComponent(benchmark)}` : '';
+  const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
   return request<RollingResponse>(
-    `/portfolio/rolling?metric=${metric}&window=${window}&from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${benchParam}`
+    `/portfolio/rolling?metric=${metric}&window=${window}&from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${benchParam}${symParam}`
   );
 }
 
@@ -759,5 +770,35 @@ export async function getCorrelations(
 ): Promise<CorrelationMatrixResponse> {
   return request<CorrelationMatrixResponse>(
     `/portfolio/correlations?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}`
+  );
+}
+
+// ---- Cumulative Return Series ----
+
+export interface CumulativePoint {
+  date: string;
+  value: number; // cumulative return in percent
+}
+
+export interface CumulativeSeriesResult {
+  symbol: string;
+  error?: string;
+  series: CumulativePoint[];
+}
+
+export interface CumulativeResponse {
+  currency: string;
+  accounting_model: string;
+  results: CumulativeSeriesResult[];
+}
+
+export async function getCumulativeSeries(
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false,
+  symbols?: string,
+): Promise<CumulativeResponse> {
+  const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
+  const cachedParam = cachedOnly ? '&cachedOnly=true' : '';
+  return request<CumulativeResponse>(
+    `/portfolio/cumulative?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedParam}${symParam}`
   );
 }

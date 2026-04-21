@@ -339,3 +339,35 @@ func TestGetDailyReturns_DatesOffsetSkip(t *testing.T) {
 		t.Errorf("Expected recovered period end date to be %v, got %s", day4.Format("2006-01-02"), endDates[0])
 	}
 }
+
+func TestGetDailyValuesPerPosition_CashFlows(t *testing.T) {
+	day1 := time.Date(2024, 10, 1, 0, 0, 0, 0, time.UTC)
+	day2 := day1.AddDate(0, 0, 1)
+
+	data := &models.FlexQueryData{
+		Trades: []models.Trade{
+			{Symbol: "TEST", Currency: "USD", BuySell: "BUY", Quantity: 10, Price: 10, Proceeds: -100, DateTime: day1},
+			{Symbol: "TEST", Currency: "USD", BuySell: "SELL", Quantity: -5, Price: 20, Proceeds: 100, DateTime: day2},
+		},
+	}
+
+	mockProvider := &mockMarketProvider{
+		prices: map[string][]models.PricePoint{
+			"TEST": {
+				{Date: day1, Close: 10, AdjClose: 10},
+				{Date: day2, Close: 20, AdjClose: 20},
+			},
+		},
+	}
+
+	svc := NewService(mockProvider, nil, 0)
+
+	res, err := svc.GetDailyValuesPerPosition(data, day1, day2, "USD", models.AccountingModelOriginal, false)
+	require.NoError(t, err)
+
+	require.Contains(t, res.CashFlowsBySymbol, "TEST")
+	cfs := res.CashFlowsBySymbol["TEST"]
+	require.Len(t, cfs, 2)
+	assert.Equal(t, 100.0, cfs[0], "buy should result in $100 positive cash flow (cost)")
+	assert.Equal(t, -100.0, cfs[1], "sell should result in -$100 negative cash flow (proceeds)")
+}

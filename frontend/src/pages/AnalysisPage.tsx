@@ -12,10 +12,10 @@ import DateRangePicker from '../components/DateRangePicker'
 import ErrorAlert from '../components/ErrorAlert'
 import CorrelationHeatmap from '../components/CorrelationHeatmap'
 import {
-  getPortfolioStats, getPortfolioReturns, getMarketHistory, comparePortfolio, getStandaloneMetrics,
-  getDrawdownSeries, getRollingMetric, getAttribution, getCorrelations,
+  getPortfolioStats, getPortfolioReturns, comparePortfolio, getStandaloneMetrics,
+  getDrawdownSeries, getRollingMetric, getAttribution, getCorrelations, getCumulativeSeries,
   type StatsResponse, type DailyValue, type BenchmarkResult, type StandaloneResult,
-  type DrawdownPoint, type RollingPoint, type AttributionResult,
+  type DrawdownResult, type RollingPoint, type AttributionResult, type CumulativeSeriesResult,
 } from '../api'
 import { formatDate, CURRENCIES, getFromDate, RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
@@ -59,54 +59,6 @@ const HOLDINGS_VIEW_OPTIONS = [
 
 const COLORS = ['#818cf8', '#34d399', '#fbbf24', '#f87171', '#22d3ee', '#f472b6', '#a78bfa']
 
-function priceReturns(prices: { date: string; close: number }[]): { date: string; ret: number }[] {
-  return prices.slice(1).map((p, i) => ({
-    date: p.date,
-    ret: prices[i].close > 0 ? (p.close - prices[i].close) / prices[i].close : 0,
-  }))
-}
-
-// todo move all this to backend and test properly
-function rollingSharpeFromReturns(rets: { date: string; ret: number }[], window: number, rfr: number): { date: string; value: number }[] {
-  const out: { date: string; value: number }[] = []
-  for (let i = window - 1; i < rets.length; i++) {
-    const slice = rets.slice(i - window + 1, i + 1).map(r => r.ret)
-    const mean = slice.reduce((s, r) => s + r, 0) / window
-    const variance = slice.reduce((s, r) => s + (r - mean) ** 2, 0) / window
-    const std = Math.sqrt(variance)
-    if (std < 1e-12) continue
-    out.push({ date: rets[i].date, value: (mean - rfr / 252) / std * Math.sqrt(252) })
-  }
-  return out
-}
-
-function rollingSortinoFromReturns(rets: { date: string; ret: number }[], window: number, rfr: number): { date: string; value: number }[] {
-  const out: { date: string; value: number }[] = []
-  for (let i = window - 1; i < rets.length; i++) {
-    const slice = rets.slice(i - window + 1, i + 1).map(r => r.ret)
-    const dailyRfr = rfr / 252
-    const mean = slice.reduce((s, r) => s + r, 0) / window
-    const downsideVariance = slice.reduce((s, r) => {
-      const excess = r - dailyRfr
-      return s + (excess < 0 ? excess ** 2 : 0)
-    }, 0) / window
-    const downsideStd = Math.sqrt(downsideVariance)
-    if (downsideStd < 1e-12) continue
-    out.push({ date: rets[i].date, value: (mean - dailyRfr) / downsideStd * Math.sqrt(252) })
-  }
-  return out
-}
-
-function rollingVolFromReturns(rets: { date: string; ret: number }[], window: number): { date: string; value: number }[] {
-  const out: { date: string; value: number }[] = []
-  for (let i = window - 1; i < rets.length; i++) {
-    const slice = rets.slice(i - window + 1, i + 1).map(r => r.ret)
-    const mean = slice.reduce((s, r) => s + r, 0) / window
-    const variance = slice.reduce((s, r) => s + (r - mean) ** 2, 0) / window
-    out.push({ date: rets[i].date, value: Math.sqrt(variance * 252) })
-  }
-  return out
-}
 
 const STAT_TOOLTIPS: Record<string, string> = {
   twr: 'Time-weighted return. Eliminates the effect of cash flows — best for evaluating portfolio manager skill.',
@@ -164,12 +116,12 @@ export default function AnalysisPage() {
   // Benchmark
   const [benchmarkInput, setBenchmarkInput]     = useState('SPY')
   const [benchmarkSymbols, setBenchmarkSymbols] = useState<string[]>([])
-  const [benchmarkData, setBenchmarkData]       = useState<Record<string, { date: string; close: number }[]>>({})
+  const [cumulativeResults, setCumulativeResults] = useState<CumulativeSeriesResult[]>([])
   const [compareResults, setCompareResults]     = useState<BenchmarkResult[]>([])
   const [standaloneResults, setStandaloneResults] = useState<StandaloneResult[]>([])
 
   // Chart-mode data
-  const [drawdownSeries, setDrawdownSeries]     = useState<DrawdownPoint[]>([])
+  const [drawdownResults, setDrawdownResults]   = useState<DrawdownResult[]>([])
   const [rollingSeries, setRollingSeries]       = useState<Record<string, RollingPoint[]>>({}) // key: 'Portfolio' or bench sym
   const [chartModeLoading, setChartModeLoading] = useState(false)
   const [chartModeError, setChartModeError]     = useState('')
@@ -305,8 +257,9 @@ export default function AnalysisPage() {
     setChartModeError('')
     try {
       if (mode === 'drawdown') {
-        const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel)
-        setDrawdownSeries(res.series)
+        const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
+        const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, symParam)
+        setDrawdownResults(res.results ?? [])
       } else {
         const metric = mode === 'rolling_sharpe' ? 'sharpe'
           : mode === 'rolling_volatility' ? 'volatility'
@@ -322,9 +275,11 @@ export default function AnalysisPage() {
             } catch { /* skip bad symbols */ }
           }))
         } else {
-          const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate)
-          const result = res.results[0]
-          if (result && !result.error) newSeries['Portfolio'] = result.series
+          const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
+          const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, undefined, symParam)
+          for (const result of res.results) {
+            if (!result.error) newSeries[result.symbol] = result.series
+          }
         }
         setRollingSeries(newSeries)
       }
@@ -376,15 +331,11 @@ export default function AnalysisPage() {
       setCompareLoading(true)
       setCompareError('')
       try {
-        const [histResults, comp] = await Promise.all([
-          Promise.all(benchmarkSymbols.map(sym => getMarketHistory(sym, effectiveFrom, to, currency, acctModel))),
+        const [cumRes, comp] = await Promise.all([
+          getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, benchmarkSymbols.join(',')),
           comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate),
         ])
-        const newData: Record<string, { date: string; close: number }[]> = {}
-        histResults.forEach((res, i) => {
-          newData[benchmarkSymbols[i]] = res.data.map(p => ({ date: p.date.slice(0, 10), close: p.close }))
-        })
-        setBenchmarkData(newData)
+        setCumulativeResults(cumRes.results.filter(r => r.symbol !== 'Portfolio'))
         setCompareResults(comp.benchmarks)
         loadStandalone(benchmarkSymbols.join(','))
       } catch (err) {
@@ -405,14 +356,18 @@ export default function AnalysisPage() {
     setCompareLoading(true)
     setCompareError('')
     try {
-      const histResults = await Promise.all(newSymbols.map(sym => getMarketHistory(sym, effectiveFrom, to, currency, acctModel)))
-      const newData: Record<string, { date: string; close: number }[]> = {}
-      histResults.forEach((res, i) => {
-        newData[newSymbols[i]] = res.data.map(p => ({ date: p.date.slice(0, 10), close: p.close }))
-      })
-      setBenchmarkData(prev => ({ ...prev, ...newData }))
+      const [cumRes, comp] = await Promise.all([
+        getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, newSymbols.join(',')),
+        comparePortfolio(newSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate),
+      ])
       const allSymbols = [...benchmarkSymbols, ...newSymbols]
-      const comp = await comparePortfolio(newSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate)
+      setCumulativeResults(prev => {
+        const merged = [...prev]
+        for (const r of cumRes.results.filter(r => r.symbol !== 'Portfolio')) {
+          if (!merged.find(m => m.symbol === r.symbol)) merged.push(r)
+        }
+        return merged
+      })
       setBenchmarkSymbols(allSymbols)
       setCompareResults(prev => [...prev, ...comp.benchmarks])
       setBenchmarkInput('')
@@ -450,7 +405,7 @@ export default function AnalysisPage() {
   const handleRemoveSymbol = (sym: string) => {
     const remaining = benchmarkSymbols.filter(s => s !== sym)
     setBenchmarkSymbols(remaining)
-    setBenchmarkData(prev => { const next = { ...prev }; delete next[sym]; return next })
+    setCumulativeResults(prev => prev.filter(r => r.symbol !== sym))
     setCompareResults(prev => prev.filter(r => r.symbol !== sym))
     loadStandalone(remaining.join(','))
   }
@@ -468,13 +423,10 @@ export default function AnalysisPage() {
       if (!dateMap[d.date]) dateMap[d.date] = {}
       dateMap[d.date]['Portfolio'] = d.value
     })
-    benchmarkSymbols.forEach(sym => {
-      const data = benchmarkData[sym]
-      if (!data || data.length === 0) return
-      const first = data[0].close || 1
-      data.forEach(d => {
-        if (!dateMap[d.date]) dateMap[d.date] = {}
-        dateMap[d.date][sym] = (d.close / first - 1) * 100
+    cumulativeResults.forEach(r => {
+      r.series.forEach(pt => {
+        if (!dateMap[pt.date]) dateMap[pt.date] = {}
+        dateMap[pt.date][r.symbol] = pt.value
       })
     })
     return Object.entries(dateMap)
@@ -483,19 +435,13 @@ export default function AnalysisPage() {
   })()
 
   const drawdownChartData = (() => {
-    if (drawdownSeries.length === 0) return []
+    if (drawdownResults.length === 0) return []
     const dateMap: Record<string, Record<string, number>> = {}
-    drawdownSeries.forEach(pt => { dateMap[pt.date] = { Drawdown: +(pt.drawdown_pct * 100).toFixed(3) } })
-    benchmarkSymbols.forEach(sym => {
-      const prices = benchmarkData[sym]
-      if (!prices || prices.length < 2) return
-      let peak = 1, wealth = 1
-      prices.slice(1).forEach((p, i) => {
-        const ret = prices[i].close > 0 ? (p.close - prices[i].close) / prices[i].close : 0
-        wealth *= (1 + ret)
-        if (wealth > peak) peak = wealth
-        const dd = +((wealth / peak - 1) * 100).toFixed(3)
-        if (dateMap[p.date]) dateMap[p.date][sym] = dd
+    drawdownResults.forEach(r => {
+      const key = r.symbol === 'Portfolio' ? 'Drawdown' : r.symbol
+      r.series.forEach(pt => {
+        if (!dateMap[pt.date]) dateMap[pt.date] = {}
+        dateMap[pt.date][key] = +(pt.drawdown_pct * 100).toFixed(3)
       })
     })
     return Object.entries(dateMap)
@@ -510,13 +456,10 @@ export default function AnalysisPage() {
       if (!dateMap[d.date]) dateMap[d.date] = {}
       dateMap[d.date]['Portfolio'] = d.value
     })
-    benchmarkSymbols.forEach(sym => {
-      const data = benchmarkData[sym]
-      if (!data || data.length === 0) return
-      const first = data[0].close || 1
-      data.forEach(d => {
-        if (!dateMap[d.date]) dateMap[d.date] = {}
-        dateMap[d.date][sym] = (d.close / first - 1) * 100
+    cumulativeResults.forEach(r => {
+      r.series.forEach(pt => {
+        if (!dateMap[pt.date]) dateMap[pt.date] = {}
+        dateMap[pt.date][r.symbol] = pt.value
       })
     })
     return Object.entries(dateMap)
@@ -524,28 +467,12 @@ export default function AnalysisPage() {
       .map(([date, values]) => ({ date, ...values }))
   })()
 
-  // Client-side benchmark rolling series for sharpe/sortino/vol modes
-  const benchmarkRollingData: Record<string, { date: string; value: number }[]> = {}
-  if (chartMode === 'rolling_sharpe' || chartMode === 'rolling_volatility' || chartMode === 'rolling_sortino') {
-    benchmarkSymbols.forEach(sym => {
-      const prices = benchmarkData[sym]
-      if (!prices || prices.length < 2) return
-      const rets = priceReturns(prices)
-      benchmarkRollingData[sym] = chartMode === 'rolling_sharpe'
-        ? rollingSharpeFromReturns(rets, rollingWindow, riskFreeRate)
-        : chartMode === 'rolling_sortino'
-        ? rollingSortinoFromReturns(rets, rollingWindow, riskFreeRate)
-        : rollingVolFromReturns(rets, rollingWindow)
-    })
-  }
-  const allRollingSeries = { ...rollingSeries, ...benchmarkRollingData }
-
   const rollingChartData = (() => {
-    const keys = Object.keys(allRollingSeries)
+    const keys = Object.keys(rollingSeries)
     if (keys.length === 0) return []
     const dateMap: Record<string, Record<string, number>> = {}
     keys.forEach(sym => {
-      allRollingSeries[sym].forEach(pt => {
+      rollingSeries[sym].forEach(pt => {
         if (!dateMap[pt.date]) dateMap[pt.date] = {}
         dateMap[pt.date][sym] = pt.value
       })
@@ -934,7 +861,7 @@ export default function AnalysisPage() {
                     ]}
                   />
                   <Legend wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.15em' }} />
-                  {Object.keys(allRollingSeries).map((sym, i) => (
+                  {Object.keys(rollingSeries).map((sym, i) => (
                     <Line key={sym} type="monotone" dataKey={sym} stroke={COLORS[i % COLORS.length]} strokeWidth={sym === 'Portfolio' ? 2.5 : 1.5} strokeDasharray={sym === 'Portfolio' ? undefined : '6 6'} dot={false} />
                   ))}
                 </LineChart>
