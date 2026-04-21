@@ -292,7 +292,6 @@ export default function AnalysisPage() {
 
   useEffect(() => {
     loadChartMode(chartMode, rollingWindow, benchmarkSymbols)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadChartMode, chartMode, rollingWindow, benchmarkSymbols])
 
   // Auto-switch away from Rolling Beta when all benchmarks are removed
