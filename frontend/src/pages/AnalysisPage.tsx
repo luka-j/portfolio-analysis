@@ -1028,7 +1028,7 @@ export default function AnalysisPage() {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#2a2e42" horizontal={false} opacity={0.3} />
                     <XAxis type="number" tickFormatter={v => `${Number(v).toFixed(1)}%`} tick={AXIS_STYLE} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" tick={{ ...AXIS_STYLE, fontSize: 9 }} axisLine={false} tickLine={false} width={56} />
+                    <YAxis type="category" dataKey="name" tick={{ ...AXIS_STYLE, fontSize: 9 }} axisLine={false} tickLine={false} width={56} interval={0} />
                     <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE} formatter={(value) => [`${Number(value).toFixed(3)}%`, 'Contribution']} />
                     <Bar dataKey="value" radius={[0, 3, 3, 0]} isAnimationActive={false}>
                       {attrDisplay.map((r, i) => (
