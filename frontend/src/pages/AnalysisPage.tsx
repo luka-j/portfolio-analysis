@@ -19,6 +19,7 @@ import {
 } from '../api'
 import { formatDate, CURRENCIES, getFromDate, RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
+import { useScenario } from '../context/ScenarioContext'
 
 const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
 
@@ -93,9 +94,16 @@ function xTickFormatter(val: string) {
 const AXIS_STYLE = { fontSize: 10, fill: '#475569' }
 const AXIS_LABEL_STYLE = { fontSize: 10, fill: '#334155', fontWeight: 900 }
 
+const COMPARE_COLOR = '#fbbf24' // amber — scenario-active accent
+
 export default function AnalysisPage() {
   const navigate = useNavigate()
   const chartRef = useRef<HTMLDivElement>(null)
+
+  const { active, compare, scenarios } = useScenario()
+  const compareLabel = compare === 0 ? 'Real'
+    : compare !== null ? (scenarios.find(s => s.id === compare)?.name ?? `Scenario ${compare}`)
+    : null
 
   const [currency, setCurrency]   = usePersistentState<string>('app_currency', 'CZK')
   const [period, setPeriod]       = usePersistentState('analysis_period', 0)
@@ -137,6 +145,12 @@ export default function AnalysisPage() {
   const [riskFreeRate, setRiskFreeRate]           = usePersistentState('analysis_riskFreeRate', 0.025)
   const [riskFreeRateInput, setRiskFreeRateInput] = usePersistentState('analysis_riskFreeRateInput', '2.50')
 
+  // Compare scenario overlay data
+  const [compareStats, setCompareStats]             = useState<StatsResponse | null>(null)
+  const [compareTwrHistory, setCompareTwrHistory]   = useState<DailyValue[]>([])
+  const [compareStandalone, setCompareStandalone]   = useState<StandaloneResult | null>(null)
+  const [compareDataLoading, setCompareDataLoading] = useState(false)
+
   // Loading / error states
   const [loading, setLoading]           = useState(true)
   const [refreshing, setRefreshing]     = useState(false)
@@ -171,14 +185,14 @@ export default function AnalysisPage() {
       }
     }
 
-    getPortfolioStats(from, to, currency, acctModel, true).then(st => {
+    getPortfolioStats(from, to, currency, acctModel, true, undefined, active).then(st => {
       if (gen === loadGenRef.current && !freshStats && Object.keys(st.statistics).length > 0) {
         setStats(st)
         checkCachedDone()
       }
     }).catch(() => {})
 
-    getPortfolioReturns(from, to, currency, acctModel, 'twr', true).then(hist => {
+    getPortfolioReturns(from, to, currency, acctModel, 'twr', true, undefined, active).then(hist => {
       if (gen === loadGenRef.current && !freshHist && hist.data.length > 0) {
         setPortfolioHistory(hist.data ?? [])
         checkCachedDone()
@@ -186,15 +200,15 @@ export default function AnalysisPage() {
     }).catch(() => {})
 
     Promise.all([
-      getPortfolioStats(from, to, currency, acctModel, false).then(st => {
+      getPortfolioStats(from, to, currency, acctModel, false, undefined, active).then(st => {
         freshStats = true
         if (gen === loadGenRef.current) setStats(st)
       }),
-      getPortfolioReturns(from, to, currency, acctModel, 'twr', false).then(hist => {
+      getPortfolioReturns(from, to, currency, acctModel, 'twr', false, undefined, active).then(hist => {
         freshHist = true
         if (gen === loadGenRef.current) setPortfolioHistory(hist.data ?? [])
       }),
-      getPortfolioReturns(from, to, currency, acctModel, 'mwr', false).then(hist => {
+      getPortfolioReturns(from, to, currency, acctModel, 'mwr', false, undefined, active).then(hist => {
         if (gen === loadGenRef.current) setMwrHistory(hist.data ?? [])
       }).catch(() => {}),
     ]).catch(err => {
@@ -205,7 +219,7 @@ export default function AnalysisPage() {
         setRefreshing(false)
       }
     })
-  }, [currency, acctModel, from, to])
+  }, [currency, acctModel, from, to, active])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -218,7 +232,7 @@ export default function AnalysisPage() {
 
     let freshArrived = false
 
-    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, true).then(res => {
+    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, true, active).then(res => {
       if (gen === loadGenRef.current && !freshArrived && res.results.length > 0) {
         setStandaloneResults(res.results)
         setStandaloneLoading(false)
@@ -226,7 +240,7 @@ export default function AnalysisPage() {
       }
     }).catch(() => {})
 
-    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, false).then(res => {
+    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, false, active).then(res => {
       if (gen === loadGenRef.current) {
         freshArrived = true
         setStandaloneResults(res.results)
@@ -239,7 +253,7 @@ export default function AnalysisPage() {
         setStandaloneRefreshing(false)
       }
     })
-  }, [currency, effectiveFrom, to, acctModel, riskFreeRate])
+  }, [currency, effectiveFrom, to, acctModel, riskFreeRate, active])
 
   useEffect(() => {
     loadStandalone(benchmarkSymbols.join(','))
@@ -258,7 +272,7 @@ export default function AnalysisPage() {
     try {
       if (mode === 'drawdown') {
         const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
-        const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, symParam)
+        const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, symParam, active)
         setDrawdownResults(res.results ?? [])
       } else {
         const metric = mode === 'rolling_sharpe' ? 'sharpe'
@@ -269,14 +283,14 @@ export default function AnalysisPage() {
         if (metric === 'beta') {
           await Promise.all(benchSyms.map(async sym => {
             try {
-              const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, sym)
+              const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, sym, undefined, active)
               const result = res.results[0]
               if (result && !result.error) newSeries[sym] = result.series
             } catch { /* skip bad symbols */ }
           }))
         } else {
           const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
-          const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, undefined, symParam)
+          const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, undefined, symParam, active)
           for (const result of res.results) {
             if (!result.error) newSeries[result.symbol] = result.series
           }
@@ -288,7 +302,7 @@ export default function AnalysisPage() {
     } finally {
       setChartModeLoading(false)
     }
-  }, [effectiveFrom, to, currency, acctModel, riskFreeRate])
+  }, [effectiveFrom, to, currency, acctModel, riskFreeRate, active])
 
   useEffect(() => {
     loadChartMode(chartMode, rollingWindow, benchmarkSymbols)
@@ -308,8 +322,8 @@ export default function AnalysisPage() {
     setHoldingsError('')
     try {
       const [attrRes, corrRes] = await Promise.all([
-        getAttribution(effectiveFrom, to, currency, acctModel, riskFreeRate),
-        getCorrelations(effectiveFrom, to, currency, acctModel),
+        getAttribution(effectiveFrom, to, currency, acctModel, riskFreeRate, active),
+        getCorrelations(effectiveFrom, to, currency, acctModel, active),
       ])
       setAttributionData(attrRes.positions)
       setAttributionTWR(attrRes.total_twr)
@@ -319,9 +333,38 @@ export default function AnalysisPage() {
     } finally {
       setHoldingsLoading(false)
     }
-  }, [effectiveFrom, to, currency, acctModel, riskFreeRate])
+  }, [effectiveFrom, to, currency, acctModel, riskFreeRate, active])
 
   useEffect(() => { loadHoldings() }, [loadHoldings])
+
+  // ── Compare scenario overlay ─────────────────────────────────────────────────
+  const loadCompareData = useCallback(async () => {
+    if (compare === null) {
+      setCompareStats(null)
+      setCompareTwrHistory([])
+      setCompareStandalone(null)
+      return
+    }
+    setCompareDataLoading(true)
+    try {
+      // compare=0 means Real (no scenario_id); compare>0 means that scenario
+      const cid = compare > 0 ? compare : null
+      const [st, hist, sa] = await Promise.all([
+        getPortfolioStats(from, to, currency, acctModel, false, undefined, cid),
+        getPortfolioReturns(from, to, currency, acctModel, 'twr', false, undefined, cid),
+        getStandaloneMetrics('', currency, effectiveFrom, to, acctModel, riskFreeRate, false, cid),
+      ])
+      setCompareStats(st)
+      setCompareTwrHistory(hist.data ?? [])
+      setCompareStandalone(sa.results.find(r => r.symbol === 'Portfolio') ?? null)
+    } catch {
+      // swallow — compare overlay is best-effort
+    } finally {
+      setCompareDataLoading(false)
+    }
+  }, [compare, from, to, currency, acctModel, effectiveFrom, riskFreeRate])
+
+  useEffect(() => { loadCompareData() }, [loadCompareData])
 
   // ── Benchmark refresh on date/currency change ────────────────────────────────
   useEffect(() => {
@@ -331,8 +374,8 @@ export default function AnalysisPage() {
       setCompareError('')
       try {
         const [cumRes, comp] = await Promise.all([
-          getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, benchmarkSymbols.join(',')),
-          comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate),
+          getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, benchmarkSymbols.join(','), active),
+          comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate, active),
         ])
         setCumulativeResults(cumRes.results.filter(r => r.symbol !== 'Portfolio'))
         setCompareResults(comp.benchmarks)
@@ -356,8 +399,8 @@ export default function AnalysisPage() {
     setCompareError('')
     try {
       const [cumRes, comp] = await Promise.all([
-        getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, newSymbols.join(',')),
-        comparePortfolio(newSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate),
+        getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, newSymbols.join(','), active),
+        comparePortfolio(newSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate, active),
       ])
       const allSymbols = [...benchmarkSymbols, ...newSymbols]
       setCumulativeResults(prev => {
@@ -386,7 +429,7 @@ export default function AnalysisPage() {
     setCompareLoading(true)
     setCompareError('')
     try {
-      const comp = await comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, newRate)
+      const comp = await comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, newRate, active)
       setCompareResults(comp.benchmarks)
       loadStandalone(benchmarkSymbols.join(','))
     } catch (err) {
@@ -428,6 +471,12 @@ export default function AnalysisPage() {
         dateMap[pt.date][r.symbol] = pt.value
       })
     })
+    if (compareTwrHistory.length > 0 && compareLabel !== null) {
+      compareTwrHistory.forEach(d => {
+        if (!dateMap[d.date]) dateMap[d.date] = {}
+        dateMap[d.date]['Compare'] = d.value
+      })
+    }
     return Object.entries(dateMap)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, values]) => ({ date, ...values }))
@@ -606,7 +655,13 @@ export default function AnalysisPage() {
           )}
         </div>
 
-        {loading ? (
+        {compareDataLoading && compare !== null && (
+          <div className="absolute top-0 right-8 flex items-center gap-1.5 text-xs text-amber-400/70">
+            <div className="w-3 h-3 rounded-full border border-amber-400/30 border-t-amber-400 animate-spin" />
+            Loading compare…
+          </div>
+        )}
+      {loading ? (
           <Spinner label="Compiling statistics…" className="py-10" />
         ) : stats ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
@@ -622,6 +677,8 @@ export default function AnalysisPage() {
                 if (numVal === null) return null
                 const tooltip = STAT_TOOLTIPS[key.toLowerCase()]
                 if (key === 'twr') {
+                  const compareVal = compareStats ? compareStats.statistics['twr'] : null
+                  const delta = compareVal !== null && compareVal !== undefined ? numVal - compareVal : null
                   return (
                     <button
                       key={key}
@@ -633,11 +690,18 @@ export default function AnalysisPage() {
                       <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%
                       </p>
+                      {delta !== null && (
+                        <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}
+                        </p>
+                      )}
                       <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
                     </button>
                   )
                 }
                 if (key === 'mwr') {
+                  const compareVal = compareStats ? compareStats.statistics['mwr'] : null
+                  const delta = compareVal !== null && compareVal !== undefined ? numVal - compareVal : null
                   return (
                     <button
                       key={key}
@@ -649,6 +713,11 @@ export default function AnalysisPage() {
                       <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%
                       </p>
+                      {delta !== null && (
+                        <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}
+                        </p>
+                      )}
                       <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
                     </button>
                   )
@@ -683,6 +752,11 @@ export default function AnalysisPage() {
                   <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {portfolioStandalone.sharpe_ratio.toFixed(3)}
                   </p>
+                  {compareStandalone !== null && (
+                    <p className={`text-xs tabular-nums mt-1 ${portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? '+' : ''}{(portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio).toFixed(3)} vs {compareLabel}
+                    </p>
+                  )}
                   <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
                 </button>
 
@@ -817,6 +891,9 @@ export default function AnalysisPage() {
                   <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE} formatter={(value, name) => [`${Number(value).toFixed(2)}%`, String(name)]} />
                   <Legend wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.15em' }} />
                   <Line type="monotone" dataKey="Portfolio" stroke={COLORS[0]} strokeWidth={3} dot={false} animationDuration={1200} />
+                  {compareLabel !== null && compareTwrHistory.length > 0 && (
+                    <Line type="monotone" dataKey="Compare" name={compareLabel} stroke={COMPARE_COLOR} strokeWidth={2} strokeDasharray="4 2" dot={false} opacity={0.7} />
+                  )}
                   {benchmarkSymbols.map((sym, i) => (
                     <Line key={sym} type="monotone" dataKey={sym} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="6 6" dot={false} />
                   ))}

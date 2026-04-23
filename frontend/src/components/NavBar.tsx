@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { clearToken, getLLMAvailable } from '../api'
 import { usePrivacy } from '../utils/PrivacyContext'
 import HoverTooltip from './HoverTooltip'
+import ScenarioPill from './ScenarioPill'
 
 export default function NavBar() {
   const navigate = useNavigate()
@@ -42,48 +43,58 @@ export default function NavBar() {
           </div>
         </div>
 
-        {/* Center: Navigation Links (desktop only) */}
-        <nav className="hidden md:flex flex-1 justify-center items-center gap-10">
-          <NavLink to="/" className={linkClass} end>
-            Dashboard
-          </NavLink>
-          <NavLink to="/portfolio" className={linkClass}>
-            Portfolio
-          </NavLink>
-          <NavLink to="/analysis" className={linkClass}>
-            Analysis
-          </NavLink>
-          <NavLink to="/breakdown" className={linkClass}>
-            Breakdown
-          </NavLink>
-          {privacy ? (
-            <div className="relative group flex items-center">
-              <span className="text-slate-500 cursor-not-allowed text-sm font-medium">Tax</span>
-              <HoverTooltip direction="down" className="w-42">
-                Not available in private mode.
-              </HoverTooltip>
-            </div>
-          ) : (
-            <NavLink to="/tax" className={linkClass}>
-              Tax
+        {/* Center: Navigation Links + Scenario pills (desktop only) */}
+        <nav className="hidden md:flex flex-1 justify-center items-center gap-6">
+          <div className="flex items-center gap-8">
+            <NavLink to="/" className={linkClass} end>
+              Dashboard
             </NavLink>
-          )}
-          {llmAvailable ? (
-            <NavLink to="/llm" className={linkClass}>
-              LLM
+            <NavLink to="/portfolio" className={linkClass}>
+              Portfolio
             </NavLink>
-          ) : (
-            <div className="relative group flex items-center">
-              <span
-                className="text-slate-500 cursor-not-allowed text-sm font-medium transition-colors duration-200"
-              >
+            <NavLink to="/analysis" className={linkClass}>
+              Analysis
+            </NavLink>
+            <NavLink to="/breakdown" className={linkClass}>
+              Breakdown
+            </NavLink>
+            {privacy ? (
+              <div className="relative group flex items-center">
+                <span className="text-slate-500 cursor-not-allowed text-sm font-medium">Tax</span>
+                <HoverTooltip direction="down" className="w-42">
+                  Not available in private mode.
+                </HoverTooltip>
+              </div>
+            ) : (
+              <NavLink to="/tax" className={linkClass}>
+                Tax
+              </NavLink>
+            )}
+            {llmAvailable ? (
+              <NavLink to="/llm" className={linkClass}>
                 LLM
-              </span>
-              <HoverTooltip direction="down" className="w-60">
-                LLM features are currently unavailable. Please configure GEMINI_API_KEY.
-              </HoverTooltip>
-            </div>
-          )}
+              </NavLink>
+            ) : (
+              <div className="relative group flex items-center">
+                <span
+                  className="text-slate-500 cursor-not-allowed text-sm font-medium transition-colors duration-200"
+                >
+                  LLM
+                </span>
+                <HoverTooltip direction="down" className="w-60">
+                  LLM features are currently unavailable. Please configure GEMINI_API_KEY.
+                </HoverTooltip>
+              </div>
+            )}
+          </div>
+
+          {/* Vertical separator */}
+          <div className="h-4 w-px bg-white/10 shrink-0" />
+
+          {/* Scenario switcher pill */}
+          <div className="flex items-center gap-2">
+            <ScenarioPill />
+          </div>
         </nav>
 
         {/* Right: Privacy indicator + Logout + (mobile) hamburger */}
@@ -172,6 +183,9 @@ export default function NavBar() {
                 LLM <span className="text-[10px] font-normal">(configure GEMINI_API_KEY)</span>
               </span>
             )}
+            <div className="px-4 py-3 flex items-center gap-2 border-t border-white/5">
+              <ScenarioPill />
+            </div>
           </nav>
         </div>
       )}

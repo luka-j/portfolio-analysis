@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import HoverTooltip from './HoverTooltip'
 import { SecurityPriceChart } from './SecurityPriceChart'
+import ConfirmDialog from './ConfirmDialog'
 import { getPortfolioTrades, deleteTransaction, type TradeEntry } from '../api'
 import { formatNumber, formatQuantity } from '../utils/format'
 
@@ -46,11 +47,15 @@ export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acc
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const isOriginal = displayCurrency === 'Original'
+  const reqCurrency = isOriginal ? 'USD' : displayCurrency
+  const reqAcctModel = isOriginal ? 'original' : acctModel
+
   const fetchTrades = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const res = await getPortfolioTrades(symbol, displayCurrency, exchange || '')
+      const res = await getPortfolioTrades(symbol, reqCurrency, exchange || '', 200, 0, reqAcctModel)
       setTrades(res.trades || [])
       setResolvedDisplayCurrency(res.display_currency || displayCurrency)
     } catch (err) {
@@ -58,7 +63,7 @@ export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acc
     } finally {
       setLoading(false)
     }
-  }, [symbol, displayCurrency, exchange])
+  }, [symbol, displayCurrency, reqCurrency, reqAcctModel, exchange])
 
   useEffect(() => {
     let cancelled = false
@@ -81,7 +86,6 @@ export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acc
   }
 
   const hasTaxCostBasis = trades.some(t => t.tax_cost_basis !== undefined && t.tax_cost_basis !== null)
-  const isOriginal = displayCurrency === 'Original'
   const colsClass = isOriginal
     ? hasTaxCostBasis ? 'grid-cols-8' : 'grid-cols-7'
     : hasTaxCostBasis ? 'grid-cols-9' : 'grid-cols-8'
@@ -173,35 +177,15 @@ export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acc
         )}
       </div>
 
-      {/* Delete confirmation dialog */}
       {pendingDeleteId && (
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
-          onClick={() => setPendingDeleteId(null)}
-        >
-          <div
-            className="bg-surface/95 backdrop-blur-xl border border-border-dim rounded-2xl p-6 w-full max-w-sm shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <h3 className="text-slate-100 font-semibold mb-2">Delete transaction?</h3>
-            <p className="text-slate-400 text-sm mb-5">This cannot be undone.</p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setPendingDeleteId(null)}
-                className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDelete(pendingDeleteId)}
-                disabled={deleting}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all disabled:opacity-50"
-              >
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Delete transaction?"
+          message="This cannot be undone."
+          confirmLabel="Delete"
+          busy={deleting}
+          onConfirm={() => handleDelete(pendingDeleteId)}
+          onCancel={() => setPendingDeleteId(null)}
+        />
       )}
     </div>
   )

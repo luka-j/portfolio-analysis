@@ -16,6 +16,7 @@ import (
 
 // BreakdownHandler handles portfolio breakdown endpoints.
 type BreakdownHandler struct {
+	ScenarioMiddleware
 	Repo            *flexquery.Repository
 	PortfolioSvc    *portfolio.Service
 	BreakdownSvc    *breakdownsvc.Service
@@ -42,9 +43,8 @@ func (h *BreakdownHandler) GetBreakdown(c *gin.Context) {
 	currency := strings.ToUpper(c.DefaultQuery("currency", "USD"))
 	cachedOnly := parseCachedOnly(c)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 

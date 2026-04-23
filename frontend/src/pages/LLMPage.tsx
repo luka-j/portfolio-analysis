@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { usePersistentState } from '../utils/usePersistentState'
 import NavBar from '../components/NavBar'
+import ScenarioBanner from '../components/ScenarioBanner'
 import HoverTooltip from '../components/HoverTooltip'
 import ToolsModal from '../components/ToolsModal'
+import CompareScenariosChip from '../components/CompareScenariosChip'
 import { AVAILABLE_TOOLS } from '../constants/tools'
 import AssistantMessage from '../components/AssistantMessage'
 import { useLocation } from 'react-router-dom'
-import { postLLMChat, type LLMChatRequest, type LLMResponseSection, type LLMToolCallEvent } from '../api'
+import { postLLMChat, compareScenariosLLM, type LLMChatRequest, type LLMResponseSection, type LLMToolCallEvent } from '../api'
+import { useScenario } from '../context/ScenarioContext'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -45,6 +48,11 @@ export default function LLMPage() {
   const locationState = location.state as { initialMessages?: ChatMessage[]; initialPrompt?: { promptType?: string; message?: string; displayMessage: string; extraParams?: Partial<LLMChatRequest> } } | null
   const initialMessages = locationState?.initialMessages ?? []
   const initialPrompt = locationState?.initialPrompt
+
+  const { active, scenarios } = useScenario()
+  const activeLabel = active === null ? 'Real'
+    : (scenarios.find(s => s.id === active)?.name ?? `Scenario ${active}`)
+
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -105,6 +113,26 @@ export default function LLMPage() {
   const handleToolToggle = (id: string) => setEnabledTools(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
   const handleToolToggleAll = (enable: boolean) => setEnabledTools(enable ? AVAILABLE_TOOLS.map(t => t.id) : [])
 
+  const handleCompareScenarios = useCallback(async (targetId: number, question?: string) => {
+    const aId = active ?? 0
+    const targetLabel = targetId === 0
+      ? 'Real'
+      : (scenarios.find(s => s.id === targetId)?.name ?? `Scenario ${targetId}`)
+    const displayMsg = `Compare ${activeLabel} vs. ${targetLabel}${question ? `: ${question}` : ''}`
+    setMessages(prev => [...prev, { role: 'user', content: displayMsg, originalRequest: { message: displayMsg, promptType: 'freeform' } }])
+    setLoading(true)
+    setLoadingLabel('Comparing scenarios…')
+    try {
+      const res = await compareScenariosLLM(aId, targetId, question, 'USD')
+      setLoading(false)
+      setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
+    } catch (err) {
+      setLoading(false)
+      const errMsg = (err as Error)?.message || 'Failed to compare scenarios.'
+      setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
+    }
+  }, [active, activeLabel, scenarios])
+
   const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string, extraParams?: Partial<LLMChatRequest>, usePageModel = false) => {
     if (!message && promptType === 'freeform') return
 
@@ -121,6 +149,7 @@ export default function LLMPage() {
         prompt_type: promptType,
         message: promptType === 'freeform' ? message : '',
         currency: 'USD',
+        scenario_id: active,
         ...(usePageModel || !isCanned ? { model } : {}),
         ...extraParams,
       }
@@ -242,6 +271,7 @@ export default function LLMPage() {
   return (
     <div className="min-h-screen md:h-screen bg-bg flex flex-col md:overflow-hidden">
       <NavBar />
+      <ScenarioBanner />
 
       {toolsModalOpen && (
         <ToolsModal
@@ -345,6 +375,8 @@ export default function LLMPage() {
                 </div>
               );
             })}
+
+            <CompareScenariosChip disabled={loading} onCompare={(id) => handleCompareScenarios(id)} />
           </div>
         </div>
 

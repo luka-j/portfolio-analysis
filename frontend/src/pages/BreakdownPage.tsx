@@ -8,6 +8,7 @@ import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } fro
 import { CURRENCIES } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
+import { useScenario } from '../context/ScenarioContext'
 
 const CURRENCY_OPTIONS = CURRENCIES.map(c => ({ label: c, value: c }))
 
@@ -166,6 +167,7 @@ function formatCurrencyValue(value: number, currency: string): string {
 
 export default function BreakdownPage() {
   const { privacy } = usePrivacy()
+  const { active } = useScenario()
   const [currency, setCurrency] = usePersistentState<string>('app_currency', 'CZK')
   const [sections, setSections] = useState<BreakdownSection[]>([])
   const [loading, setLoading] = useState(false)
@@ -179,7 +181,7 @@ export default function BreakdownPage() {
     let freshArrived = false
 
     // 1. Cached call — show immediately if non-empty, mark as stale
-    getPortfolioBreakdown(currency, true).then(data => {
+    getPortfolioBreakdown(currency, true, active).then(data => {
       if (!freshArrived && (data.sections ?? []).length > 0) {
         setSections(data.sections ?? [])
         setLoading(false)
@@ -189,7 +191,7 @@ export default function BreakdownPage() {
 
     // 2. Fresh call — always overwrites cached, clears stale indicator
     try {
-      const data = await getPortfolioBreakdown(currency, false)
+      const data = await getPortfolioBreakdown(currency, false, active)
       freshArrived = true
       setSections(data.sections ?? [])
     } catch (e) {
@@ -198,7 +200,7 @@ export default function BreakdownPage() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [currency])
+  }, [currency, active])
 
   useEffect(() => { load() }, [load])
 

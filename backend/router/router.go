@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
@@ -19,6 +20,7 @@ import (
 	"portfolio-analysis/services/llm"
 	"portfolio-analysis/services/market"
 	"portfolio-analysis/services/portfolio"
+	scenariosvc "portfolio-analysis/services/scenario"
 	"portfolio-analysis/services/tax"
 )
 
@@ -67,6 +69,32 @@ func SetupRouter(
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	// Scenario repository — shared across handlers that support scenario_id.
+	scenarioRepo := scenariosvc.NewRepository(database)
+
+	// Evict unpinned scenarios older than 7 days; run once at startup then daily.
+	go func() {
+		evict := func() {
+			n, labels, err := scenarioRepo.EvictStaleUnpinned(time.Now().UTC().AddDate(0, 0, -7))
+			if err != nil {
+				log.Printf("WARN: scenario eviction: %v", err)
+			} else if n > 0 {
+				log.Printf("Evicted %d stale unpinned scenarios: %v", n, labels)
+			}
+		}
+		evict()
+		for range time.Tick(24 * time.Hour) {
+			evict()
+		}
+	}()
+
+	// Shared ScenarioMiddleware wired to all handlers that support scenario_id.
+	scenarioMiddleware := handlers.ScenarioMiddleware{
+		ScenarioRepo: scenarioRepo,
+		ScenarioMkt:  marketSvc,
+		ScenarioFX:   fxSvc,
+	}
+
 	// API v1 group with auth.
 	api := r.Group("/api/v1")
 	api.Use(middleware.TokenAuth(cfg.AllowedTokenHashes))
@@ -78,12 +106,13 @@ func SetupRouter(
 
 	// Portfolio endpoints.
 	ph := handlers.NewPortfolioHandler(repo, portfolioSvc, fxSvc)
+	ph.ScenarioMiddleware = scenarioMiddleware
 	api.POST("/portfolio/upload", ph.Upload)
 	api.POST("/portfolio/upload/etrade/benefits", ph.UploadEtradeBenefits)
 	api.POST("/portfolio/upload/etrade/sales", ph.UploadEtradeSales)
 	api.GET("/portfolio/value", ph.GetValue)
 	api.GET("/portfolio/history", ph.GetHistory)
-	api.GET("/portfolio/history/returns", ph.GetReturns) // real cumulative TWR curve
+	api.GET("/portfolio/history/returns", ph.GetReturns)
 	api.GET("/portfolio/trades", ph.GetTrades)
 	api.GET("/portfolio/price-history", ph.GetPriceHistory)
 	api.PUT("/portfolio/symbols/:symbol/mapping", ph.MapSymbol)
@@ -98,6 +127,7 @@ func SetupRouter(
 
 	// Stats endpoints.
 	sh := handlers.NewStatsHandler(repo, portfolioSvc, marketSvc, fxSvc, currencyGetter)
+	sh.ScenarioMiddleware = scenarioMiddleware
 	api.GET("/portfolio/stats", sh.GetStats)
 	api.GET("/portfolio/compare", sh.Compare)
 	api.GET("/portfolio/standalone", sh.GetStandalone)
@@ -108,18 +138,33 @@ func SetupRouter(
 	api.GET("/portfolio/cumulative", sh.GetCumulative)
 
 	// Tax endpoints.
-	th := &handlers.TaxHandler{Repo: repo, TaxSvc: taxSvc}
+	th := &handlers.TaxHandler{
+		ScenarioMiddleware: scenarioMiddleware,
+		Repo:               repo,
+		TaxSvc:             taxSvc,
+	}
 	api.POST("/tax/report", th.GetReport)
 
 	// Breakdown endpoint.
 	bh := handlers.NewBreakdownHandler(repo, portfolioSvc, breakdownService, fundamentalsSvc)
+	bh.ScenarioMiddleware = scenarioMiddleware
 	api.GET("/portfolio/breakdown", bh.GetBreakdown)
 
 	// LLM endpoints.
 	lh := handlers.NewLLMHandler(repo, database, llmService, portfolioSvc, taxSvc, marketSvc, currencyGetter)
+	lh.ScenarioMiddleware = scenarioMiddleware
 	api.GET("/llm/available", lh.IsAvailable)
 	api.GET("/llm/summary", lh.GetSummary)
 	api.POST("/llm/chat", lh.Chat)
+
+	// Scenario endpoints.
+	sch := handlers.NewScenarioHandler(repo, database, scenarioRepo, portfolioSvc, taxSvc, marketSvc, currencyGetter, fxSvc, llmService)
+	api.GET("/scenarios", sch.List)
+	api.POST("/scenarios", sch.Create)
+	api.GET("/scenarios/:id", sch.Get)
+	api.PATCH("/scenarios/:id", sch.Update)
+	api.DELETE("/scenarios/:id", sch.Delete)
+	api.POST("/scenarios/compare-llm", sch.CompareLLM)
 
 	return r
 }

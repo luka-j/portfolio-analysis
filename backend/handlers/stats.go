@@ -20,6 +20,7 @@ import (
 
 // StatsHandler handles portfolio statistics and comparison endpoints.
 type StatsHandler struct {
+	ScenarioMiddleware
 	Repo             *flexquery.Repository
 	PortfolioService *portfolio.Service
 	MarketProvider   market.Provider
@@ -42,9 +43,8 @@ func NewStatsHandler(repo *flexquery.Repository, ps *portfolio.Service, mp marke
 func (h *StatsHandler) GetStats(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -176,9 +176,8 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 func (h *StatsHandler) Compare(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -343,9 +342,8 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 func (h *StatsHandler) GetStandalone(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -497,9 +495,8 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 func (h *StatsHandler) GetDrawdown(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -583,9 +580,8 @@ func (h *StatsHandler) GetDrawdown(c *gin.Context) {
 func (h *StatsHandler) GetRolling(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -772,9 +768,8 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 func (h *StatsHandler) GetAttribution(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -856,9 +851,8 @@ func (h *StatsHandler) GetAttribution(c *gin.Context) {
 func (h *StatsHandler) GetCumulative(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -941,9 +935,8 @@ func (h *StatsHandler) GetCumulative(c *gin.Context) {
 func (h *StatsHandler) GetCorrelations(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 

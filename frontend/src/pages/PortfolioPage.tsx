@@ -13,6 +13,7 @@ import { getPortfolioValue, getPortfolioPriceHistory, type PositionValue, type S
 import { formatCurrency, formatNumber, formatQuantity, formatDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
+import { useScenario } from '../context/ScenarioContext'
 
 const FX_METHOD_OPTIONS = [
   { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the currency, accounting for currency movements over time.' },
@@ -47,6 +48,7 @@ export default function PortfolioPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { privacy } = usePrivacy()
+  const { active } = useScenario()
   const [showWelcome, setShowWelcome] = useState(() => !!(location.state as { firstUpload?: boolean } | null)?.firstUpload)
   const [globalCurrency, setGlobalCurrency] = usePersistentState<string>('app_currency', 'CZK')
   // 'Original' is a portfolio-only option — it doesn't propagate to other pages.
@@ -74,6 +76,13 @@ export default function PortfolioPage() {
   const [phLoading, setPhLoading] = useState(false)
   const [showAddTransaction, setShowAddTransaction] = useState(false)
 
+  // 'Original' is a UI-only sentinel — the backend signals "no conversion" via
+  // accounting_model=original and rejects "Original" as a currency code. Translate
+  // here and pass a real currency placeholder (the backend ignores it in original mode).
+  const isOriginal = currency === 'Original'
+  const reqCurrency = isOriginal ? globalCurrency : currency
+  const reqAcctModel = isOriginal ? 'original' : acctModel
+
   const loadData = useCallback(async () => {
     setLoading(true)
     setValueRefreshing(false)
@@ -82,7 +91,7 @@ export default function PortfolioPage() {
     let freshArrived = false
 
     // 1. Cached call — show positions immediately if there's data
-    getPortfolioValue(currency, acctModel, true).then(val => {
+    getPortfolioValue(reqCurrency, reqAcctModel, true, active).then(val => {
       if (!freshArrived && (val.positions ?? []).length > 0) {
         const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
         setPositions(sorted)
@@ -94,7 +103,7 @@ export default function PortfolioPage() {
 
     // 2. Fresh call — always takes priority
     try {
-      const val = await getPortfolioValue(currency, acctModel, false)
+      const val = await getPortfolioValue(reqCurrency, reqAcctModel, false, active)
       freshArrived = true
       const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
       setPositions(sorted)
@@ -105,14 +114,14 @@ export default function PortfolioPage() {
       setLoading(false)
       setValueRefreshing(false)
     }
-  }, [currency, acctModel])
+  }, [reqCurrency, reqAcctModel, active])
 
   useEffect(() => { loadData() }, [loadData])
 
   useEffect(() => {
     const { from, to } = getPeriodDates(period, customFrom, customTo)
     setPhLoading(true)
-    getPortfolioPriceHistory(from, to, currency, acctModel)
+    getPortfolioPriceHistory(from, to, reqCurrency, reqAcctModel, active)
       .then(res => {
         const map: Record<string, SymbolPriceHistory> = {}
         for (const item of res.items) {
@@ -123,7 +132,7 @@ export default function PortfolioPage() {
       })
       .catch(() => setPriceHistory({}))
       .finally(() => setPhLoading(false))
-  }, [period, customFrom, customTo, currency, acctModel])
+  }, [period, customFrom, customTo, reqCurrency, reqAcctModel, active])
 
   const totals = positions.reduce(
     (acc, pos) => {

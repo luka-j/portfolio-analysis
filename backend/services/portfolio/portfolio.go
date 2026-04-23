@@ -434,7 +434,7 @@ func (s *Service) computeCurrentValueMapsMemo(data *models.FlexQueryData, curren
 	realizedGLMap = make(map[string]float64)
 	commissionsMap = make(map[string]float64)
 
-	isOriginal := currency == "Original" || currency == "original" || acctModel == models.AccountingModelOriginal
+	isOriginal := acctModel == models.AccountingModelOriginal
 
 	// Group all trades by posKey for FIFO matching (includes TRANSFER_IN, which
 	// represents received shares with a cost basis; FX trades are grouped under
@@ -545,9 +545,12 @@ func (s *Service) computeCurrentValueMapsMemo(data *models.FlexQueryData, curren
 
 // GetTradesForSymbol returns the trades for a specific symbol+exchange in a
 // frontend-friendly format, with prices converted to displayCurrency.
-func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchange, displayCurrency string) (*models.TradesResponse, error) {
+// When acctModel is AccountingModelOriginal, prices are kept in their native currency
+// and displayCurrency is ignored for conversion (but echoed in the response).
+func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchange, displayCurrency string, acctModel models.AccountingModel) (*models.TradesResponse, error) {
 	var entries []models.TradeEntry
 	nativeCurrency := ""
+	isOriginal := acctModel == models.AccountingModelOriginal
 
 	for _, t := range data.Trades {
 		if t.BuySell == "TRANSFER_IN" {
@@ -562,7 +565,7 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 		nativeCurrency = t.Currency
 
 		convertedPrice := t.Price
-		if displayCurrency != "Original" && displayCurrency != "original" && t.Currency != displayCurrency {
+		if !isOriginal && t.Currency != displayCurrency {
 			cp, err := s.FXService.Convert(t.Price, t.Currency, displayCurrency, t.DateTime, false) // trades usually don't need cachedOnly logic
 			if err != nil {
 				// Fall back to native price on FX error

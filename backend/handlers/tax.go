@@ -2,16 +2,20 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"portfolio-analysis/middleware"
+	"portfolio-analysis/models"
+	scenariosvc "portfolio-analysis/services/scenario"
 	"portfolio-analysis/services/flexquery"
 	"portfolio-analysis/services/tax"
 )
 
 // TaxHandler processes tax report requests.
 type TaxHandler struct {
+	ScenarioMiddleware
 	Repo   *flexquery.Repository
 	TaxSvc *tax.Service
 }
@@ -35,9 +39,25 @@ func (h *TaxHandler) GetReport(c *gin.Context) {
 		return
 	}
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "failed to load data: " + err.Error()})
+	// Backtest scenarios contain only synthetic Trade entries with no cost-basis lineage,
+	// no corporate actions, and no dividend/ESPP/RSU records — the Czech tax report would
+	// be meaningless. Refuse up front.
+	if sidStr := c.Query("scenario_id"); sidStr != "" {
+		if sid, perr := strconv.ParseUint(sidStr, 10, 64); perr == nil && h.ScenarioRepo != nil {
+			var user models.User
+			if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err == nil {
+				if row, gerr := h.ScenarioRepo.Get(user.ID, uint(sid)); gerr == nil && row != nil {
+					if spec, perr2 := scenariosvc.ParseSpec(row); perr2 == nil && spec.Backtest != nil {
+						c.JSON(http.StatusBadRequest, gin.H{"error": "tax reports are not available for backtest scenarios (no cost-basis or tax lineage)"})
+						return
+					}
+				}
+			}
+		}
+	}
+
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 

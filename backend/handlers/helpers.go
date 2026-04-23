@@ -4,16 +4,98 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"portfolio-analysis/models"
+	scenariosvc "portfolio-analysis/services/scenario"
+	"portfolio-analysis/services/flexquery"
+	"portfolio-analysis/services/fx"
 	"portfolio-analysis/services/market"
 	"portfolio-analysis/services/portfolio"
 	"portfolio-analysis/services/stats"
 )
+
+// ScenarioMiddleware holds the dependencies needed to resolve an optional scenario_id
+// query parameter. Embed this in handler structs that should support scenarios.
+type ScenarioMiddleware struct {
+	ScenarioRepo *scenariosvc.Repository
+	ScenarioMkt  market.Provider
+	ScenarioFX   *fx.Service
+}
+
+// loadPortfolioData loads FlexQueryData for the authenticated user.
+// If a scenario_id query parameter is present, the corresponding ScenarioSpec is
+// applied via scenario.Build and the synthesised FlexQueryData is returned.
+// The second return value is false when the handler should abort (error already written).
+func (sm *ScenarioMiddleware) loadPortfolioData(
+	c *gin.Context,
+	flexRepo *flexquery.Repository,
+	userHash string,
+) (*models.FlexQueryData, bool) {
+	realData, err := flexRepo.LoadSaved(userHash)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return nil, false
+	}
+
+	scenarioIDStr := c.Query("scenario_id")
+	if scenarioIDStr == "" {
+		return realData, true
+	}
+
+	scenarioID, err := strconv.ParseUint(scenarioIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scenario_id"})
+		return nil, false
+	}
+
+	if sm.ScenarioRepo == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scenarios not available"})
+		return nil, false
+	}
+
+	// Resolve user ID from the token hash.
+	var user models.User
+	if err := flexRepo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return nil, false
+	}
+
+	row, err := sm.ScenarioRepo.Get(user.ID, uint(scenarioID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "loading scenario: " + err.Error()})
+		return nil, false
+	}
+	if row == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "scenario not found"})
+		return nil, false
+	}
+
+	spec, err := scenariosvc.ParseSpec(row)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "parsing scenario: " + err.Error()})
+		return nil, false
+	}
+
+	syntheticData, err := scenariosvc.Build(spec, realData, sm.ScenarioMkt, sm.ScenarioFX)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "building scenario: " + err.Error()})
+		return nil, false
+	}
+
+	// Scenario-specific hash prevents singleflight cache collisions with the real portfolio.
+	// Including UpdatedAt (ns) means editing the scenario invalidates any downstream caches
+	// that key on UserHash (e.g. portfolio-service singleflight).
+	syntheticData.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+
+	go sm.ScenarioRepo.TouchLastUsed(user.ID, uint(scenarioID))
+
+	return syntheticData, true
+}
 
 // parseDateRange extracts and validates from/to query parameters.
 func parseDateRange(c *gin.Context) (time.Time, time.Time, error) {

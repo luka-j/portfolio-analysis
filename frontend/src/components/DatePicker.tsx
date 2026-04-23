@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { formatDate } from '../utils/format'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -21,18 +22,48 @@ interface Props {
   onChange: (date: string) => void
 }
 
+interface DropdownPos {
+  top: number
+  left: number
+}
+
 export default function DatePicker({ value, onChange }: Props) {
   const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos]   = useState<DropdownPos | null>(null)
+  const buttonRef   = useRef<HTMLButtonElement>(null)
+  const calendarRef = useRef<HTMLDivElement>(null)
   const today = formatDate(new Date())
 
   const seed = value || today
   const [viewYear,  setViewYear]  = useState(() => parseInt(seed.slice(0, 4)))
   const [viewMonth, setViewMonth] = useState(() => parseInt(seed.slice(5, 7)) - 1)
 
+  function calcPos() {
+    if (!buttonRef.current) return
+    const r = buttonRef.current.getBoundingClientRect()
+    setPos({ top: r.bottom + 4, left: r.left })
+  }
+
+  // Track button position while open
+  useEffect(() => {
+    if (!open) return
+    function update() { calcPos() }
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [open])
+
+  // Close on outside click
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      if (
+        buttonRef.current   && !buttonRef.current.contains(target) &&
+        calendarRef.current && !calendarRef.current.contains(target)
+      ) {
         setOpen(false)
       }
     }
@@ -50,10 +81,13 @@ export default function DatePicker({ value, onChange }: Props) {
   const cells = buildCells(viewYear, viewMonth)
 
   return (
-    <div ref={containerRef} className="relative">
+    <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => {
+          if (open) { setOpen(false) } else { calcPos(); setOpen(true) }
+        }}
         className="w-full bg-bg border border-border-dim rounded-xl px-4 py-2.5 text-slate-100 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors text-left flex items-center justify-between"
       >
         <span className="font-mono">{value || 'Select date'}</span>
@@ -63,8 +97,13 @@ export default function DatePicker({ value, onChange }: Props) {
         </svg>
       </button>
 
-      {open && (
-        <div className="absolute z-[70] mt-1 left-0 bg-surface border border-border-dim/70 rounded-2xl px-5 py-4 shadow-2xl">
+      {open && pos && createPortal(
+        <div
+          ref={calendarRef}
+          className="bg-surface border border-border-dim/70 rounded-2xl px-5 py-4 shadow-2xl"
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
+          onMouseDown={e => e.preventDefault()}
+        >
           <div className="flex items-center justify-between mb-3">
             <button
               type="button"
@@ -112,7 +151,8 @@ export default function DatePicker({ value, onChange }: Props) {
               )
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

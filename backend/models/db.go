@@ -158,6 +158,19 @@ type CashDividendRecord struct {
 	Description string
 }
 
+// ScenarioRecord stores a user-defined counterfactual portfolio scenario.
+// The spec is serialized as JSON. Unpinned scenarios are evicted after 7 days of inactivity.
+type ScenarioRecord struct {
+	ID         uint      `gorm:"primaryKey"`
+	UserID     uint      `gorm:"index;not null"`
+	Name       string
+	Pinned     bool      `gorm:"default:false;index"`
+	SpecJSON   string    `gorm:"type:text;not null"` // JSON-encoded ScenarioSpec
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	LastUsedAt time.Time `gorm:"index"`
+}
+
 // LLMCache stores cached responses from the LLM.
 type LLMCache struct {
 	ID         uint      `gorm:"primaryKey"`

@@ -14,6 +14,7 @@ import {
 import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFromDate, RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
+import { useScenario } from '../context/ScenarioContext'
 
 const PERIODS = [
   { label: '1M', months: 1 },
@@ -26,6 +27,7 @@ const PERIODS = [
 
 export default function LandingPage() {
   const { privacy, togglePrivacy } = usePrivacy()
+  const { active } = useScenario()
   const [currency, setCurrency] = usePersistentState<string>('app_currency', 'CZK')
   const [period, setPeriod] = usePersistentState('landing_period', 0)
   const [chartMode, setChartMode] = usePersistentState<'value' | 'twr' | 'mwr'>('landing_chartMode', 'value')
@@ -121,7 +123,7 @@ export default function LandingPage() {
     let freshArrived = false
 
     // 1. Cached call — paint the hero instantly if anything is cached.
-    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', true, controller.signal)
+    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', true, controller.signal, active)
       .then(res => {
         if (gen === loadGenRef.current && !freshArrived && res.value > 0) {
           applyMulti(res)
@@ -132,7 +134,7 @@ export default function LandingPage() {
       .catch(() => {})
 
     // 2. Fresh call — authoritative, clears the stale indicator.
-    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', false, controller.signal)
+    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', false, controller.signal, active)
       .then(res => {
         if (gen !== loadGenRef.current) return
         freshArrived = true
@@ -149,7 +151,7 @@ export default function LandingPage() {
       })
 
     return () => { controller.abort() }
-  }, [currency, uploadCount, applyMulti])
+  }, [currency, uploadCount, applyMulti, active])
 
   // Stats loader: depends on period (and currency / upload count). Split from
   // the value loader so period switches don't re-trigger the multi-currency
@@ -162,7 +164,7 @@ export default function LandingPage() {
     const to = formatDate(new Date())
     setStatsRefreshing(false)
 
-    getPortfolioStats(from, to, currency, 'historical', true, controller.signal)
+    getPortfolioStats(from, to, currency, 'historical', true, controller.signal, active)
       .then(st => {
         if (cancelled || freshArrived) return
         if (st.statistics && Object.keys(st.statistics).length > 0) {
@@ -172,7 +174,7 @@ export default function LandingPage() {
       })
       .catch(() => {})
 
-    getPortfolioStats(from, to, currency, 'historical', false, controller.signal)
+    getPortfolioStats(from, to, currency, 'historical', false, controller.signal, active)
       .then(st => {
         if (cancelled) return
         freshArrived = true
@@ -182,7 +184,7 @@ export default function LandingPage() {
       .catch(() => { if (!cancelled) setStatsRefreshing(false) })
 
     return () => { cancelled = true; controller.abort() }
-  }, [currency, period, uploadCount])
+  }, [currency, period, uploadCount, active])
 
   // Re-fetch triggered by explicit post-upload callback.
   const loadData = useCallback(() => {
@@ -202,8 +204,8 @@ export default function LandingPage() {
     // Only fetch the series for the currently-displayed mode.
     // Previously-loaded data for other modes is retained in state.
     const fetchFn = chartMode === 'value'
-      ? (cO: boolean, s?: AbortSignal) => getPortfolioHistory(from, to, currency, 'historical', cO, s)
-      : (cO: boolean, s?: AbortSignal) => getPortfolioReturns(from, to, currency, 'historical', chartMode, cO, s)
+      ? (cO: boolean, s?: AbortSignal) => getPortfolioHistory(from, to, currency, 'historical', cO, s, active)
+      : (cO: boolean, s?: AbortSignal) => getPortfolioReturns(from, to, currency, 'historical', chartMode, cO, s, active)
     const setter = chartMode === 'value' ? setHistory : chartMode === 'twr' ? setTwrHistory : setMwrHistory
 
     // 1. Cached call — show immediately if non-empty, mark as stale
@@ -229,7 +231,7 @@ export default function LandingPage() {
     })
 
     return () => { cancelled = true; controller.abort() }
-  }, [currency, period, chartMode])
+  }, [currency, period, chartMode, active])
 
   const currValue = portfolioValues[currency] ?? 0
   // Only show LLM when we know there are trades AND the portfolio has a non-zero value.
@@ -241,7 +243,7 @@ export default function LandingPage() {
     const fetchSummary = async (forceRefresh: boolean) => {
       setLlmSummaryLoading(true)
       try {
-        const res = await getLLMSummary(llmPeriod, forceRefresh)
+        const res = await getLLMSummary(llmPeriod, forceRefresh, active)
         if (!cancelled) {
           setLlmSummary(res.summary)
           setLlmAvailable(true)

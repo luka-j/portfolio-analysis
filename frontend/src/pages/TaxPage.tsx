@@ -9,6 +9,7 @@ import { getTaxReport } from '../api'
 import type { TaxReportResponse, TaxTransaction } from '../api'
 import { escapeCSVField } from '../utils/format'
 import { usePrivacy } from '../utils/PrivacyContext'
+import { useScenario } from '../context/ScenarioContext'
 
 type FxMethod = 'historical' | 'universal'
 
@@ -19,6 +20,7 @@ const FX_OPTIONS = [
 
 export default function TaxPage() {
   const { privacy } = usePrivacy()
+  const { active } = useScenario()
 
   const [year, setYear] = useState<number>(new Date().getFullYear() - 1)
   const [fxMethod, setFxMethod] = useState<FxMethod>('historical')
@@ -43,7 +45,7 @@ export default function TaxPage() {
       setError('')
       setReport(null)
       try {
-        const data = await getTaxReport(year)
+        const data = await getTaxReport(year, undefined, active)
         if (!cancelled) {
           const found = extractCurrencies(data)
           setCurrencies(found)
@@ -62,7 +64,7 @@ export default function TaxPage() {
     }
     fetchCurrencies()
     return () => { cancelled = true }
-  }, [year, fxMethod])
+  }, [year, fxMethod, active])
 
   // Fetch historical report automatically
   useEffect(() => {
@@ -72,7 +74,7 @@ export default function TaxPage() {
       setLoading(true)
       setError('')
       try {
-        const data = await getTaxReport(year)
+        const data = await getTaxReport(year, undefined, active)
         if (!cancelled) setReport(data)
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
@@ -82,7 +84,7 @@ export default function TaxPage() {
     }
     fetchReport()
     return () => { cancelled = true }
-  }, [year, fxMethod])
+  }, [year, fxMethod, active])
 
   const allRatesFilled = currencies.length > 0 && currencies.every(c => {
     const v = parseFloat(rateInputs[c] ?? '')
@@ -95,14 +97,14 @@ export default function TaxPage() {
     setLoading(true)
     setError('')
     try {
-      const data = await getTaxReport(year, rates)
+      const data = await getTaxReport(year, rates, active)
       setReport(data)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
-  }, [year, currencies, rateInputs])
+  }, [year, currencies, rateInputs, active])
 
   const handleFxMethodChange = (v: FxMethod) => {
     setReport(null)

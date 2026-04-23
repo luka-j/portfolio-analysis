@@ -71,6 +71,7 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.CurrentPrice{},
 		&models.CorporateActionRecord{},
 		&models.CashDividendRecord{},
+		&models.ScenarioRecord{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("migrating database: %w", err)

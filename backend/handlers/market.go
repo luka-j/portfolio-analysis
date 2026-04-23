@@ -103,7 +103,8 @@ type SecurityChartPoint struct {
 
 // GetSecurityChart handles GET /api/v1/market/security-chart
 // Query params: symbol (required), from (required, YYYY-MM-DD), to (optional, YYYY-MM-DD, default today),
-// ma_days (int, default 30, range 2-365), currency (optional, omit or "Original" = native), accounting_model (optional).
+// ma_days (int, default 30, range 2-365), currency (optional), accounting_model (optional;
+// "original" or omitting currency keeps native prices).
 func (h *MarketHandler) GetSecurityChart(c *gin.Context) {
 	symbol := c.Query("symbol")
 	if symbol == "" {
@@ -158,13 +159,13 @@ func (h *MarketHandler) GetSecurityChart(c *gin.Context) {
 	}
 
 	// Apply FX conversion when a real display currency is requested.
-	// "Original" (or absent) means keep native prices.
+	// accounting_model=original (or an absent currency) means keep native prices.
 	currency := c.Query("currency")
 	acctModel, ok := parseAccountingModel(c)
 	if !ok {
 		return
 	}
-	if currency != "" && currency != "Original" && h.CurrencyGetter != nil {
+	if currency != "" && acctModel != models.AccountingModelOriginal && h.CurrencyGetter != nil {
 		nativeCcy, ccyErr := h.CurrencyGetter.GetCurrency(effectiveSym)
 		if ccyErr != nil {
 			log.Printf("Warning: could not determine currency for %s: %v", effectiveSym, ccyErr)

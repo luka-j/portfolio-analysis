@@ -21,6 +21,7 @@ import (
 
 // PortfolioHandler handles portfolio-related endpoints.
 type PortfolioHandler struct {
+	ScenarioMiddleware
 	Repo             *flexquery.Repository
 	PortfolioService *portfolio.Service
 	FXService        *fx.Service
@@ -227,10 +228,8 @@ func (h *PortfolioHandler) saveEtradeTransactions(userHash string, txns []models
 // GetValue handles GET /api/v1/portfolio/value
 func (h *PortfolioHandler) GetValue(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
-
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -293,10 +292,8 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 // GetHistory handles GET /api/v1/portfolio/history
 func (h *PortfolioHandler) GetHistory(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
-
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -336,10 +333,8 @@ func (h *PortfolioHandler) GetHistory(c *gin.Context) {
 // Supports ?limit=N&offset=M pagination (default: limit=200, offset=0).
 func (h *PortfolioHandler) GetTrades(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
-
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -364,8 +359,12 @@ func (h *PortfolioHandler) GetTrades(c *gin.Context) {
 	}
 
 	displayCurrency := c.DefaultQuery("currency", "CZK")
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
 
-	result, err := h.PortfolioService.GetTradesForSymbol(data, symbol, exchange, displayCurrency)
+	result, err := h.PortfolioService.GetTradesForSymbol(data, symbol, exchange, displayCurrency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -399,10 +398,8 @@ func (h *PortfolioHandler) GetTrades(c *gin.Context) {
 // plot a true return chart, uncontaminated by cash flows.
 func (h *PortfolioHandler) GetReturns(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
-
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -461,10 +458,8 @@ type SymbolPriceHistory struct {
 // Returns change % and average price for each portfolio position over the requested date range.
 func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 	userHash := c.GetString(middleware.UserHashKey)
-
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -619,7 +614,7 @@ func (h *PortfolioHandler) GetPriceHistory(c *gin.Context) {
 			}
 			avg := sum / float64(len(pts))
 			// Convert native avg price to display currency using spot rate.
-			if currency != "Original" && pos.nativeCurrency != "" && pos.nativeCurrency != currency {
+			if acctModel != models.AccountingModelOriginal && pos.nativeCurrency != "" && pos.nativeCurrency != currency {
 				converted, fxErr := h.FXService.ConvertSpot(avg, pos.nativeCurrency, currency, false)
 				if fxErr == nil {
 					avg = converted

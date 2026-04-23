@@ -95,13 +95,22 @@ type fundamentalsEntry struct {
 }
 
 // lookupFundamentals batch-queries asset_fundamentals for the given symbols and returns a symbol→entry map.
-func (s *Service) lookupFundamentals(symbols []string) map[string]fundamentalsEntry {
+// When userHash is non-empty, results are scoped to that user's rows (asset_fundamentals is
+// keyed on (user_id, symbol)). When empty, the query is unscoped and may return an arbitrary
+// user's row for a shared symbol — only pass empty userHash for contexts that don't have
+// access to the authenticated user, and treat the result as best-effort metadata.
+func (s *Service) lookupFundamentals(userHash string, symbols []string) map[string]fundamentalsEntry {
 	result := make(map[string]fundamentalsEntry, len(symbols))
 	if s.DB == nil || len(symbols) == 0 {
 		return result
 	}
 	var rows []models.AssetFundamental
-	if err := s.DB.Select("symbol, name, isin").Where("symbol IN ?", symbols).Find(&rows).Error; err != nil {
+	q := s.DB.Select("symbol, name, isin").Where("symbol IN ?", symbols)
+	if userHash != "" {
+		// Extract the real userHash from a possibly scenario-prefixed UserHash.
+		q = q.Where("user_id = (SELECT id FROM users WHERE token_hash = ?)", realUserHash(userHash))
+	}
+	if err := q.Find(&rows).Error; err != nil {
 		log.Printf("WARN: llm fundamentals lookup failed: %v", err)
 		return result
 	}
@@ -111,9 +120,29 @@ func (s *Service) lookupFundamentals(symbols []string) map[string]fundamentalsEn
 	return result
 }
 
+// realUserHash strips the "scenario:<id>:<ns>:" prefix, if present, from a synthetic
+// UserHash so DB queries resolve to the owning user. See handlers/helpers.go for the prefix shape.
+func realUserHash(h string) string {
+	const prefix = "scenario:"
+	if len(h) < len(prefix) || h[:len(prefix)] != prefix {
+		return h
+	}
+	// Find the 3rd colon; the real hash follows it.
+	colons := 0
+	for i := 0; i < len(h); i++ {
+		if h[i] == ':' {
+			colons++
+			if colons == 3 {
+				return h[i+1:]
+			}
+		}
+	}
+	return h
+}
+
 // lookupNames batch-queries asset_fundamentals for the given symbols and returns a symbol→name map.
-func (s *Service) lookupNames(symbols []string) map[string]string {
-	fd := s.lookupFundamentals(symbols)
+func (s *Service) lookupNames(userHash string, symbols []string) map[string]string {
+	fd := s.lookupFundamentals(userHash, symbols)
 	names := make(map[string]string, len(fd))
 	for sym, e := range fd {
 		if e.Name != "" {
@@ -141,7 +170,7 @@ func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, 
 			symbols = append(symbols, pos.Symbol)
 		}
 	}
-	fd := s.lookupFundamentals(symbols)
+	fd := s.lookupFundamentals(data.UserHash, symbols)
 
 	var items []PortfolioContextItem
 	for _, pos := range result.Positions {
@@ -215,6 +244,17 @@ func (s *Service) callGemini(ctx context.Context, model, callType string, conten
 		}
 	}
 	return strings.Join(parts, "\n"), nil
+}
+
+// GenerateSimple sends a single-turn prompt to the specified model and returns the text response.
+// Used for ad-hoc generation (e.g. scenario comparison) without tool use or structured output.
+func (s *Service) GenerateSimple(ctx context.Context, prompt, modelKey string) (string, error) {
+	if !s.isAvailable() {
+		return "", ErrNotConfigured
+	}
+	model := s.ResolveModel(modelKey)
+	cfg := &genai.GenerateContentConfig{}
+	return s.callGemini(ctx, model, "simple", genai.Text(prompt), cfg)
 }
 
 // GetMarketSummary generates a short market summary for the requested period.

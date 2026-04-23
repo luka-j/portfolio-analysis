@@ -9,6 +9,8 @@ import AnalysisPage from './pages/AnalysisPage'
 import BreakdownPage from './pages/BreakdownPage'
 import TaxPage from './pages/TaxPage'
 import LLMPage from './pages/LLMPage'
+import ScenarioEditPage from './pages/ScenarioEditPage'
+import { ScenarioProvider } from './context/ScenarioContext'
 
 /** Listens for 401 events dispatched by the api layer and redirects to /login. */
 function UnauthorizedListener() {
@@ -33,16 +35,19 @@ export default function App() {
   return (
     <>
       <UnauthorizedListener />
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<ProtectedRoute><LandingPage /></ProtectedRoute>} />
-        <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
-        <Route path="/analysis" element={<ProtectedRoute><AnalysisPage /></ProtectedRoute>} />
-        <Route path="/breakdown" element={<ProtectedRoute><BreakdownPage /></ProtectedRoute>} />
-        <Route path="/tax" element={<ProtectedRoute><TaxPage /></ProtectedRoute>} />
-        <Route path="/llm" element={<ProtectedRoute><LLMPage /></ProtectedRoute>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <ScenarioProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<ProtectedRoute><LandingPage /></ProtectedRoute>} />
+          <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
+          <Route path="/analysis" element={<ProtectedRoute><AnalysisPage /></ProtectedRoute>} />
+          <Route path="/breakdown" element={<ProtectedRoute><BreakdownPage /></ProtectedRoute>} />
+          <Route path="/tax" element={<ProtectedRoute><TaxPage /></ProtectedRoute>} />
+          <Route path="/llm" element={<ProtectedRoute><LLMPage /></ProtectedRoute>} />
+          <Route path="/scenario/edit" element={<ProtectedRoute><ScenarioEditPage /></ProtectedRoute>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ScenarioProvider>
     </>
   )
 }

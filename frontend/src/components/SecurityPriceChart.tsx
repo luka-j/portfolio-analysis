@@ -278,18 +278,23 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
 
   const from = period === 'custom' ? customFrom : periodToFrom(period)
 
+  // Translate the UI 'Original' sentinel into accounting_model=original for the backend.
+  const isOriginal = displayCurrency === 'Original'
+  const reqCurrency = isOriginal ? undefined : displayCurrency
+  const reqAcctModel = isOriginal ? 'original' : acctModel
+
   useEffect(() => {
     if (!from) return
     const controller = new AbortController()
     dispatch({ type: 'start' })
     const to = todayStr()
-    getSecurityChart(symbol, from, to, maDays, controller.signal, displayCurrency, acctModel)
+    getSecurityChart(symbol, from, to, maDays, controller.signal, reqCurrency, reqAcctModel)
       .then(res => dispatch({ type: 'success', data: res.data }))
       .catch(err => {
         if (err.name !== 'AbortError') dispatch({ type: 'error', message: err.message ?? 'Failed to load price data' })
       })
     return () => controller.abort()
-  }, [symbol, from, maDays, displayCurrency, acctModel])
+  }, [symbol, from, maDays, reqCurrency, reqAcctModel])
 
   function handleCustomClick() {
     if (period !== 'custom') {

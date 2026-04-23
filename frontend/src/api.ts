@@ -55,6 +55,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return resp.json();
 }
 
+function scenarioParam(id?: number | null): string {
+  // 0 means "Real portfolio" (no param); null/undefined also means Real.
+  return id != null && id > 0 ? `&scenario_id=${id}` : '';
+}
+
 // ---------- Types ----------
 
 export interface PositionValue {
@@ -270,6 +275,7 @@ export interface LLMChatRequest {
   currency: string;
   model?: 'flash' | 'pro';
   force_refresh?: boolean;
+  scenario_id?: number | null;
   // Freeform-only
   enabled_tools?: string[];
   history?: { role: 'user' | 'assistant'; content: string }[];
@@ -303,6 +309,68 @@ export interface LLMChatResponse {
   sections?: LLMResponseSection[];
 }
 
+// ---- Scenario types ----
+
+export type BaseMode = 'real' | 'empty';
+export type AdjustmentAction = 'sell_qty' | 'sell_pct' | 'sell_all' | 'buy';
+export type BasketMode = 'quantity' | 'weight';
+export type RebalanceMode = 'none' | 'monthly' | 'quarterly' | 'annually' | 'threshold';
+export type ContributionCadence = 'none' | 'monthly' | 'quarterly' | 'annually';
+
+export interface Adjustment {
+  symbol: string;
+  action: AdjustmentAction;
+  value: number;
+  date?: string;       // YYYY-MM-DD
+  currency?: string;
+}
+
+export interface BasketItem {
+  symbol: string;
+  quantity?: number;
+  weight?: number;
+  cost_basis?: number;
+  currency: string;
+}
+
+export interface Basket {
+  mode: BasketMode;
+  items: BasketItem[];
+  notional_value?: number;
+  notional_currency?: string;
+  acquired_at?: string;  // YYYY-MM-DD
+}
+
+export interface BacktestConfig {
+  start_date: string;  // YYYY-MM-DD
+  initial_amount: number;
+  currency: string;
+  contribution: ContributionCadence;
+  contribution_amount: number;
+  rebalance: RebalanceMode;
+  rebalance_threshold: number;
+}
+
+export interface ScenarioSpec {
+  base: BaseMode;
+  base_as_of?: string;      // YYYY-MM-DD
+  adjustments?: Adjustment[];
+  basket?: Basket;
+  backtest?: BacktestConfig;
+}
+
+export interface ScenarioSummary {
+  id: number;
+  name: string;
+  pinned: boolean;
+  created_at: string;
+  last_used_at: string;
+}
+
+export interface ScenarioDetail extends ScenarioSummary {
+  spec: ScenarioSpec;
+}
+
 // ---------- API Calls ----------
 
 export async function uploadFlexQuery(file: File): Promise<UploadResponse> {
@@ -332,8 +400,10 @@ export async function uploadEtradeSales(file: File): Promise<EtradeUploadRespons
   });
 }
 
-export async function getPortfolioValue(currency = 'USD', accountingModel = 'historical', cachedOnly = false): Promise<PortfolioValueResponse> {
-  const query = `currencies=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
+export async function getPortfolioValue(
+  currency = 'USD', accountingModel = 'historical', cachedOnly = false, scenarioId?: number | null
+): Promise<PortfolioValueResponse> {
+  const query = `currencies=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
   return request<PortfolioValueResponse>(`/portfolio/value?${query}`);
 }
 
@@ -342,16 +412,16 @@ export async function getPortfolioValue(currency = 'USD', accountingModel = 'his
 // The primary currency's scalars (price/value/cost_basis) are still populated,
 // while per-currency maps are filled for every requested currency.
 export async function getPortfolioValueMulti(
-  currencies: string[], accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal
+  currencies: string[], accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
 ): Promise<PortfolioValueResponse> {
-  const query = `currencies=${currencies.map(encodeURIComponent).join(',')}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
+  const query = `currencies=${currencies.map(encodeURIComponent).join(',')}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
   return request<PortfolioValueResponse>(`/portfolio/value?${query}`, { signal });
 }
 
 export async function getPortfolioHistory(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
 ): Promise<PortfolioHistoryResponse> {
-  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`;
+  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
   return request<PortfolioHistoryResponse>(
     `/portfolio/history?${query}`,
     { signal }
@@ -368,40 +438,41 @@ export async function getMarketHistory(
 }
 
 export async function getPortfolioStats(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal
+  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
 ): Promise<StatsResponse> {
   return request<StatsResponse>(
-    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}`,
+    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`,
     { signal }
   );
 }
 
 export async function comparePortfolio(
   symbols: string, currency: string, from: string, to: string,
-  accountingModel = 'historical', riskFreeRate = 0.05
+  accountingModel = 'historical', riskFreeRate = 0.05, scenarioId?: number | null
 ): Promise<CompareResponse> {
   return request<CompareResponse>(
-    `/portfolio/compare?symbols=${encodeURIComponent(symbols)}&currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}`
+    `/portfolio/compare?symbols=${encodeURIComponent(symbols)}&currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${scenarioParam(scenarioId)}`
   );
 }
 
 export async function getStandaloneMetrics(
   symbols: string, currency: string, from: string, to: string,
-  accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false
+  accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false, scenarioId?: number | null
 ): Promise<StandaloneResponse> {
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : ''
   const cachedParam = cachedOnly ? '&cachedOnly=true' : ''
   return request<StandaloneResponse>(
-    `/portfolio/standalone?currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${symParam}${cachedParam}`
+    `/portfolio/standalone?currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${symParam}${cachedParam}${scenarioParam(scenarioId)}`
   );
 }
 
 export async function getPortfolioTrades(
-  symbol: string, currency = 'CZK', exchange = '', limit = 200, offset = 0
+  symbol: string, currency = 'CZK', exchange = '', limit = 200, offset = 0,
+  accountingModel = 'historical'
 ): Promise<TradesResponse & { total: number; limit: number; offset: number }> {
   const exchangeParam = exchange ? `&exchange=${encodeURIComponent(exchange)}` : '';
   return request(
-    `/portfolio/trades?symbol=${encodeURIComponent(symbol)}&currency=${currency}${exchangeParam}&limit=${limit}&offset=${offset}`
+    `/portfolio/trades?symbol=${encodeURIComponent(symbol)}&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${exchangeParam}&limit=${limit}&offset=${offset}`
   );
 }
 
@@ -409,9 +480,9 @@ export async function getPortfolioTrades(
 // This is the correct data source for the TWR / MWR chart — each value is the chain-linked
 // return up to that date, with cash flows properly neutralised.
 export async function getPortfolioReturns(
-  from: string, to: string, currency: string, accountingModel = 'historical', returnType = 'twr', cachedOnly = false, signal?: AbortSignal
+  from: string, to: string, currency: string, accountingModel = 'historical', returnType = 'twr', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
 ): Promise<PortfolioHistoryResponse> {
-  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&type=${returnType}${cachedOnly ? '&cachedOnly=true' : ''}`;
+  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&type=${returnType}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
   return request<PortfolioHistoryResponse>(
     `/portfolio/history/returns?${query}`,
     { signal }
@@ -456,8 +527,11 @@ export const updateSymbolMapping = (symbol: string, yahooSymbol: string, exchang
   });
 };
 
-export async function getTaxReport(year: number, exchangeRates?: Record<string, number>): Promise<TaxReportResponse> {
-  return request<TaxReportResponse>(`/tax/report`, {
+export async function getTaxReport(
+  year: number, exchangeRates?: Record<string, number>, scenarioId?: number | null
+): Promise<TaxReportResponse> {
+  const sid = scenarioParam(scenarioId)
+  return request<TaxReportResponse>(`/tax/report${sid ? `?${sid.slice(1)}` : ''}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ year, exchange_rates: exchangeRates }),
@@ -483,8 +557,10 @@ export interface BreakdownResponse {
   sections: BreakdownSection[];
 }
 
-export async function getPortfolioBreakdown(currency = 'USD', cachedOnly = false): Promise<BreakdownResponse> {
-  return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}${cachedOnly ? '&cachedOnly=true' : ''}`);
+export async function getPortfolioBreakdown(
+  currency = 'USD', cachedOnly = false, scenarioId?: number | null
+): Promise<BreakdownResponse> {
+  return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`);
 }
 
 // ---- Portfolio Price History ----
@@ -498,10 +574,10 @@ export interface SymbolPriceHistory {
 }
 
 export async function getPortfolioPriceHistory(
-  from: string, to: string, currency: string, accountingModel = 'historical'
+  from: string, to: string, currency: string, accountingModel = 'historical', scenarioId?: number | null
 ): Promise<{ items: SymbolPriceHistory[] }> {
   return request<{ items: SymbolPriceHistory[] }>(
-    `/portfolio/price-history?from=${from}&to=${to}&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}`
+    `/portfolio/price-history?from=${from}&to=${to}&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${scenarioParam(scenarioId)}`
   );
 }
 
@@ -509,9 +585,9 @@ export async function getLLMAvailable(): Promise<{ available: boolean; canned_mo
   return request<{ available: boolean; canned_model?: 'flash' | 'pro' }>('/llm/available');
 }
 
-export async function getLLMSummary(period = '1d', forceRefresh = false): Promise<LLMSummaryResponse> {
+export async function getLLMSummary(period = '1d', forceRefresh = false, scenarioId?: number | null): Promise<LLMSummaryResponse> {
   const extra = forceRefresh ? '&force_refresh=true' : '';
-  return request<LLMSummaryResponse>(`/llm/summary?period=${period}${extra}`);
+  return request<LLMSummaryResponse>(`/llm/summary?period=${period}${extra}${scenarioParam(scenarioId)}`);
 }
 
 export async function postLLMChat(
@@ -525,7 +601,10 @@ export async function postLLMChat(
   };
   if (token) headers['X-Auth-Token'] = token;
 
-  const resp = await fetch(`${API_BASE}/llm/chat`, {
+  // scenario_id rides the URL so the backend ScenarioMiddleware (c.Query) picks it up for both
+  // GET and POST handlers without needing body parsing.
+  const sid = req.scenario_id != null && req.scenario_id > 0 ? `?scenario_id=${req.scenario_id}` : '';
+  const resp = await fetch(`${API_BASE}/llm/chat${sid}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(req),
@@ -562,18 +641,18 @@ export async function postLLMChat(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    
+
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split('\n\n');
     buffer = parts.pop() || '';
-    
+
     for (const part of parts) {
       if (!part.trim()) continue;
-      
+
       const lines = part.split('\n');
       let eventType = 'message';
       let dataStr = '';
-      
+
       for (const line of lines) {
         if (line.startsWith('event:')) {
           eventType = line.substring(6).trim();
@@ -581,7 +660,7 @@ export async function postLLMChat(
           dataStr += line.substring(5).trim();
         }
       }
-      
+
       if (dataStr) {
         try {
           const data = JSON.parse(dataStr);
@@ -606,7 +685,7 @@ export async function postLLMChat(
       }
     }
   }
-  
+
   return fullResponse;
 }
 
@@ -648,15 +727,14 @@ export async function getSecurityChart(
   to: string,      // YYYY-MM-DD, today
   maDays: number,
   signal?: AbortSignal,
-  currency?: string,       // omit or 'Original' → native currency (no conversion)
-  accountingModel?: string,
+  currency?: string,       // omit → native currency (no conversion)
+  accountingModel?: string, // pass 'original' to keep native prices when currency is set
 ): Promise<SecurityChartResponse> {
-  // Only send currency when a real conversion is wanted; omitting it (or sending
-  // 'Original') tells the backend to return prices in the security's native currency.
-  const currencyParam =
-    currency && currency !== 'Original'
-      ? `&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel ?? 'historical'}`
-      : ''
+  // Send accounting_model alongside currency. accounting_model=original tells the
+  // backend to skip FX conversion regardless of the currency value.
+  const currencyParam = currency
+    ? `&currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel ?? 'historical'}`
+    : ''
   return request<SecurityChartResponse>(
     `/market/security-chart?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&ma_days=${maDays}${currencyParam}`,
     { signal },
@@ -687,11 +765,11 @@ export interface DrawdownResponse {
 
 export async function getDrawdownSeries(
   from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false,
-  symbols?: string,
+  symbols?: string, scenarioId?: number | null,
 ): Promise<DrawdownResponse> {
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
   return request<DrawdownResponse>(
-    `/portfolio/drawdown?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${symParam}`
+    `/portfolio/drawdown?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${symParam}${scenarioParam(scenarioId)}`
   );
 }
 
@@ -724,11 +802,12 @@ export async function getRollingMetric(
   riskFreeRate = 0.05,
   benchmark?: string,
   symbols?: string,
+  scenarioId?: number | null,
 ): Promise<RollingResponse> {
   const benchParam = benchmark ? `&benchmark=${encodeURIComponent(benchmark)}` : '';
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
   return request<RollingResponse>(
-    `/portfolio/rolling?metric=${metric}&window=${window}&from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${benchParam}${symParam}`
+    `/portfolio/rolling?metric=${metric}&window=${window}&from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${benchParam}${symParam}${scenarioParam(scenarioId)}`
   );
 }
 
@@ -749,10 +828,10 @@ export interface AttributionResponse {
 }
 
 export async function getAttribution(
-  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05
+  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05, scenarioId?: number | null
 ): Promise<AttributionResponse> {
   return request<AttributionResponse>(
-    `/portfolio/attribution?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}`
+    `/portfolio/attribution?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${scenarioParam(scenarioId)}`
   );
 }
 
@@ -766,10 +845,10 @@ export interface CorrelationMatrixResponse {
 }
 
 export async function getCorrelations(
-  from: string, to: string, currency: string, accountingModel = 'historical'
+  from: string, to: string, currency: string, accountingModel = 'historical', scenarioId?: number | null
 ): Promise<CorrelationMatrixResponse> {
   return request<CorrelationMatrixResponse>(
-    `/portfolio/correlations?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}`
+    `/portfolio/correlations?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${scenarioParam(scenarioId)}`
   );
 }
 
@@ -794,11 +873,59 @@ export interface CumulativeResponse {
 
 export async function getCumulativeSeries(
   from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false,
-  symbols?: string,
+  symbols?: string, scenarioId?: number | null,
 ): Promise<CumulativeResponse> {
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
   const cachedParam = cachedOnly ? '&cachedOnly=true' : '';
   return request<CumulativeResponse>(
-    `/portfolio/cumulative?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedParam}${symParam}`
+    `/portfolio/cumulative?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedParam}${symParam}${scenarioParam(scenarioId)}`
   );
+}
+
+// ---- Scenarios ----
+
+export async function listScenarios(): Promise<ScenarioSummary[]> {
+  return request<ScenarioSummary[]>('/scenarios');
+}
+
+export async function getScenario(id: number): Promise<ScenarioDetail> {
+  return request<ScenarioDetail>(`/scenarios/${id}`);
+}
+
+export async function createScenario(spec: ScenarioSpec, name?: string, pinned = false): Promise<ScenarioDetail> {
+  return request<ScenarioDetail>('/scenarios', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spec, name: name ?? '', pinned }),
+  });
+}
+
+export async function updateScenario(
+  id: number,
+  patch: { name?: string; pinned?: boolean; spec?: ScenarioSpec }
+): Promise<ScenarioDetail> {
+  return request<ScenarioDetail>(`/scenarios/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteScenario(id: number): Promise<void> {
+  await request<void>(`/scenarios/${id}`, { method: 'DELETE' });
+}
+
+export interface CompareScenariosLLMResponse {
+  response: string;
+  cached: boolean;
+}
+
+export async function compareScenariosLLM(
+  aId: number, bId: number, question?: string, currency = 'USD'
+): Promise<CompareScenariosLLMResponse> {
+  return request<CompareScenariosLLMResponse>('/scenarios/compare-llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ a_id: aId, b_id: bId, question, currency }),
+  });
 }

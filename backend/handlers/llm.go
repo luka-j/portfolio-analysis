@@ -26,6 +26,7 @@ import (
 
 // LLMHandler manages LLM text generation and AI analysis endpoints.
 type LLMHandler struct {
+	ScenarioMiddleware
 	Repo             *flexquery.Repository
 	DB               *gorm.DB
 	LLM              *llm.Service
@@ -72,10 +73,8 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		log.Printf("ERROR: GetSummary LoadSaved failed [user=%s]: %v", userHash[:8], err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "user data not found"})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -207,10 +206,8 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	}
 	modelKey := h.LLM.ResolveModel(effectiveKey)
 
-	data, err := h.Repo.LoadSaved(userHash)
-	if err != nil {
-		log.Printf("ERROR: Chat LoadSaved failed [user=%s]: %v", userHash[:8], err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "user data not found"})
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
 		return
 	}
 
@@ -774,7 +771,7 @@ func (h *LLMHandler) toolGetRecentTransactions(_ context.Context, data *models.F
 		limitF = 50 // cap
 	}
 
-	tradesResp, err := h.PortfolioService.GetTradesForSymbol(data, sym, "", req.Currency)
+	tradesResp, err := h.PortfolioService.GetTradesForSymbol(data, sym, "", req.Currency, models.AccountingModelHistorical)
 	if err != nil {
 		return nil, fmt.Errorf("fetching trades: %w", err)
 	}
