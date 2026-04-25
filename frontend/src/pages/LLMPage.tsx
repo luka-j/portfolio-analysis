@@ -35,6 +35,8 @@ const loadingLabelMap: Record<string, string> = {
   add_or_trim: 'Evaluating capital allocation…',
   long_market_summary: 'Pulling market data…',
   ticker_analysis: 'Researching ticker…',
+  risk_metrics_comparison: 'Comparing portfolio scenarios…',
+  holdings_comparison: 'Analyzing composition differences…',
 }
 
 const examplePrompts = [
@@ -67,7 +69,8 @@ export default function LLMPage() {
     'get_fx_impact',
     'get_historical_performance_series',
     'get_open_positions_with_cost_basis',
-    'get_tax_impact'
+    'get_tax_impact',
+    'simulate_scenario'
   ].includes(id))
   const [enabledTools, setEnabledTools] = usePersistentState<string[]>('llm_enabled_tools', defaultTools)
   const [toolsModalOpen, setToolsModalOpen] = useState(false)

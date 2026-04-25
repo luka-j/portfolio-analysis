@@ -27,64 +27,81 @@ type ScenarioMiddleware struct {
 	ScenarioFX   *fx.Service
 }
 
-// loadPortfolioData loads FlexQueryData for the authenticated user.
-// If a scenario_id query parameter is present, the corresponding ScenarioSpec is
-// applied via scenario.Build and the synthesised FlexQueryData is returned.
+// PortfolioContext holds data and metadata about the active portfolio/scenario.
+type PortfolioContext struct {
+	Data            *models.FlexQueryData
+	Kind            string // "real" | "scenario"
+	ScenarioID      uint
+	ScenarioName    string
+	ScenarioSummary string
+}
+
+// loadPortfolioContext loads FlexQueryData for the authenticated user and scenario metadata.
 // The second return value is false when the handler should abort (error already written).
-func (sm *ScenarioMiddleware) loadPortfolioData(
+func (sm *ScenarioMiddleware) loadPortfolioContext(
 	c *gin.Context,
 	flexRepo *flexquery.Repository,
 	userHash string,
-) (*models.FlexQueryData, bool) {
+) (PortfolioContext, bool) {
+	pc := PortfolioContext{Kind: "real"}
 	realData, err := flexRepo.LoadSaved(userHash)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return nil, false
+		return pc, false
 	}
 
 	scenarioIDStr := c.Query("scenario_id")
-	if scenarioIDStr == "" {
-		return realData, true
+	if scenarioIDStr == "" || scenarioIDStr == "0" {
+		pc.Data = realData
+		return pc, true
 	}
 
 	scenarioID, err := strconv.ParseUint(scenarioIDStr, 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scenario_id"})
-		return nil, false
+		return pc, false
 	}
+	pc.ScenarioID = uint(scenarioID)
 
 	if sm.ScenarioRepo == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "scenarios not available"})
-		return nil, false
+		return pc, false
 	}
 
 	// Resolve user ID from the token hash.
 	var user models.User
 	if err := flexRepo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
-		return nil, false
+		return pc, false
 	}
 
 	row, err := sm.ScenarioRepo.Get(user.ID, uint(scenarioID))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "loading scenario: " + err.Error()})
-		return nil, false
+		return pc, false
 	}
 	if row == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scenario not found"})
-		return nil, false
+		return pc, false
+	}
+	
+	pc.Kind = "scenario"
+	pc.ScenarioName = row.Name
+	if pc.ScenarioName == "" {
+		pc.ScenarioName = fmt.Sprintf("Scenario %d", scenarioID)
 	}
 
 	spec, err := scenariosvc.ParseSpec(row)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "parsing scenario: " + err.Error()})
-		return nil, false
+		return pc, false
 	}
+	pc.ScenarioSummary = scenariosvc.RenderSummary(spec)
 
 	syntheticData, err := scenariosvc.Build(spec, realData, sm.ScenarioMkt, sm.ScenarioFX)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "building scenario: " + err.Error()})
-		return nil, false
+		return pc, false
 	}
 
 	// Scenario-specific hash prevents singleflight cache collisions with the real portfolio.
@@ -94,7 +111,18 @@ func (sm *ScenarioMiddleware) loadPortfolioData(
 
 	go sm.ScenarioRepo.TouchLastUsed(user.ID, uint(scenarioID))
 
-	return syntheticData, true
+	pc.Data = syntheticData
+	return pc, true
+}
+
+// loadPortfolioData backward-compatible wrapper for loadPortfolioContext.
+func (sm *ScenarioMiddleware) loadPortfolioData(
+	c *gin.Context,
+	flexRepo *flexquery.Repository,
+	userHash string,
+) (*models.FlexQueryData, bool) {
+	pc, ok := sm.loadPortfolioContext(c, flexRepo, userHash)
+	return pc.Data, ok
 }
 
 // parseDateRange extracts and validates from/to query parameters.

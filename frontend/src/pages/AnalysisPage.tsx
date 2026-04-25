@@ -11,6 +11,7 @@ import Spinner from '../components/Spinner'
 import DateRangePicker from '../components/DateRangePicker'
 import ErrorAlert from '../components/ErrorAlert'
 import CorrelationHeatmap from '../components/CorrelationHeatmap'
+import CompareScenariosChip from '../components/CompareScenariosChip'
 import {
   getPortfolioStats, getPortfolioReturns, comparePortfolio, getStandaloneMetrics,
   getDrawdownSeries, getRollingMetric, getAttribution, getCorrelations, getCumulativeSeries,
@@ -101,6 +102,7 @@ export default function AnalysisPage() {
   const chartRef = useRef<HTMLDivElement>(null)
 
   const { active, compare, scenarios } = useScenario()
+  const activeLabel = active === null ? 'Real' : (scenarios.find(s => s.id === active)?.name ?? `Scenario ${active}`)
   const compareLabel = compare === 0 ? 'Real'
     : compare !== null ? (scenarios.find(s => s.id === compare)?.name ?? `Scenario ${compare}`)
     : null
@@ -140,6 +142,12 @@ export default function AnalysisPage() {
   const [correlationData, setCorrelationData]       = useState<{ symbols: string[]; matrix: number[][] }>({ symbols: [], matrix: [] })
   const [holdingsLoading, setHoldingsLoading]       = useState(false)
   const [holdingsError, setHoldingsError]           = useState('')
+
+  // Scenario benchmarks (chart overlays from specific scenarios)
+  const [scenarioBenchmarks, setScenarioBenchmarks] = useState<Array<{id: number; name: string; series: DailyValue[]}>>([])
+  const [scenarioBenchmarkLoading, setScenarioBenchmarkLoading] = useState(false)
+  const [scenarioPickerOpen, setScenarioPickerOpen] = useState(false)
+  const scenarioPickerRef = useRef<HTMLDivElement>(null)
 
   // Risk-free rate
   const [riskFreeRate, setRiskFreeRate]           = usePersistentState('analysis_riskFreeRate', 0.025)
@@ -452,6 +460,48 @@ export default function AnalysisPage() {
     loadStandalone(remaining.join(','))
   }
 
+  // ── Scenario benchmark chart overlays ────────────────────────────────────────
+  const addScenarioBenchmark = async (id: number, name: string) => {
+    if (scenarioBenchmarks.find(sb => sb.id === id)) return
+    setScenarioBenchmarkLoading(true)
+    try {
+      const hist = await getPortfolioReturns(effectiveFrom, to, currency, acctModel, 'twr', false, undefined, id)
+      setScenarioBenchmarks(prev => [...prev, { id, name, series: hist.data ?? [] }])
+    } catch { /* ignore */ }
+    finally { setScenarioBenchmarkLoading(false) }
+  }
+
+  const removeScenarioBenchmark = (id: number) => {
+    setScenarioBenchmarks(prev => prev.filter(sb => sb.id !== id))
+  }
+
+  // Refresh scenario benchmark series when date/currency/acctModel changes
+  useEffect(() => {
+    if (scenarioBenchmarks.length === 0) return
+    const refresh = async () => {
+      const updated = await Promise.all(scenarioBenchmarks.map(async sb => {
+        try {
+          const hist = await getPortfolioReturns(effectiveFrom, to, currency, acctModel, 'twr', false, undefined, sb.id)
+          return { ...sb, series: hist.data ?? [] }
+        } catch { return sb }
+      }))
+      setScenarioBenchmarks(updated)
+    }
+    refresh()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveFrom, to, currency, acctModel])
+
+  // Close scenario picker on outside click
+  useEffect(() => {
+    if (!scenarioPickerOpen) return
+    const handler = (e: MouseEvent) => {
+      if (scenarioPickerRef.current && !scenarioPickerRef.current.contains(e.target as Node))
+        setScenarioPickerOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [scenarioPickerOpen])
+
   const handleStatCardClick = (mode: ChartMode) => {
     setChartMode(mode)
     setTimeout(() => chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
@@ -477,6 +527,12 @@ export default function AnalysisPage() {
         dateMap[d.date]['Compare'] = d.value
       })
     }
+    scenarioBenchmarks.forEach(sb => {
+      sb.series.forEach(pt => {
+        if (!dateMap[pt.date]) dateMap[pt.date] = {}
+        dateMap[pt.date][`[S] ${sb.name}`] = pt.value
+      })
+    })
     return Object.entries(dateMap)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, values]) => ({ date, ...values }))
@@ -638,10 +694,17 @@ export default function AnalysisPage() {
         )}
         <div className="flex items-center justify-center gap-3 mb-8">
           <h2 className="text-xl font-semibold text-slate-100">Risk &amp; Return Metrics</h2>
+          <CompareScenariosChip onCompare={() => {}} />
           {stats && portfolioStandalone && (
             <div className="relative group">
               <button
-                onClick={() => navigate('/llm', { state: { initialPrompt: { promptType: 'risk_metrics', displayMessage: `Analyze my portfolio's risk & return metrics for ${periodLabel}`, extraParams: { currency, from, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } } } })}
+                onClick={() => {
+                  const isComparing = compare !== null && compareStats !== null
+                  navigate('/llm', { state: { initialPrompt: isComparing
+                    ? { promptType: 'risk_metrics_comparison', displayMessage: `Compare risk & return: ${activeLabel} vs ${compareLabel}`, extraParams: { scenario_id: active ?? 0, scenario_id_a: active ?? 0, scenario_id_b: compare, currency, from, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } }
+                    : { promptType: 'risk_metrics', displayMessage: `Analyze my portfolio's risk & return metrics for ${periodLabel}`, extraParams: { currency, from, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } }
+                  }})
+                }}
                 className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -650,165 +713,225 @@ export default function AnalysisPage() {
                   <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
                 </svg>
               </button>
-              <HoverTooltip direction="down" className="w-max whitespace-nowrap">AI analysis of risk &amp; return metrics</HoverTooltip>
+              <HoverTooltip direction="down" className="w-max whitespace-nowrap">
+                {compare !== null && compareStats !== null ? `AI comparison: ${activeLabel} vs ${compareLabel}` : 'AI analysis of risk & return metrics'}
+              </HoverTooltip>
             </div>
           )}
         </div>
 
-        {compareDataLoading && compare !== null && (
-          <div className="absolute top-0 right-8 flex items-center gap-1.5 text-xs text-amber-400/70">
-            <div className="w-3 h-3 rounded-full border border-amber-400/30 border-t-amber-400 animate-spin" />
-            Loading compare…
-          </div>
-        )}
       {loading ? (
           <Spinner label="Compiling statistics…" className="py-10" />
         ) : stats ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {(() => {
-              const entries = Object.entries(stats.statistics)
-              const ordered = [
-                ...entries.filter(([k]) => k === 'twr'),
-                ...entries.filter(([k]) => k === 'mwr'),
-                ...entries.filter(([k]) => k !== 'twr' && k !== 'mwr'),
-              ]
-              return ordered.map(([key, val]) => {
-                const numVal = typeof val === 'number' ? val : null
-                if (numVal === null) return null
-                const tooltip = STAT_TOOLTIPS[key.toLowerCase()]
-                if (key === 'twr') {
-                  const compareVal = compareStats ? compareStats.statistics['twr'] : null
-                  const delta = compareVal !== null && compareVal !== undefined ? numVal - compareVal : null
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => handleStatCardClick('twr')}
-                      className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all"
-                    >
-                      {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                      <p className="text-sm font-medium text-slate-500 mb-2 uppercase">TWR</p>
-                      <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%
-                      </p>
-                      {delta !== null && (
-                        <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}
-                        </p>
+          compare !== null && (compareStats !== null || compareDataLoading) ? (
+            /* ── Side-by-side comparison layout ── */
+            <div className="flex flex-col lg:flex-row gap-6">
+              {/* Active scenario column */}
+              <div className="flex-1 min-w-0">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">{activeLabel}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {(() => {
+                    const twrVal = typeof stats.statistics['twr'] === 'number' ? stats.statistics['twr'] as number : null
+                    const mwrVal = typeof stats.statistics['mwr'] === 'number' ? stats.statistics['mwr'] as number : null
+                    return (<>
+                      {twrVal !== null && (
+                        <button onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                          <HoverTooltip className="w-56">{STAT_TOOLTIPS.twr}</HoverTooltip>
+                          <p className="text-xs font-medium text-slate-500 mb-1 uppercase">TWR</p>
+                          <p className={`text-xl font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
+                          <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                        </button>
                       )}
-                      <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                    </button>
-                  )
-                }
-                if (key === 'mwr') {
-                  const compareVal = compareStats ? compareStats.statistics['mwr'] : null
-                  const delta = compareVal !== null && compareVal !== undefined ? numVal - compareVal : null
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => handleStatCardClick('mwr')}
-                      className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all"
-                    >
-                      {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                      <p className="text-sm font-medium text-slate-500 mb-2 uppercase">MWR</p>
-                      <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%
-                      </p>
-                      {delta !== null && (
-                        <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}
-                        </p>
+                      {mwrVal !== null && (
+                        <button onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                          <HoverTooltip className="w-56">{STAT_TOOLTIPS.mwr}</HoverTooltip>
+                          <p className="text-xs font-medium text-slate-500 mb-1 uppercase">MWR</p>
+                          <p className={`text-xl font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
+                          <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                        </button>
                       )}
-                      <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                    </button>
-                  )
-                }
-                return (
-                  <div key={key} className={`relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
-                    {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                    <p className="text-sm font-medium text-slate-500 mb-2 capitalize">{key.replace(/_/g, ' ')}</p>
-                    <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%
-                    </p>
-                  </div>
-                )
-              })
-            })()}
-
-            {standaloneLoading && !portfolioStandalone && (
-              <div className="col-span-2 md:col-span-4 flex justify-center py-4">
-                <Spinner label="Computing risk metrics…" />
-              </div>
-            )}
-
-            {portfolioStandalone && (
-              <>
-                {/* Sharpe — clickable, links to rolling_sharpe chart */}
-                <button
-                  onClick={() => handleStatCardClick('rolling_sharpe')}
-                  className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all"
-                >
-                  <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
-                  <p className="text-sm font-medium text-slate-500 mb-2">Sharpe Ratio</p>
-                  <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {portfolioStandalone.sharpe_ratio.toFixed(3)}
-                  </p>
-                  {compareStandalone !== null && (
-                    <p className={`text-xs tabular-nums mt-1 ${portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? '+' : ''}{(portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio).toFixed(3)} vs {compareLabel}
-                    </p>
+                    </>)
+                  })()}
+                  {standaloneLoading && !portfolioStandalone && (
+                    <div className="col-span-2 flex justify-center py-2"><Spinner label="Computing…" /></div>
                   )}
-                  <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                </button>
-
-                <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
-                  <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
-                  <p className="text-sm font-medium text-slate-500 mb-2">VAMI</p>
-                  <p className="text-2xl font-semibold tabular-nums text-slate-100">
-                    {portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-                  </p>
+                  {portfolioStandalone && (<>
+                    <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
+                      <p className="text-xs font-medium text-slate-500 mb-1">Sharpe</p>
+                      <p className={`text-xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
+                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                    </button>
+                    <div className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-help">
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
+                      <p className="text-xs font-medium text-slate-500 mb-1">VAMI</p>
+                      <p className="text-xl font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
+                    </div>
+                    <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
+                      <p className="text-xs font-medium text-slate-500 mb-1">Volatility</p>
+                      <p className="text-xl font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
+                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                    </button>
+                    <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
+                      <p className="text-xs font-medium text-slate-500 mb-1">Sortino</p>
+                      <p className={`text-xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
+                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                    </button>
+                    <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
+                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
+                      <p className="text-xs font-medium text-slate-500 mb-1">Max DD</p>
+                      <p className="text-xl font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
+                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                    </button>
+                  </>)}
                 </div>
+              </div>
 
-                {/* Volatility — clickable, links to rolling_volatility chart */}
-                <button
-                  onClick={() => handleStatCardClick('rolling_volatility')}
-                  className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all"
-                >
-                  <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
-                  <p className="text-sm font-medium text-slate-500 mb-2">Volatility</p>
-                  <p className="text-2xl font-semibold tabular-nums text-slate-400">
-                    {(portfolioStandalone.volatility * 100).toFixed(2)}%
-                  </p>
-                  <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                </button>
+              {/* Divider */}
+              <div className="hidden lg:block w-px bg-border-dim/30 self-stretch" />
+              <div className="block lg:hidden h-px bg-border-dim/30 w-full" />
 
-                {/* Sortino — clickable, links to rolling_sortino chart */}
-                <button
-                  onClick={() => handleStatCardClick('rolling_sortino')}
-                  className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all"
-                >
-                  <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
-                  <p className="text-sm font-medium text-slate-500 mb-2">Sortino Ratio</p>
-                  <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {portfolioStandalone.sortino_ratio.toFixed(3)}
-                  </p>
-                  <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                </button>
-
-                {/* Max Drawdown — clickable, links to drawdown chart */}
-                <button
-                  onClick={() => handleStatCardClick('drawdown')}
-                  className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all"
-                >
-                  <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
-                  <p className="text-sm font-medium text-slate-500 mb-2">Max Drawdown</p>
-                  <p className="text-2xl font-semibold tabular-nums text-rose-400">
-                    -{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%
-                  </p>
-                  <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                </button>
-              </>
-            )}
-          </div>
+              {/* Compare scenario column */}
+              <div className="flex-1 min-w-0">
+                <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-[0.2em] mb-4 text-center">{compareLabel}</p>
+                {compareDataLoading ? (
+                  <div className="flex justify-center py-10"><Spinner label="Loading…" /></div>
+                ) : compareStats ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    {(() => {
+                      const twrVal = typeof compareStats.statistics['twr'] === 'number' ? compareStats.statistics['twr'] as number : null
+                      const mwrVal = typeof compareStats.statistics['mwr'] === 'number' ? compareStats.statistics['mwr'] as number : null
+                      return (<>
+                        {twrVal !== null && (
+                          <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
+                            <p className="text-xs font-medium text-slate-500 mb-1 uppercase">TWR</p>
+                            <p className={`text-xl font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
+                          </div>
+                        )}
+                        {mwrVal !== null && (
+                          <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
+                            <p className="text-xs font-medium text-slate-500 mb-1 uppercase">MWR</p>
+                            <p className={`text-xl font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
+                          </div>
+                        )}
+                      </>)
+                    })()}
+                    {compareStandalone && (<>
+                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Sharpe</p>
+                        <p className={`text-xl font-semibold tabular-nums ${compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sharpe_ratio.toFixed(3)}</p>
+                      </div>
+                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
+                        <p className="text-xs font-medium text-slate-500 mb-1">VAMI</p>
+                        <p className="text-xl font-semibold tabular-nums text-slate-100">{compareStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
+                      </div>
+                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Volatility</p>
+                        <p className="text-xl font-semibold tabular-nums text-slate-400">{(compareStandalone.volatility * 100).toFixed(2)}%</p>
+                      </div>
+                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Sortino</p>
+                        <p className={`text-xl font-semibold tabular-nums ${compareStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sortino_ratio.toFixed(3)}</p>
+                      </div>
+                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
+                        <p className="text-xs font-medium text-slate-500 mb-1">Max DD</p>
+                        <p className="text-xl font-semibold tabular-nums text-rose-400">-{(compareStandalone.max_drawdown * 100).toFixed(2)}%</p>
+                      </div>
+                    </>)}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            /* ── Original single-column grid ── */
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              {(() => {
+                const entries = Object.entries(stats.statistics)
+                const ordered = [
+                  ...entries.filter(([k]) => k === 'twr'),
+                  ...entries.filter(([k]) => k === 'mwr'),
+                  ...entries.filter(([k]) => k !== 'twr' && k !== 'mwr'),
+                ]
+                return ordered.map(([key, val]) => {
+                  const numVal = typeof val === 'number' ? val : null
+                  if (numVal === null) return null
+                  const tooltip = STAT_TOOLTIPS[key.toLowerCase()]
+                  if (key === 'twr') {
+                    const compareVal = compareStats ? compareStats.statistics['twr'] : null
+                    const delta = compareVal !== null && compareVal !== undefined ? numVal - (compareVal as number) : null
+                    return (
+                      <button key={key} onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                        {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
+                        <p className="text-sm font-medium text-slate-500 mb-2 uppercase">TWR</p>
+                        <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
+                        {delta !== null && <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
+                        <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                      </button>
+                    )
+                  }
+                  if (key === 'mwr') {
+                    const compareVal = compareStats ? compareStats.statistics['mwr'] : null
+                    const delta = compareVal !== null && compareVal !== undefined ? numVal - (compareVal as number) : null
+                    return (
+                      <button key={key} onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                        {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
+                        <p className="text-sm font-medium text-slate-500 mb-2 uppercase">MWR</p>
+                        <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
+                        {delta !== null && <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
+                        <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                      </button>
+                    )
+                  }
+                  return (
+                    <div key={key} className={`relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
+                      {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
+                      <p className="text-sm font-medium text-slate-500 mb-2 capitalize">{key.replace(/_/g, ' ')}</p>
+                      <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
+                    </div>
+                  )
+                })
+              })()}
+              {standaloneLoading && !portfolioStandalone && (
+                <div className="col-span-2 md:col-span-4 flex justify-center py-4"><Spinner label="Computing risk metrics…" /></div>
+              )}
+              {portfolioStandalone && (
+                <>
+                  <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
+                    <p className="text-sm font-medium text-slate-500 mb-2">Sharpe Ratio</p>
+                    <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
+                    {compareStandalone !== null && <p className={`text-xs tabular-nums mt-1 ${portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? '+' : ''}{(portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio).toFixed(3)} vs {compareLabel}</p>}
+                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                  </button>
+                  <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
+                    <p className="text-sm font-medium text-slate-500 mb-2">VAMI</p>
+                    <p className="text-2xl font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
+                  </div>
+                  <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
+                    <p className="text-sm font-medium text-slate-500 mb-2">Volatility</p>
+                    <p className="text-2xl font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
+                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                  </button>
+                  <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
+                    <p className="text-sm font-medium text-slate-500 mb-2">Sortino Ratio</p>
+                    <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
+                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                  </button>
+                  <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
+                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
+                    <p className="text-sm font-medium text-slate-500 mb-2">Max Drawdown</p>
+                    <p className="text-2xl font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
+                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                  </button>
+                </>
+              )}
+            </div>
+          )
         ) : (
           <p className="text-slate-500 text-center text-sm py-10">Historical context required to generate statistics.</p>
         )}
@@ -832,13 +955,49 @@ export default function AnalysisPage() {
             >
               {compareLoading ? 'Processing…' : 'Execute'}
             </button>
+            {scenarios.length > 0 && (
+              <div className="relative" ref={scenarioPickerRef}>
+                <button
+                  onClick={() => setScenarioPickerOpen(p => !p)}
+                  disabled={scenarioBenchmarkLoading}
+                  className="whitespace-nowrap px-4 py-3 bg-surface border border-amber-500/30 text-amber-400 text-sm font-medium rounded-xl hover:bg-amber-500/10 transition-all disabled:opacity-50"
+                >
+                  {scenarioBenchmarkLoading ? '…' : '+ Scenario'}
+                </button>
+                {scenarioPickerOpen && (
+                  <div className="absolute top-full mt-1 right-0 z-30 min-w-[160px] bg-panel border border-border-dim/80 rounded-xl shadow-2xl overflow-hidden">
+                    {scenarios
+                      .filter(s => s.id !== active && !scenarioBenchmarks.find(sb => sb.id === s.id))
+                      .map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => { addScenarioBenchmark(s.id, s.name); setScenarioPickerOpen(false) }}
+                          className="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 hover:text-slate-100 transition-colors"
+                        >
+                          {s.name}
+                        </button>
+                      ))
+                    }
+                    {scenarios.filter(s => s.id !== active && !scenarioBenchmarks.find(sb => sb.id === s.id)).length === 0 && (
+                      <p className="px-4 py-2.5 text-xs text-slate-500">No scenarios to add</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {benchmarkSymbols.length > 0 && (
+          {(benchmarkSymbols.length > 0 || scenarioBenchmarks.length > 0) && (
             <div className="flex flex-wrap gap-2 w-full">
               {benchmarkSymbols.map(sym => (
                 <span key={sym} className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-border-dim/60 rounded-lg text-sm font-medium text-slate-300">
                   {sym}
                   <button onClick={() => handleRemoveSymbol(sym)} className="text-slate-500 hover:text-red-400 transition-colors leading-none" aria-label={`Remove ${sym}`}>×</button>
+                </span>
+              ))}
+              {scenarioBenchmarks.map(sb => (
+                <span key={sb.id} className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-amber-500/25 rounded-lg text-sm font-medium text-amber-400/80">
+                  {sb.name}
+                  <button onClick={() => removeScenarioBenchmark(sb.id)} className="text-amber-500/50 hover:text-red-400 transition-colors leading-none" aria-label={`Remove ${sb.name}`}>×</button>
                 </span>
               ))}
             </div>
@@ -896,6 +1055,9 @@ export default function AnalysisPage() {
                   )}
                   {benchmarkSymbols.map((sym, i) => (
                     <Line key={sym} type="monotone" dataKey={sym} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="6 6" dot={false} />
+                  ))}
+                  {scenarioBenchmarks.map((sb, i) => (
+                    <Line key={`[S] ${sb.name}`} type="monotone" dataKey={`[S] ${sb.name}`} name={sb.name} stroke={COLORS[(benchmarkSymbols.length + i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="8 3" dot={false} opacity={0.85} />
                   ))}
                 </LineChart>
               ) : chartMode === 'mwr' ? (
@@ -1063,7 +1225,13 @@ export default function AnalysisPage() {
           {attributionData.length > 0 && holdingsView === 'attribution' && (
             <div className="relative group">
               <button
-                onClick={() => navigate('/llm', { state: { initialPrompt: { promptType: 'biggest_drag_on_performance', displayMessage: `Identify the biggest drag on performance in my portfolio for ${periodLabel}`, extraParams: { currency, from: effectiveFrom, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } } } })}
+                onClick={() => {
+                  const isComparing = compare !== null && compareStats !== null
+                  navigate('/llm', { state: { initialPrompt: isComparing
+                    ? { promptType: 'holdings_comparison', displayMessage: `Compare holdings: ${activeLabel} vs ${compareLabel}`, extraParams: { scenario_id: active ?? 0, scenario_id_a: active ?? 0, scenario_id_b: compare, currency, from: effectiveFrom, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } }
+                    : { promptType: 'biggest_drag_on_performance', displayMessage: `Identify the biggest drag on performance in my portfolio for ${periodLabel}`, extraParams: { currency, from: effectiveFrom, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } }
+                  }})
+                }}
                 className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1072,7 +1240,9 @@ export default function AnalysisPage() {
                   <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
                 </svg>
               </button>
-              <HoverTooltip direction="down" className="w-max whitespace-nowrap">AI attribution analysis</HoverTooltip>
+              <HoverTooltip direction="down" className="w-max whitespace-nowrap">
+                {compare !== null && compareStats !== null ? `AI comparison: ${activeLabel} vs ${compareLabel}` : 'AI attribution analysis'}
+              </HoverTooltip>
             </div>
           )}
         </div>

@@ -17,6 +17,7 @@ const (
 	ToolGetRecentTransactions       = "get_recent_transactions"
 	ToolGetFXImpact                 = "get_fx_impact"
 	ToolGetHistoricalPerformance    = "get_historical_performance_series"
+	ToolSimulateScenario            = "simulate_scenario"
 )
 
 // ToolExecutor is a callback invoked by the LLM loop when the model requests a function call.
@@ -122,6 +123,64 @@ func PortfolioTools() *genai.Tool {
 						"to_date":   strParam("End date (YYYY-MM-DD). Defaults to today."),
 					},
 					Required: []string{"from_date"},
+				},
+			},
+			{
+				Name:        ToolSimulateScenario,
+				Description: "Builds a hypothetical portfolio for analysis based on the user's real portfolio ('real' base) or an empty portfolio ('empty' base), applying optional adjustments and baskets. Its results are counterfactual; never present them as the user's real holdings.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"base": &genai.Schema{
+							Type: genai.TypeString, Description: "Base dataset mode, 'real' (user's actual trades) or 'empty' (no existing trades).",
+						},
+						"base_as_of": strParam("Optional date (YYYY-MM-DD) to truncate the base portfolio at. Any trades after this date are ignored."),
+						"adjustments": &genai.Schema{
+							Type: genai.TypeArray,
+							Items: &genai.Schema{
+								Type: genai.TypeObject,
+								Properties: map[string]*genai.Schema{
+									"symbol": strParam("Symbol into which the adjustment applies."),
+									"action": strParam("Action: 'sell_qty', 'sell_pct', 'sell_all', 'buy'."),
+									"value": numParam("Value for the action (number of shares, percentage, or currency amount respectively)."),
+									"date": strParam("Optional date (YYYY-MM-DD)."),
+									"currency": strParam("Optional currency code, mainly used for 'buy' actions."),
+								},
+								Required: []string{"symbol", "action"},
+							},
+						},
+						"basket": &genai.Schema{
+							Type: genai.TypeObject,
+							Properties: map[string]*genai.Schema{
+								"mode": strParam("Mode for interpreting items: 'quantity', 'weight'."),
+								"items": &genai.Schema{
+									Type: genai.TypeArray,
+									Items: &genai.Schema{
+										Type: genai.TypeObject,
+										Properties: map[string]*genai.Schema{
+											"symbol": strParam("Symbol"),
+											"quantity": numParam("Quantity (if mode=quantity)"),
+											"weight": numParam("Weight 0.0-1.0 (if mode=weight)"),
+										},
+										Required: []string{"symbol"},
+									},
+								},
+								"notional_value": numParam("Total basket value (required if mode=weight)."),
+								"notional_currency": strParam("Currency of the total basket value (required if mode=weight)."),
+								"acquired_at": strParam("Acquisition date (YYYY-MM-DD)."),
+							},
+							Required: []string{"mode", "items"},
+						},
+						"metrics": &genai.Schema{
+							Type: genai.TypeArray,
+							Items: strParam("Metric block to fetch"),
+							Description: "Which metrics to evaluate and return for the hypothetical portfolio: 'allocations', 'risk', 'holdings', 'historical_performance', 'benchmark'.",
+						},
+						"from_date": strParam("Start date (YYYY-MM-DD) for metrics calculations (risk, historical_performance, benchmark)."),
+						"to_date":   strParam("End date (YYYY-MM-DD) for metrics calculations. Defaults to today."),
+						"benchmark_symbol": strParam("Symbol to use if 'benchmark' is included in metrics (e.g., 'SPY')."),
+					},
+					Required: []string{"base"},
 				},
 			},
 		},

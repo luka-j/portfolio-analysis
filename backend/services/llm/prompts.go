@@ -47,6 +47,7 @@ const defaultConstraints = `<constraints>
 - DO NOT speculate on exact future price targets, only on ranges and only when backed up with a multitude of sources, carefully citing them.
 - TICKER SYMBOLS ARE AUTHORITATIVE: every symbol and name in the portfolio data is exact and correct. Never silently correct, substitute, or confuse a ticker with a more commonly known one (e.g. "SPP1" is the Vanguard FTSE All-World EUR-hedged ETF — it is NOT a misspelling of the S&P 500 or any S&P 500 instrument). If a ticker is unfamiliar, look it up rather than assuming it refers to something more popular. If search results conflict with the name provided in the portfolio data, the portfolio data is the ground truth — do not let search results override or reinterpret the provided ticker-to-name mapping.
 - OMIT RATHER THAN FABRICATE: if you have no meaningful, well-grounded content for a section (e.g. no relevant recent news, no clear factor tilt, no identifiable risk), write "Nothing significant to report." for that section instead of filling it with vague or speculative filler. No information is better than low-quality information.
+- SIMULATED SCENARIOS: The simulate_scenario tool builds a hypothetical portfolio for analysis. Its results are counterfactual; never present them as the user's real holdings. Always state 'in this hypothetical' when discussing its output.
 </constraints>`
 
 // stringSchema is a convenience helper for a simple string field schema.
@@ -357,6 +358,109 @@ Then fill each field with fluent markdown prose:
 			"drawdown_scenario":    "🌩️ The 15% Drawdown Scenario",
 			"beta_contributors":    "🎢 Beta Contributors & Detractors",
 			"defensive_evaluation": "🛡️ Defensive Evaluation",
+		},
+	},
+	"risk_metrics_comparison": {
+		Message: `Here are the risk and return metrics for two portfolios I want you to compare, for the period {from} to {to} (risk-free rate: {rfr}).
+
+**Portfolio A — {name_a}:**
+- TWR: {a_twr}
+- MWR: {a_mwr}
+- Sharpe Ratio: {a_sharpe}
+- Sortino Ratio: {a_sortino}
+- VAMI (growth of 1,000 invested at start): {a_vami}
+- Annualised Volatility: {a_vol}
+- Max Drawdown: {a_dd}
+
+**Portfolio B — {name_b}:**
+- TWR: {b_twr}
+- MWR: {b_mwr}
+- Sharpe Ratio: {b_sharpe}
+- Sortino Ratio: {b_sortino}
+- VAMI: {b_vami}
+- Annualised Volatility: {b_vol}
+- Max Drawdown: {b_dd}
+
+In the ` + "`thinking`" + ` field, reason through what these numbers tell you — which portfolio delivered more return per unit of risk, which had shallower drawdowns, which compounded wealth faster, and what the spread between MWR and TWR signals about investment timing.
+
+Then fill each field with fluent markdown prose, addressed directly to the investor:
+
+- **` + "`returns_comparison`" + `**: Compare the raw TWR and MWR of both portfolios. Which came out ahead and by how much? Does the MWR–TWR spread reveal better or worse timing of cash flows in one versus the other?
+
+- **` + "`risk_efficiency`" + `**: Which portfolio squeezed more return per unit of risk (Sharpe, Sortino)? Was the higher-return portfolio simply taking proportionately more downside risk, or was it genuinely more efficient?
+
+- **` + "`wealth_growth`" + `**: Compare the VAMI figures and volatility. In practical terms, what is the gap in final wealth if 1,000 was invested at the start? How "bumpy" was each ride relative to its reward?
+
+- **` + "`verdict`" + `**: Give a clear, jargon-free verdict: which portfolio is the better risk-adjusted bet, and what is the single most important reason why?`,
+		SystemInstruction: "Act as a private wealth manager performing a comparative performance review for a client. Speak directly to the client. Focus on what the numbers mean in practical terms, not just what they are.",
+		ChatAccessible:    true,
+		Cacheable:         false,
+		Schema: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"thinking":           stringSchema(),
+				"returns_comparison": stringSchema(),
+				"risk_efficiency":    stringSchema(),
+				"wealth_growth":      stringSchema(),
+				"verdict":            stringSchema(),
+			},
+			Required: []string{"thinking", "returns_comparison", "risk_efficiency", "wealth_growth", "verdict"},
+		},
+		SectionOrder: []string{
+			"thinking",
+			"returns_comparison",
+			"risk_efficiency",
+			"wealth_growth",
+			"verdict",
+		},
+		SectionTitles: map[string]string{
+			"returns_comparison": "📈 Returns Comparison",
+			"risk_efficiency":    "⚖️ Risk Efficiency",
+			"wealth_growth":      "💰 Wealth Growth",
+			"verdict":            "🏁 Verdict",
+		},
+	},
+	"holdings_comparison": {
+		Message: `Here are the current top holdings for two portfolios I want you to compare. Both portfolios span the period {from} to {to}.
+
+**Portfolio A — {name_a}:**
+{holdings_a}
+
+**Portfolio B — {name_b}:**
+{holdings_b}
+
+In the ` + "`thinking`" + ` field, identify the major composition differences — different sectors, geographies, concentration levels, or asset types — and reason through how those structural differences might translate into different performance, risk, and future sensitivity.
+
+Then fill each field with fluent markdown prose, addressed directly to the investor:
+
+- **` + "`composition_differences`" + `**: What are the most significant structural differences between these two portfolios? Consider sectors, geographies, asset types, and diversification levels. Be specific about what is present in one but absent or underweight in the other.
+
+- **` + "`performance_drivers`" + `**: Based on the composition differences, which specific bets in each portfolio are most likely driving divergent outcomes? Which holdings in one portfolio are doing work that the other portfolio lacks?
+
+- **` + "`verdict`" + `**: Give a clear, jargon-free summary of the key trade-off between these two approaches. Which is more suitable for growth-oriented investors? Which for defensive, income-focused, or lower-volatility goals?`,
+		SystemInstruction: "Act as an expert portfolio construction analyst comparing two investment portfolios. Speak directly to the client. Focus on the structural differences and their real-world implications.",
+		ChatAccessible:    true,
+		Cacheable:         false,
+		Schema: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"thinking":               stringSchema(),
+				"composition_differences": stringSchema(),
+				"performance_drivers":    stringSchema(),
+				"verdict":                stringSchema(),
+			},
+			Required: []string{"thinking", "composition_differences", "performance_drivers", "verdict"},
+		},
+		SectionOrder: []string{
+			"thinking",
+			"composition_differences",
+			"performance_drivers",
+			"verdict",
+		},
+		SectionTitles: map[string]string{
+			"composition_differences": "🧩 Composition Differences",
+			"performance_drivers":     "🎯 Performance Drivers",
+			"verdict":                 "🏁 Verdict",
 		},
 	},
 }

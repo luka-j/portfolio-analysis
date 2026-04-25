@@ -290,6 +290,9 @@ export interface LLMChatRequest {
   benchmark_symbol?: string;
   // long_market_summary
   period?: string;
+  // risk_metrics_comparison / holdings_comparison
+  scenario_id_a?: number | null;
+  scenario_id_b?: number | null;
 }
 
 export interface LLMResponseSection {

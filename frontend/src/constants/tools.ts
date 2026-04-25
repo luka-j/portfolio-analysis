@@ -14,4 +14,5 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   { id: 'get_benchmark_metrics', label: 'Benchmark Comparison', description: 'Measure alpha / beta / tracking error against any index or security.' },
   { id: 'get_risk_metrics', label: 'Risk Metrics', description: 'Measure Max Drawdown, Sharpe, Sortino ratios.' },
   { id: 'get_fx_impact', label: 'FX Impact', description: 'Assess how currency changes have moved portfolio value. (Exposes absolute monetary values)' },
+  { id: 'simulate_scenario', label: 'Simulate Scenario', description: 'Build and analyze hypothetical what-if portfolio configurations.' },
 ]
