@@ -12,9 +12,11 @@ import DateRangePicker from '../components/DateRangePicker'
 import ErrorAlert from '../components/ErrorAlert'
 import CorrelationHeatmap from '../components/CorrelationHeatmap'
 import CompareScenariosChip from '../components/CompareScenariosChip'
+import AutocompleteInput from '../components/AutocompleteInput'
 import {
   getPortfolioStats, getPortfolioReturns, comparePortfolio, getStandaloneMetrics,
   getDrawdownSeries, getRollingMetric, getAttribution, getCorrelations, getCumulativeSeries,
+  getMarketSymbols,
   type StatsResponse, type DailyValue, type BenchmarkResult, type StandaloneResult,
   type DrawdownResult, type RollingPoint, type AttributionResult, type CumulativeSeriesResult,
 } from '../api'
@@ -97,6 +99,15 @@ const AXIS_LABEL_STYLE = { fontSize: 10, fill: '#334155', fontWeight: 900 }
 
 const COMPARE_COLOR = '#fbbf24' // amber — scenario-active accent
 
+function formatSymbolName(sym: string, scenarios: Array<{id: number, name: string}>) {
+  if (sym.startsWith('scenario:')) {
+    const sid = parseInt(sym.replace('scenario:', ''), 10)
+    const s = scenarios.find(x => x.id === sid)
+    return s ? `[S] ${s.name}` : sym
+  }
+  return sym
+}
+
 export default function AnalysisPage() {
   const navigate = useNavigate()
   const chartRef = useRef<HTMLDivElement>(null)
@@ -125,6 +136,7 @@ export default function AnalysisPage() {
 
   // Benchmark
   const [benchmarkInput, setBenchmarkInput]     = useState('SPY')
+  const [marketSymbols, setMarketSymbols]       = useState<string[]>([])
   const [benchmarkSymbols, setBenchmarkSymbols] = useState<string[]>([])
   const [cumulativeResults, setCumulativeResults] = useState<CumulativeSeriesResult[]>([])
   const [compareResults, setCompareResults]     = useState<BenchmarkResult[]>([])
@@ -144,7 +156,7 @@ export default function AnalysisPage() {
   const [holdingsError, setHoldingsError]           = useState('')
 
   // Scenario benchmarks (chart overlays from specific scenarios)
-  const [scenarioBenchmarks, setScenarioBenchmarks] = useState<Array<{id: number; name: string; series: DailyValue[]}>>([])
+  const [scenarioBenchmarks, setScenarioBenchmarks] = useState<Array<{id: number; name: string; twr: DailyValue[]; mwr: DailyValue[]}>>([])
   const [scenarioBenchmarkLoading, setScenarioBenchmarkLoading] = useState(false)
   const [scenarioPickerOpen, setScenarioPickerOpen] = useState(false)
   const scenarioPickerRef = useRef<HTMLDivElement>(null)
@@ -231,6 +243,10 @@ export default function AnalysisPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  useEffect(() => {
+    getMarketSymbols().then(setMarketSymbols).catch(() => {})
+  }, [])
+
   // ── Standalone metrics ───────────────────────────────────────────────────────
   const loadStandalone = useCallback(async (symbols = '') => {
     const gen = loadGenRef.current
@@ -242,7 +258,7 @@ export default function AnalysisPage() {
 
     getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, true, active).then(res => {
       if (gen === loadGenRef.current && !freshArrived && res.results.length > 0) {
-        setStandaloneResults(res.results)
+        setStandaloneResults(res.results.map(r => ({ ...r, symbol: formatSymbolName(r.symbol, scenarios) })))
         setStandaloneLoading(false)
         setStandaloneRefreshing(true)
       }
@@ -251,7 +267,7 @@ export default function AnalysisPage() {
     getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, false, active).then(res => {
       if (gen === loadGenRef.current) {
         freshArrived = true
-        setStandaloneResults(res.results)
+        setStandaloneResults(res.results.map(r => ({ ...r, symbol: formatSymbolName(r.symbol, scenarios) })))
       }
     }).catch(err => {
       if (gen === loadGenRef.current) setStandaloneError(err instanceof Error ? err.message : 'Standalone metrics failed')
@@ -261,15 +277,16 @@ export default function AnalysisPage() {
         setStandaloneRefreshing(false)
       }
     })
-  }, [currency, effectiveFrom, to, acctModel, riskFreeRate, active])
+  }, [currency, effectiveFrom, to, acctModel, riskFreeRate, active, scenarios])
 
   useEffect(() => {
-    loadStandalone(benchmarkSymbols.join(','))
+    const allSyms = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
+    loadStandalone(allSyms)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadStandalone])
 
   // ── Chart-mode data ──────────────────────────────────────────────────────────
-  const loadChartMode = useCallback(async (mode: ChartMode, window: number, benchSyms: string[]) => {
+  const loadChartMode = useCallback(async (mode: ChartMode, window: number, benchSyms: string[], sBenches: typeof scenarioBenchmarks) => {
     if (mode === 'twr' || mode === 'mwr') {
       setChartModeLoading(false)
       setChartModeError('')
@@ -281,7 +298,17 @@ export default function AnalysisPage() {
       if (mode === 'drawdown') {
         const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
         const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, symParam, active)
-        setDrawdownResults(res.results ?? [])
+        const baseResults = res.results ?? []
+        
+        const sbRes = await Promise.all(sBenches.map(async sb => {
+          try {
+             const r = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, undefined, sb.id)
+             const pRes = (r.results ?? []).find(x => x.symbol === 'Portfolio')
+             if (pRes) return { ...pRes, symbol: `[S] ${sb.name}` }
+          } catch {}
+          return null
+        }))
+        setDrawdownResults([...baseResults, ...sbRes.filter(Boolean) as DrawdownResult[]])
       } else {
         const metric = mode === 'rolling_sharpe' ? 'sharpe'
           : mode === 'rolling_volatility' ? 'volatility'
@@ -289,12 +316,23 @@ export default function AnalysisPage() {
           : 'beta'
         const newSeries: Record<string, RollingPoint[]> = {}
         if (metric === 'beta') {
-          await Promise.all(benchSyms.map(async sym => {
+          const allBenchSyms = [...benchSyms, ...sBenches.map(sb => `scenario:${sb.id}`)]
+          await Promise.all(allBenchSyms.map(async sym => {
+            const symName = formatSymbolName(sym, scenarios)
             try {
               const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, sym, undefined, active)
               const result = res.results[0]
-              if (result && !result.error) newSeries[sym] = result.series
+              if (result && !result.error) newSeries[symName] = result.series
             } catch { /* skip bad symbols */ }
+            
+            await Promise.all(sBenches.map(async sb => {
+              if (sym === `scenario:${sb.id}`) return // skip self comparison
+              try {
+                const r = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, sym, undefined, sb.id)
+                const result = r.results[0]
+                if (result && !result.error) newSeries[`[S] ${sb.name} (${symName})`] = result.series
+              } catch {}
+            }))
           }))
         } else {
           const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
@@ -302,6 +340,13 @@ export default function AnalysisPage() {
           for (const result of res.results) {
             if (!result.error) newSeries[result.symbol] = result.series
           }
+          await Promise.all(sBenches.map(async sb => {
+             try {
+               const r = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, undefined, undefined, sb.id)
+               const pRes = r.results.find(x => x.symbol === 'Portfolio')
+               if (pRes && !pRes.error) newSeries[`[S] ${sb.name}`] = pRes.series
+             } catch {}
+          }))
         }
         setRollingSeries(newSeries)
       }
@@ -313,16 +358,16 @@ export default function AnalysisPage() {
   }, [effectiveFrom, to, currency, acctModel, riskFreeRate, active])
 
   useEffect(() => {
-    loadChartMode(chartMode, rollingWindow, benchmarkSymbols)
-  }, [loadChartMode, chartMode, rollingWindow, benchmarkSymbols])
+    loadChartMode(chartMode, rollingWindow, benchmarkSymbols, scenarioBenchmarks)
+  }, [loadChartMode, chartMode, rollingWindow, benchmarkSymbols, scenarioBenchmarks])
 
   // Auto-switch away from Rolling Beta when all benchmarks are removed
   useEffect(() => {
-    if (benchmarkSymbols.length === 0 && chartMode === 'rolling_beta') {
+    if (benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0 && chartMode === 'rolling_beta') {
       setChartMode('twr')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [benchmarkSymbols])
+  }, [benchmarkSymbols, scenarioBenchmarks])
 
   // ── Holdings analysis ────────────────────────────────────────────────────────
   const loadHoldings = useCallback(async () => {
@@ -376,18 +421,21 @@ export default function AnalysisPage() {
 
   // ── Benchmark refresh on date/currency change ────────────────────────────────
   useEffect(() => {
-    if (benchmarkSymbols.length === 0) return
+    if (benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0) return
     const refresh = async () => {
       setCompareLoading(true)
       setCompareError('')
       try {
+        const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
         const [cumRes, comp] = await Promise.all([
-          getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, benchmarkSymbols.join(','), active),
-          comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate, active),
+          benchmarkSymbols.length > 0 ? getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, benchmarkSymbols.join(','), active) : Promise.resolve({results: []}),
+          comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active),
         ])
-        setCumulativeResults(cumRes.results.filter(r => r.symbol !== 'Portfolio'))
-        setCompareResults(comp.benchmarks)
-        loadStandalone(benchmarkSymbols.join(','))
+        if (benchmarkSymbols.length > 0) {
+          setCumulativeResults(cumRes.results.filter(r => r.symbol !== 'Portfolio'))
+        }
+        setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
+        loadStandalone(allSymsStr)
       } catch (err) {
         setCompareError(err instanceof Error ? err.message : 'Comparison failed')
       } finally {
@@ -399,18 +447,30 @@ export default function AnalysisPage() {
   }, [effectiveFrom, to, currency, acctModel])
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
-  const handleCompare = async () => {
-    const inputSymbols = benchmarkInput.split(',').map(s => s.trim()).filter(Boolean)
+  const handleCompare = async (inputOverride?: string) => {
+    const input = inputOverride ?? benchmarkInput
+
+    // If the user typed/selected a scenario name, add it as a scenario benchmark
+    const matchedScenario = scenarios.find(s => s.name === input && s.id !== active)
+    if (matchedScenario) {
+      addScenarioBenchmark(matchedScenario.id, matchedScenario.name)
+      setBenchmarkInput('')
+      return
+    }
+
+    const inputSymbols = input.split(',').map(s => s.trim()).filter(Boolean)
     const newSymbols = inputSymbols.filter(s => !benchmarkSymbols.includes(s))
     if (newSymbols.length === 0) { setBenchmarkInput(''); return }
     setCompareLoading(true)
     setCompareError('')
     try {
+      const allSymbols = [...benchmarkSymbols, ...newSymbols]
+      const allSymsStr = [...allSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
+      
       const [cumRes, comp] = await Promise.all([
         getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, newSymbols.join(','), active),
-        comparePortfolio(newSymbols.join(','), currency, effectiveFrom, to, acctModel, riskFreeRate, active),
+        comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active),
       ])
-      const allSymbols = [...benchmarkSymbols, ...newSymbols]
       setCumulativeResults(prev => {
         const merged = [...prev]
         for (const r of cumRes.results.filter(r => r.symbol !== 'Portfolio')) {
@@ -419,9 +479,9 @@ export default function AnalysisPage() {
         return merged
       })
       setBenchmarkSymbols(allSymbols)
-      setCompareResults(prev => [...prev, ...comp.benchmarks])
+      setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
       setBenchmarkInput('')
-      loadStandalone(allSymbols.join(','))
+      loadStandalone(allSymsStr)
     } catch (err) {
       setCompareError(err instanceof Error ? err.message : 'Comparison failed')
     } finally {
@@ -433,13 +493,14 @@ export default function AnalysisPage() {
     setRiskFreeRateInput((newRate * 100).toFixed(2))
     if (newRate === riskFreeRate) return
     setRiskFreeRate(newRate)
-    if (benchmarkSymbols.length === 0) return
+    const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
+    if (!allSymsStr) return
     setCompareLoading(true)
     setCompareError('')
     try {
-      const comp = await comparePortfolio(benchmarkSymbols.join(','), currency, effectiveFrom, to, acctModel, newRate, active)
-      setCompareResults(comp.benchmarks)
-      loadStandalone(benchmarkSymbols.join(','))
+      const comp = await comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, newRate, active)
+      setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
+      loadStandalone(allSymsStr)
     } catch (err) {
       setCompareError(err instanceof Error ? err.message : 'Comparison failed')
     } finally {
@@ -456,8 +517,16 @@ export default function AnalysisPage() {
     const remaining = benchmarkSymbols.filter(s => s !== sym)
     setBenchmarkSymbols(remaining)
     setCumulativeResults(prev => prev.filter(r => r.symbol !== sym))
-    setCompareResults(prev => prev.filter(r => r.symbol !== sym))
-    loadStandalone(remaining.join(','))
+    
+    const allSymsStr = [...remaining, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
+    if (allSymsStr) {
+      comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active).then(comp => {
+         setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
+      })
+    } else {
+      setCompareResults([])
+    }
+    loadStandalone(allSymsStr)
   }
 
   // ── Scenario benchmark chart overlays ────────────────────────────────────────
@@ -465,14 +534,31 @@ export default function AnalysisPage() {
     if (scenarioBenchmarks.find(sb => sb.id === id)) return
     setScenarioBenchmarkLoading(true)
     try {
-      const hist = await getPortfolioReturns(effectiveFrom, to, currency, acctModel, 'twr', false, undefined, id)
-      setScenarioBenchmarks(prev => [...prev, { id, name, series: hist.data ?? [] }])
+      const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, undefined, id)
+      const twr = res.results.find(r => r.symbol === 'Portfolio')?.series ?? []
+      const mwr = res.results.find(r => r.symbol === 'Portfolio-MWR')?.series ?? []
+      setScenarioBenchmarks(prev => [...prev, { id, name, twr, mwr }])
+      
+      const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`), `scenario:${id}`].join(',')
+      const comp = await comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active)
+      setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
+      loadStandalone(allSymsStr)
     } catch { /* ignore */ }
     finally { setScenarioBenchmarkLoading(false) }
   }
 
   const removeScenarioBenchmark = (id: number) => {
     setScenarioBenchmarks(prev => prev.filter(sb => sb.id !== id))
+    
+    const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.filter(sb => sb.id !== id).map(sb => `scenario:${sb.id}`)].join(',')
+    if (allSymsStr) {
+      comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active).then(comp => {
+         setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
+      })
+    } else {
+      setCompareResults([])
+    }
+    loadStandalone(allSymsStr)
   }
 
   // Refresh scenario benchmark series when date/currency/acctModel changes
@@ -481,8 +567,10 @@ export default function AnalysisPage() {
     const refresh = async () => {
       const updated = await Promise.all(scenarioBenchmarks.map(async sb => {
         try {
-          const hist = await getPortfolioReturns(effectiveFrom, to, currency, acctModel, 'twr', false, undefined, sb.id)
-          return { ...sb, series: hist.data ?? [] }
+          const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, undefined, sb.id)
+          const twr = res.results.find(r => r.symbol === 'Portfolio')?.series ?? []
+          const mwr = res.results.find(r => r.symbol === 'Portfolio-MWR')?.series ?? []
+          return { ...sb, twr, mwr }
         } catch { return sb }
       }))
       setScenarioBenchmarks(updated)
@@ -516,6 +604,7 @@ export default function AnalysisPage() {
       dateMap[d.date]['Portfolio'] = d.value
     })
     cumulativeResults.forEach(r => {
+      if (!r.series) return
       r.series.forEach(pt => {
         if (!dateMap[pt.date]) dateMap[pt.date] = {}
         dateMap[pt.date][r.symbol] = pt.value
@@ -528,7 +617,8 @@ export default function AnalysisPage() {
       })
     }
     scenarioBenchmarks.forEach(sb => {
-      sb.series.forEach(pt => {
+      if (!sb.twr) return
+      sb.twr.forEach(pt => {
         if (!dateMap[pt.date]) dateMap[pt.date] = {}
         dateMap[pt.date][`[S] ${sb.name}`] = pt.value
       })
@@ -542,6 +632,7 @@ export default function AnalysisPage() {
     if (drawdownResults.length === 0) return []
     const dateMap: Record<string, Record<string, number>> = {}
     drawdownResults.forEach(r => {
+      if (!r.series) return
       const key = r.symbol === 'Portfolio' ? 'Drawdown' : r.symbol
       r.series.forEach(pt => {
         if (!dateMap[pt.date]) dateMap[pt.date] = {}
@@ -561,9 +652,17 @@ export default function AnalysisPage() {
       dateMap[d.date]['Portfolio'] = d.value
     })
     cumulativeResults.forEach(r => {
+      if (!r.series) return
       r.series.forEach(pt => {
         if (!dateMap[pt.date]) dateMap[pt.date] = {}
         dateMap[pt.date][r.symbol] = pt.value
+      })
+    })
+    scenarioBenchmarks.forEach(sb => {
+      if (!sb.mwr) return
+      sb.mwr.forEach(pt => {
+        if (!dateMap[pt.date]) dateMap[pt.date] = {}
+        dateMap[pt.date][`[S] ${sb.name}`] = pt.value
       })
     })
     return Object.entries(dateMap)
@@ -576,6 +675,7 @@ export default function AnalysisPage() {
     if (keys.length === 0) return []
     const dateMap: Record<string, Record<string, number>> = {}
     keys.forEach(sym => {
+      if (!rollingSeries[sym]) return
       rollingSeries[sym].forEach(pt => {
         if (!dateMap[pt.date]) dateMap[pt.date] = {}
         dateMap[pt.date][sym] = pt.value
@@ -943,14 +1043,21 @@ export default function AnalysisPage() {
 
         <div className="flex flex-col items-center gap-3 mb-10 w-full max-w-2xl mx-auto">
           <div className="flex flex-col sm:flex-row items-center w-full gap-4">
-            <input
-              type="text" value={benchmarkInput} onChange={e => setBenchmarkInput(e.target.value)}
-              placeholder="Symbols (SPY, QQQ, VWCE.DE)"
-              className="w-full px-6 py-3 bg-surface border border-border-dim/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all"
-              onKeyDown={e => e.key === 'Enter' && handleCompare()}
-            />
+            <div className="w-full">
+              <AutocompleteInput
+                options={[
+                  ...marketSymbols.map(sym => ({ value: sym, label: 'Stock Ticker' })),
+                  ...scenarios.filter(s => s.id !== active).map(s => ({ value: s.name, label: 'Scenario' })),
+                ]}
+                value={benchmarkInput}
+                onChange={setBenchmarkInput}
+                onSelect={opt => handleCompare(opt.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.defaultPrevented && handleCompare()}
+                placeholder="Symbols (SPY, QQQ) or Scenario Name"
+              />
+            </div>
             <button
-              onClick={handleCompare} disabled={compareLoading}
+              onClick={() => handleCompare()} disabled={compareLoading}
               className="whitespace-nowrap px-8 py-3 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-500 transition-all disabled:opacity-50 shadow-lg"
             >
               {compareLoading ? 'Processing…' : 'Execute'}
@@ -1023,9 +1130,9 @@ export default function AnalysisPage() {
             label="Chart Mode"
             options={CHART_MODE_OPTIONS.map(o => ({
               ...o,
-              disabled: o.value === 'rolling_beta' && benchmarkSymbols.length === 0,
-              tooltip: o.value === 'rolling_beta' && benchmarkSymbols.length === 0
-                ? 'Add a benchmark symbol first to enable rolling beta'
+              disabled: o.value === 'rolling_beta' && benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0,
+              tooltip: o.value === 'rolling_beta' && benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0
+                ? 'Add a benchmark symbol or scenario overlay first to enable rolling beta'
                 : undefined,
             }))}
             value={chartMode}

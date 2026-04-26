@@ -94,6 +94,16 @@ func (h *MarketHandler) GetHistory(c *gin.Context) {
 	})
 }
 
+// GetSymbols handles GET /api/v1/market/symbols
+func (h *MarketHandler) GetSymbols(c *gin.Context) {
+	var symbols []string
+	if err := h.DB.Model(&models.MarketData{}).Where("symbol NOT LIKE '%=X'").Distinct("symbol").Pluck("symbol", &symbols).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"symbols": symbols})
+}
+
 // SecurityChartPoint is one data point in the security price chart response.
 type SecurityChartPoint struct {
 	Date  string   `json:"date"`

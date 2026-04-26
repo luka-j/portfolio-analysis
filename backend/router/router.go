@@ -124,6 +124,7 @@ func SetupRouter(
 	mh := handlers.NewMarketHandler(marketSvc, currencyGetter, database)
 	api.GET("/market/history", mh.GetHistory)
 	api.GET("/market/security-chart", mh.GetSecurityChart)
+	api.GET("/market/symbols", mh.GetSymbols)
 
 	// Stats endpoints.
 	sh := handlers.NewStatsHandler(repo, portfolioSvc, marketSvc, fxSvc, currencyGetter)

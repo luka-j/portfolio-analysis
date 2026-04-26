@@ -440,6 +440,11 @@ export async function getMarketHistory(
   );
 }
 
+export async function getMarketSymbols(): Promise<string[]> {
+  const resp = await request<{ symbols: string[] }>('/market/symbols');
+  return resp.symbols;
+}
+
 export async function getPortfolioStats(
   from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
 ): Promise<StatsResponse> {

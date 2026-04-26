@@ -15,6 +15,9 @@ interface Props {
    *  (free-text is still allowed but unmatched entries show a subtle warning).
    *  Default: false. */
   strictSuggestions?: boolean
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
+  /** Called when the user explicitly picks an option from the dropdown (click or Enter). */
+  onSelect?: (opt: AutocompleteOption) => void
 }
 
 export default function AutocompleteInput({
@@ -23,6 +26,8 @@ export default function AutocompleteInput({
   onChange,
   placeholder = '',
   autoFocus = false,
+  onKeyDown,
+  onSelect,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -63,7 +68,8 @@ export default function AutocompleteInput({
     setOpen(false)
     setActiveIndex(-1)
     inputRef.current?.focus()
-  }, [onChange])
+    if (onSelect) onSelect(opt)
+  }, [onChange, onSelect])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!open) {
@@ -90,6 +96,10 @@ export default function AutocompleteInput({
       setActiveIndex(-1)
     } else if (e.key === 'Tab') {
       setOpen(false)
+    }
+
+    if (onKeyDown) {
+      onKeyDown(e)
     }
   }
 

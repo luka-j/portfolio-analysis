@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"portfolio-analysis/services/fx"
 	"portfolio-analysis/services/market"
 	"portfolio-analysis/services/portfolio"
+	scenariosvc "portfolio-analysis/services/scenario"
 	"portfolio-analysis/services/stats"
 )
 
@@ -231,6 +233,83 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 
 	var benchmarks []models.BenchmarkResult
 	for _, sym := range symbols {
+		if strings.HasPrefix(sym, "scenario:") {
+			idStr := strings.TrimPrefix(sym, "scenario:")
+			scenarioID, err := strconv.ParseUint(idStr, 10, 64)
+			if err != nil {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "invalid scenario ID"})
+				continue
+			}
+
+			realData, err := h.Repo.LoadSaved(userHash)
+			if err != nil {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "loading real data: " + err.Error()})
+				continue
+			}
+
+			var user models.User
+			if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "user not found"})
+				continue
+			}
+
+			row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
+			if err != nil || row == nil {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "scenario not found"})
+				continue
+			}
+
+			spec, err := scenariosvc.ParseSpec(row)
+			if err != nil {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "parsing scenario: " + err.Error()})
+				continue
+			}
+
+			syntheticData, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
+			if err != nil {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "building scenario: " + err.Error()})
+				continue
+			}
+			syntheticData.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+
+			sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
+			if err != nil {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "computing scenario returns: " + err.Error()})
+				continue
+			}
+
+			sMap := make(map[string]float64)
+			for i, endD := range sEnd {
+				sMap[endD] = sRet[i]
+			}
+
+			var pRetAligned []float64
+			var bRet []float64
+			for i := 0; i < len(portfolioReturns); i++ {
+				if val, ok := sMap[endDates[i]]; ok {
+					bRet = append(bRet, val)
+					pRetAligned = append(pRetAligned, portfolioReturns[i])
+				}
+			}
+
+			if len(pRetAligned) == 0 {
+				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "no overlapping data between portfolio and scenario"})
+				continue
+			}
+
+			metrics := stats.CalculateBenchmarkMetrics(pRetAligned, bRet, riskFreeRate)
+			benchmarks = append(benchmarks, models.BenchmarkResult{
+				Symbol:           sym,
+				Alpha:            metrics.Alpha,
+				Beta:             metrics.Beta,
+				TreynorRatio:     metrics.TreynorRatio,
+				TrackingError:    metrics.TrackingError,
+				InformationRatio: metrics.InformationRatio,
+				Correlation:      metrics.Correlation,
+			})
+			continue
+		}
+
 		// Fetch with a 7-day lookback to ensure we have a starting price for forward-filling.
 		// On error, record the problem in the result and continue with remaining symbols
 		// so one bad ticker does not discard metrics already computed for others.
@@ -405,6 +484,80 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 		}
 
 		for _, sym := range symbols {
+			if strings.HasPrefix(sym, "scenario:") {
+				idStr := strings.TrimPrefix(sym, "scenario:")
+				scenarioID, err := strconv.ParseUint(idStr, 10, 64)
+				if err != nil {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "invalid scenario ID"})
+					continue
+				}
+
+				realData, err := h.Repo.LoadSaved(userHash)
+				if err != nil {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "loading real data: " + err.Error()})
+					continue
+				}
+
+				var user models.User
+				if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "user not found"})
+					continue
+				}
+
+				row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
+				if err != nil || row == nil {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "scenario not found"})
+					continue
+				}
+
+				spec, err := scenariosvc.ParseSpec(row)
+				if err != nil {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "parsing scenario: " + err.Error()})
+					continue
+				}
+
+				syntheticData, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
+				if err != nil {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "building scenario: " + err.Error()})
+					continue
+				}
+				syntheticData.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+
+				sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
+				if err != nil {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "computing scenario returns: " + err.Error()})
+					continue
+				}
+
+				sMap := make(map[string]float64)
+				for i, endD := range sEnd {
+					sMap[endD] = sRet[i]
+				}
+
+				var symReturns []float64
+				for i := 0; i < len(portfolioReturns); i++ {
+					if val, ok := sMap[endDates[i]]; ok {
+						symReturns = append(symReturns, val)
+					}
+				}
+
+				if len(symReturns) == 0 {
+					results = append(results, models.StandaloneResult{Symbol: sym, Error: "no data: portfolio has no holdings in this date range or scenario returns do not overlap"})
+					continue
+				}
+
+				m := stats.CalculateStandaloneMetrics(symReturns, riskFreeRate)
+				results = append(results, models.StandaloneResult{
+					Symbol:       sym,
+					SharpeRatio:  m.SharpeRatio,
+					VAMI:         m.VAMI,
+					Volatility:   m.Volatility,
+					SortinoRatio: m.SortinoRatio,
+					MaxDrawdown:  m.MaxDrawdown,
+				})
+				continue
+			}
+
 			prices, err := h.MarketProvider.GetHistory(sym, from.AddDate(0, 0, -7), to, cachedOnly)
 			if err != nil {
 				log.Printf("Warning: fetching standalone %s: %v", sym, err)
@@ -644,15 +797,77 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 		}
 
 		// We only need the aligned price data — recompute rolling below from raw prices.
+		var pAligned, bAligned []float64
+		var dAligned []string
 
-		// Re-align portfolio and benchmark returns for rolling.
-		prices, priceErr := h.MarketProvider.GetHistory(benchSym, from.AddDate(0, 0, -7), to, cachedOnly)
-		if priceErr != nil {
-			rollingResults = append(rollingResults, models.RollingSeriesResult{
-				Symbol: benchSym,
-				Error:  "could not fetch price data: " + priceErr.Error(),
-			})
+		if strings.HasPrefix(benchSym, "scenario:") {
+			idStr := strings.TrimPrefix(benchSym, "scenario:")
+			scenarioID, err := strconv.ParseUint(idStr, 10, 64)
+			if err != nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "invalid scenario ID"})
+				goto computeBeta
+			}
+
+			realData, err := h.Repo.LoadSaved(userHash)
+			if err != nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "loading real data: " + err.Error()})
+				goto computeBeta
+			}
+
+			var user models.User
+			if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "user not found"})
+				goto computeBeta
+			}
+
+			row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
+			if err != nil || row == nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "scenario not found"})
+				goto computeBeta
+			}
+
+			spec, err := scenariosvc.ParseSpec(row)
+			if err != nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "parsing scenario: " + err.Error()})
+				goto computeBeta
+			}
+
+			syntheticData, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
+			if err != nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "building scenario: " + err.Error()})
+				goto computeBeta
+			}
+			syntheticData.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+
+			sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
+			if err != nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "computing scenario returns: " + err.Error()})
+				goto computeBeta
+			}
+
+			sMap := make(map[string]float64)
+			for i, endD := range sEnd {
+				sMap[endD] = sRet[i]
+			}
+
+			for i := 0; i < len(portfolioReturns); i++ {
+				if val, ok := sMap[endDates[i]]; ok {
+					bAligned = append(bAligned, val)
+					pAligned = append(pAligned, portfolioReturns[i])
+					dAligned = append(dAligned, endDates[i])
+				}
+			}
 		} else {
+			// Re-align portfolio and benchmark returns for rolling.
+			prices, priceErr := h.MarketProvider.GetHistory(benchSym, from.AddDate(0, 0, -7), to, cachedOnly)
+			if priceErr != nil {
+				rollingResults = append(rollingResults, models.RollingSeriesResult{
+					Symbol: benchSym,
+					Error:  "could not fetch price data: " + priceErr.Error(),
+				})
+				goto computeBeta
+			}
+			
 			var fxRates map[string]float64
 			if (acctModel == models.AccountingModelHistorical || acctModel == "") && h.CurrencyGetter != nil {
 				if nativeCcy, err := h.CurrencyGetter.GetCurrency(benchSym); err == nil {
@@ -684,34 +899,19 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 				}
 			}
 
-			// Build aligned return series (portfolio, benchmark, dates).
-			type alignedEntry struct {
-				date string
-				pRet float64
-				bRet float64
-			}
-			var aligned []alignedEntry
 			for i := 0; i < len(portfolioReturns); i++ {
 				prevPrice, ok1 := benchPriceMap[startDates[i]]
 				curPrice, ok2 := benchPriceMap[endDates[i]]
 				if ok1 && ok2 && prevPrice != 0 {
-					aligned = append(aligned, alignedEntry{
-						date: endDates[i],
-						pRet: portfolioReturns[i],
-						bRet: (curPrice - prevPrice) / prevPrice,
-					})
+					pAligned = append(pAligned, portfolioReturns[i])
+					bAligned = append(bAligned, (curPrice-prevPrice)/prevPrice)
+					dAligned = append(dAligned, endDates[i])
 				}
 			}
+		}
 
-			pAligned := make([]float64, len(aligned))
-			bAligned := make([]float64, len(aligned))
-			dAligned := make([]string, len(aligned))
-			for i, a := range aligned {
-				pAligned[i] = a.pRet
-				bAligned[i] = a.bRet
-				dAligned[i] = a.date
-			}
-
+	computeBeta:
+		if len(pAligned) > 0 {
 			pts := stats.CalculateRollingBeta(pAligned, bAligned, dAligned, window, riskFreeRate)
 			series := make([]models.RollingPoint, len(pts))
 			for i, pt := range pts {
