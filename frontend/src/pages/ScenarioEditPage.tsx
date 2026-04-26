@@ -23,17 +23,19 @@ import {
   type ContributionCadence,
 } from '../api'
 import { useScenario } from '../context/ScenarioContext'
+import { usePersistentState } from '../utils/usePersistentState'
 import { formatDate, CURRENCIES } from '../utils/format'
 import SelectInput from '../components/SelectInput'
 import NumberInput from '../components/NumberInput'
 import ConfirmDialog from '../components/ConfirmDialog'
 import HoverTooltip from '../components/HoverTooltip'
 
-type EditorMode = 'modify' | 'basket' | 'backtest'
+type EditorMode = 'modify' | 'basket' | 'backtest' | 'redirect'
 
 const MODE_OPTIONS = [
   { label: 'Adjust Trades', value: 'modify' as EditorMode },
   { label: 'Custom Basket', value: 'basket' as EditorMode },
+  { label: 'Target Allocation', value: 'redirect' as EditorMode },
   { label: 'Historical Backtest', value: 'backtest' as EditorMode },
 ]
 
@@ -99,6 +101,7 @@ function fiveYearsAgo(): string {
 function BasketEditor({
   items, mode, notional, notionalCurrency, acquiredAt,
   onItemsChange, onModeChange, onNotionalChange, onNotionalCurrencyChange, onAcquiredAtChange,
+  hideNotional, hideAcquiredAt
 }: {
   items: BasketItem[]
   mode: BasketMode
@@ -110,6 +113,8 @@ function BasketEditor({
   onNotionalChange: (v: number) => void
   onNotionalCurrencyChange: (c: string) => void
   onAcquiredAtChange: (d: string) => void
+  hideNotional?: boolean
+  hideAcquiredAt?: boolean
 }) {
   function addRow() {
     onItemsChange([...items, { symbol: '', currency: 'USD', weight: 0, quantity: 0 }])
@@ -134,17 +139,19 @@ function BasketEditor({
         <SegmentedControl label="Mode" options={BASKET_MODE_OPTIONS} value={mode} onChange={onModeChange} />
         {mode === 'weight' && (
           <>
-            <div className="flex flex-col gap-1">
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Notional Value</label>
-              <div className="w-32">
-                <NumberInput
-                  value={notional ? notional.toString() : ''}
-                  onChange={v => onNotionalChange(parseFloat(v) || 0)}
-                  placeholder="10000"
-                  min={0}
-                />
+            {!hideNotional && (
+              <div className="flex flex-col gap-1">
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Notional Value</label>
+                <div className="w-32">
+                  <NumberInput
+                    value={notional ? notional.toString() : ''}
+                    onChange={v => onNotionalChange(parseFloat(v) || 0)}
+                    placeholder="10000"
+                    min={0}
+                  />
+                </div>
               </div>
-            </div>
+            )}
             <div className="flex flex-col gap-1">
               <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Currency</label>
               <SelectInput
@@ -155,10 +162,12 @@ function BasketEditor({
             </div>
           </>
         )}
-        <div className="flex flex-col gap-1">
-          <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Acquired At</label>
-          <DatePicker value={acquiredAt} onChange={onAcquiredAtChange} />
-        </div>
+        {!hideAcquiredAt && (
+          <div className="flex flex-col gap-1">
+            <label className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Acquired At</label>
+            <DatePicker value={acquiredAt} onChange={onAcquiredAtChange} />
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-border-dim overflow-hidden">
@@ -266,7 +275,7 @@ export default function ScenarioEditPage() {
 
   // Form state
   const [name, setName] = useState('')
-  const [pinned, setPinned] = useState(false)
+  const [pinned, setPinned] = usePersistentState('scenario_edit_pinned', true)
   const [mode, setMode] = useState<EditorMode>('modify')
 
   // Modify-real state
@@ -282,6 +291,10 @@ export default function ScenarioEditPage() {
   const [notional, setNotional] = useState(10000)
   const [notionalCurrency, setNotionalCurrency] = useState('USD')
   const [acquiredAt, setAcquiredAt] = useState(today())
+
+  // Redirect state
+  const [redirectBasketItems, setRedirectBasketItems] = useState<BasketItem[]>([{ symbol: '', currency: 'USD', weight: 0 }])
+  const [redirectNotionalCurrency, setRedirectNotionalCurrency] = useState('USD')
 
   // Backtest state
   const [btStartDate, setBtStartDate] = useState(fiveYearsAgo())
@@ -329,6 +342,10 @@ export default function ScenarioEditPage() {
           setNotional(spec.basket.notional_value ?? 10000)
           setNotionalCurrency(spec.basket.notional_currency ?? 'USD')
           setAcquiredAt(spec.basket.acquired_at ?? today())
+        } else if (spec.base === 'redirect' && spec.basket) {
+          setMode('redirect')
+          setRedirectBasketItems(spec.basket.items)
+          setRedirectNotionalCurrency(spec.basket.notional_currency ?? 'USD')
         } else {
           setMode('modify')
           setModifyBase(spec.base ?? 'real')
@@ -423,6 +440,15 @@ export default function ScenarioEditPage() {
       return { base: 'empty' as BaseMode, basket }
     }
 
+    if (mode === 'redirect') {
+      const basket: Basket = {
+        mode: 'weight',
+        items: redirectBasketItems.filter(i => i.symbol.trim()),
+        notional_currency: redirectNotionalCurrency,
+      }
+      return { base: 'redirect' as BaseMode, basket }
+    }
+
     // backtest
     const basket: Basket = {
       mode: btBasketMode,
@@ -442,17 +468,16 @@ export default function ScenarioEditPage() {
     return { base: 'empty' as BaseMode, basket, backtest }
   }
 
-  async function handleSave(shouldPin?: boolean) {
+  async function handleSave() {
     setSaving(true)
     setError(null)
     try {
       const spec = buildSpec()
-      const pinnedValue = shouldPin !== undefined ? shouldPin : pinned
       let saved
       if (editId !== null) {
-        saved = await updateScenario(editId, { name, pinned: pinnedValue, spec })
+        saved = await updateScenario(editId, { name, pinned, spec })
       } else {
-        saved = await createScenario(spec, name, pinnedValue)
+        saved = await createScenario(spec, name, pinned)
       }
       await refresh()
       setActive(saved.id)
@@ -517,7 +542,7 @@ export default function ScenarioEditPage() {
             />
           </div>
           <div className="flex flex-col gap-1.5 pt-5">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
+            <label className="flex items-center gap-2 cursor-pointer select-none relative group">
               <input
                 type="checkbox"
                 checked={pinned}
@@ -525,6 +550,9 @@ export default function ScenarioEditPage() {
                 className="w-4 h-4 rounded accent-amber-400"
               />
               <span className="text-sm text-slate-300">Pin (never evict)</span>
+              <HoverTooltip align="center" className="whitespace-nowrap">
+                Prevents automatic eviction after 7 days of inactivity
+              </HoverTooltip>
             </label>
           </div>
         </div>
@@ -734,6 +762,29 @@ export default function ScenarioEditPage() {
           </div>
         )}
 
+        {/* ---- Target Allocation (Redirect) ---- */}
+        {mode === 'redirect' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-400">
+              Simulate investing all your historical cash flows into a target portfolio instead of your actual trades.
+            </p>
+            <BasketEditor
+              items={redirectBasketItems}
+              mode="weight"
+              notional={0} // not used for display when mode="weight" without input, wait, notional input is shown.
+              notionalCurrency={redirectNotionalCurrency}
+              acquiredAt={today()} // Not used for redirect, but required by component. 
+              onItemsChange={setRedirectBasketItems}
+              onModeChange={() => {}} // locked to weight
+              onNotionalChange={() => {}} // Not used
+              onNotionalCurrencyChange={setRedirectNotionalCurrency}
+              onAcquiredAtChange={() => {}} // Not used
+              hideNotional={true}
+              hideAcquiredAt={true}
+            />
+          </div>
+        )}
+
         {/* ---- Historical Backtest ---- */}
         {mode === 'backtest' && (
           <div className="space-y-6">
@@ -837,19 +888,11 @@ export default function ScenarioEditPage() {
         {/* Footer actions */}
         <div className="flex items-center gap-3 pt-2 border-t border-white/5">
           <button
-            onClick={() => handleSave(false)}
+            onClick={() => handleSave()}
             disabled={saving}
             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button
-            onClick={() => handleSave(true)}
-            disabled={saving}
-            title="Saves and prevents automatic eviction after 7 days of inactivity"
-            className="px-5 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-sm font-medium border border-amber-400/20 transition-colors disabled:opacity-50"
-          >
-            Save & Pin
           </button>
           <button
             onClick={() => navigate(-1)}

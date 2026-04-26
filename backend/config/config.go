@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"fmt"
 )
 
 // Config holds all application configuration.
@@ -28,6 +30,11 @@ type Config struct {
 	// temporary bucket before being counted as a real portfolio outflow. Set to
 	// 0 to disable the feature and revert to the legacy behaviour.
 	CashBucketExpiryDays int // CASH_BUCKET_EXPIRY_DAYS, default 30
+
+	// DefaultRiskFreeRate is the annualised risk-free rate used by LLM tools and
+	// metrics calculations when no explicit value is provided. Expressed as a
+	// decimal (e.g. 0.04 = 4%).
+	DefaultRiskFreeRate float64 // DEFAULT_RISK_FREE_RATE, default 0.04
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -47,7 +54,8 @@ func Load() *Config {
 		GeminiProModel:    getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
 		GeminiDefaultModel: getEnv("GEMINI_DEFAULT_MODEL", "flash"),
 
-		CashBucketExpiryDays: getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
+		CashBucketExpiryDays:  getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
+		DefaultRiskFreeRate:  getEnvFloat("DEFAULT_RISK_FREE_RATE", 0.04),
 	}
 
 	if v := os.Getenv("ALLOWED_TOKEN_HASHES"); v != "" {
@@ -60,6 +68,16 @@ func Load() *Config {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+		fmt.Printf("WARN: invalid float for %s=%q, using default %.4f\n", key, v, fallback)
 	}
 	return fallback
 }

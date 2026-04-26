@@ -13,8 +13,9 @@ import (
 type BaseMode string
 
 const (
-	BaseModeReal  BaseMode = "real"
-	BaseModeEmpty BaseMode = "empty"
+	BaseModeReal     BaseMode = "real"
+	BaseModeEmpty    BaseMode = "empty"
+	BaseModeRedirect BaseMode = "redirect"
 )
 
 // AdjustmentAction describes what to do with an existing position.
@@ -127,6 +128,16 @@ func Build(spec ScenarioSpec, realData *models.FlexQueryData, mp market.Provider
 	// Start from the chosen base.
 	var data *models.FlexQueryData
 	switch spec.Base {
+	case BaseModeRedirect:
+		var err error
+		data, err = buildRedirectScenario(spec, realData, mp, fxSvc)
+		if err != nil {
+			return nil, fmt.Errorf("building redirect scenario: %w", err)
+		}
+		// Redirect scenario already processes the basket dynamically based on cash flows.
+		// We do not want to apply the basket again. Adjustments can still be applied if provided.
+		// To prevent applyBasket from running, we can clear the Basket reference for the rest of the flow.
+		spec.Basket = nil
 	case BaseModeEmpty:
 		data = &models.FlexQueryData{UserHash: realData.UserHash}
 	default: // BaseModeReal

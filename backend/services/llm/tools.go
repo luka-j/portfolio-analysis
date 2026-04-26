@@ -18,6 +18,8 @@ const (
 	ToolGetFXImpact                 = "get_fx_impact"
 	ToolGetHistoricalPerformance    = "get_historical_performance_series"
 	ToolSimulateScenario            = "simulate_scenario"
+	ToolGetPortfolioBreakdown       = "get_portfolio_fundamentals_breakdown"
+	ToolGetCorrelations             = "get_portfolio_correlations"
 )
 
 // ToolExecutor is a callback invoked by the LLM loop when the model requests a function call.
@@ -33,6 +35,9 @@ func PortfolioTools() *genai.Tool {
 	}
 	numParam := func(desc string) *genai.Schema {
 		return &genai.Schema{Type: genai.TypeNumber, Description: desc}
+	}
+	enumParam := func(desc string, values []string) *genai.Schema {
+		return &genai.Schema{Type: genai.TypeString, Description: desc, Enum: values}
 	}
 
 	return &genai.Tool{
@@ -50,7 +55,7 @@ func PortfolioTools() *genai.Tool {
 					Properties: map[string]*genai.Schema{
 						"from_date":      strParam("Start date for the analysis period (YYYY-MM-DD). Use the earliest available date if the user wants all-time metrics."),
 						"to_date":        strParam("End date for the analysis period (YYYY-MM-DD). Defaults to today if omitted."),
-						"risk_free_rate": numParam("Annualised risk-free rate as a decimal (e.g. 0.05 for 5%). Defaults to 0.05 if omitted."),
+						"risk_free_rate": numParam("Annualised risk-free rate as a decimal (e.g. 0.04 for 4%). Defaults to the server-configured rate (typically 4%) if omitted. Only override if the user explicitly requests a different rate."),
 					},
 					Required: []string{"from_date", "to_date"},
 				},
@@ -64,14 +69,14 @@ func PortfolioTools() *genai.Tool {
 						"benchmark_symbol": strParam("Yahoo Finance ticker of the benchmark (e.g. 'SPY', 'QQQ', 'VWCE.DE')."),
 						"from_date":        strParam("Start date (YYYY-MM-DD)."),
 						"to_date":          strParam("End date (YYYY-MM-DD). Defaults to today if omitted."),
-						"risk_free_rate":   numParam("Annualised risk-free rate as a decimal (e.g. 0.05). Defaults to 0.05 if omitted."),
+						"risk_free_rate":   numParam("Annualised risk-free rate as a decimal (e.g. 0.04). Defaults to the server-configured rate (typically 4%) if omitted. Only override if the user explicitly requests a different rate."),
 					},
 					Required: []string{"benchmark_symbol", "from_date", "to_date"},
 				},
 			},
 			{
 				Name:        ToolGetAssetFundamentals,
-				Description: "Looks up stored fundamental data for a specific ticker: asset type (Stock/ETF/Bond ETF), country, sector, and for ETFs the pre-aggregated country/sector/bond-rating breakdown weights. Use this when the user asks about sector exposure, country risk, or a specific holding's characteristics.",
+				Description: "Looks up stored fundamental data for a specific ticker: asset type (Stock/ETF/Bond ETF), country, sector, and for ETFs the pre-aggregated country/sector/bond-rating breakdown weights. Use this when the user asks about a specific holding's characteristics.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
@@ -79,6 +84,11 @@ func PortfolioTools() *genai.Tool {
 					},
 					Required: []string{"symbol"},
 				},
+			},
+			{
+				Name:        ToolGetPortfolioBreakdown,
+				Description: "Returns the aggregate portfolio breakdown by asset type, country, and sector, with each holding's contribution pre-computed. This is much faster than calling get_asset_fundamentals for each holding individually. Use this for sector exposure, geographic risk, or concentration analysis.",
+				Parameters: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{}},
 			},
 			{
 				Name:        ToolGetPositionsWithCostBasis,
@@ -115,7 +125,7 @@ func PortfolioTools() *genai.Tool {
 			},
 			{
 				Name:        ToolGetHistoricalPerformance,
-				Description: "Returns a high-level time series array of the portfolio's total value going back in time to analyze drawdown patterns. Sampled monthly to keep data compact.",
+				Description: "Returns a time series of the portfolio's total value with pre-computed analytics: top 3 drawdown periods, best month, and worst month. Sampled monthly to keep data compact.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
@@ -126,24 +136,33 @@ func PortfolioTools() *genai.Tool {
 				},
 			},
 			{
+				Name:        ToolGetCorrelations,
+				Description: "Returns the pairwise Pearson correlation matrix for all current portfolio holdings. Correlations are computed only over the overlapping period where both assets were simultaneously held. Use this to identify hidden concentration risks or diversification gaps.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"from_date": strParam("Start date (YYYY-MM-DD). Defaults to portfolio inception."),
+						"to_date":   strParam("End date (YYYY-MM-DD). Defaults to today."),
+					},
+				},
+			},
+			{
 				Name:        ToolSimulateScenario,
 				Description: "Builds a hypothetical portfolio for analysis based on the user's real portfolio ('real' base) or an empty portfolio ('empty' base), applying optional adjustments and baskets. Its results are counterfactual; never present them as the user's real holdings.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
-						"base": &genai.Schema{
-							Type: genai.TypeString, Description: "Base dataset mode, 'real' (user's actual trades) or 'empty' (no existing trades).",
-						},
+						"base":     enumParam("Base dataset mode.", []string{"real", "empty"}),
 						"base_as_of": strParam("Optional date (YYYY-MM-DD) to truncate the base portfolio at. Any trades after this date are ignored."),
 						"adjustments": &genai.Schema{
 							Type: genai.TypeArray,
 							Items: &genai.Schema{
 								Type: genai.TypeObject,
 								Properties: map[string]*genai.Schema{
-									"symbol": strParam("Symbol into which the adjustment applies."),
-									"action": strParam("Action: 'sell_qty', 'sell_pct', 'sell_all', 'buy'."),
-									"value": numParam("Value for the action (number of shares, percentage, or currency amount respectively)."),
-									"date": strParam("Optional date (YYYY-MM-DD)."),
+									"symbol":   strParam("Symbol into which the adjustment applies."),
+									"action":   enumParam("Action to perform.", []string{"sell_qty", "sell_pct", "sell_all", "buy"}),
+									"value":    numParam("Value for the action (number of shares, percentage, or currency amount respectively)."),
+									"date":     strParam("Optional date (YYYY-MM-DD)."),
 									"currency": strParam("Optional currency code, mainly used for 'buy' actions."),
 								},
 								Required: []string{"symbol", "action"},
@@ -152,32 +171,32 @@ func PortfolioTools() *genai.Tool {
 						"basket": &genai.Schema{
 							Type: genai.TypeObject,
 							Properties: map[string]*genai.Schema{
-								"mode": strParam("Mode for interpreting items: 'quantity', 'weight'."),
+								"mode": enumParam("Mode for interpreting items.", []string{"quantity", "weight"}),
 								"items": &genai.Schema{
 									Type: genai.TypeArray,
 									Items: &genai.Schema{
 										Type: genai.TypeObject,
 										Properties: map[string]*genai.Schema{
-											"symbol": strParam("Symbol"),
+											"symbol":   strParam("Symbol"),
 											"quantity": numParam("Quantity (if mode=quantity)"),
-											"weight": numParam("Weight 0.0-1.0 (if mode=weight)"),
+											"weight":   numParam("Weight 0.0-1.0 (if mode=weight)"),
 										},
 										Required: []string{"symbol"},
 									},
 								},
-								"notional_value": numParam("Total basket value (required if mode=weight)."),
+								"notional_value":    numParam("Total basket value (required if mode=weight)."),
 								"notional_currency": strParam("Currency of the total basket value (required if mode=weight)."),
-								"acquired_at": strParam("Acquisition date (YYYY-MM-DD)."),
+								"acquired_at":       strParam("Acquisition date (YYYY-MM-DD)."),
 							},
 							Required: []string{"mode", "items"},
 						},
 						"metrics": &genai.Schema{
-							Type: genai.TypeArray,
-							Items: strParam("Metric block to fetch"),
-							Description: "Which metrics to evaluate and return for the hypothetical portfolio: 'allocations', 'risk', 'holdings', 'historical_performance', 'benchmark'.",
+							Type:        genai.TypeArray,
+							Items:       enumParam("Metric block to fetch", []string{"allocations", "risk", "holdings", "historical_performance", "benchmark"}),
+							Description: "Which metrics to evaluate and return for the hypothetical portfolio.",
 						},
-						"from_date": strParam("Start date (YYYY-MM-DD) for metrics calculations (risk, historical_performance, benchmark)."),
-						"to_date":   strParam("End date (YYYY-MM-DD) for metrics calculations. Defaults to today."),
+						"from_date":        strParam("Start date (YYYY-MM-DD) for metrics calculations (risk, historical_performance, benchmark)."),
+						"to_date":          strParam("End date (YYYY-MM-DD) for metrics calculations. Defaults to today."),
 						"benchmark_symbol": strParam("Symbol to use if 'benchmark' is included in metrics (e.g., 'SPY')."),
 					},
 					Required: []string{"base"},

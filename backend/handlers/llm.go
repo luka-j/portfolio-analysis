@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,24 +19,28 @@ import (
 
 	"portfolio-analysis/middleware"
 	"portfolio-analysis/models"
+	breakdownsvc "portfolio-analysis/services/breakdown"
 	"portfolio-analysis/services/flexquery"
 	"portfolio-analysis/services/llm"
 	"portfolio-analysis/services/market"
 	"portfolio-analysis/services/portfolio"
 	scenariosvc "portfolio-analysis/services/scenario"
+	"portfolio-analysis/services/stats"
 	"portfolio-analysis/services/tax"
 )
 
 // LLMHandler manages LLM text generation and AI analysis endpoints.
 type LLMHandler struct {
 	ScenarioMiddleware
-	Repo             *flexquery.Repository
-	DB               *gorm.DB
-	LLM              *llm.Service
-	PortfolioService *portfolio.Service
-	TaxSvc           *tax.Service
-	MarketProvider   market.Provider
-	CurrencyGetter   market.CurrencyGetter
+	Repo               *flexquery.Repository
+	DB                 *gorm.DB
+	LLM                *llm.Service
+	PortfolioService   *portfolio.Service
+	TaxSvc             *tax.Service
+	MarketProvider     market.Provider
+	CurrencyGetter     market.CurrencyGetter
+	BreakdownSvc       *breakdownsvc.Service
+	DefaultRiskFreeRate float64
 }
 
 // NewLLMHandler creates a new handler.
@@ -47,15 +52,19 @@ func NewLLMHandler(
 	ts *tax.Service,
 	mp market.Provider,
 	cg market.CurrencyGetter,
+	bs *breakdownsvc.Service,
+	defaultRFR float64,
 ) *LLMHandler {
 	return &LLMHandler{
-		Repo:             repo,
-		DB:               db,
-		LLM:              llmSvc,
-		PortfolioService: ps,
-		TaxSvc:           ts,
-		MarketProvider:   mp,
-		CurrencyGetter:   cg,
+		Repo:               repo,
+		DB:                 db,
+		LLM:                llmSvc,
+		PortfolioService:   ps,
+		TaxSvc:             ts,
+		MarketProvider:     mp,
+		CurrencyGetter:     cg,
+		BreakdownSvc:       bs,
+		DefaultRiskFreeRate: defaultRFR,
 	}
 }
 
@@ -175,6 +184,8 @@ var toolCallLabel = map[string]string{
 	llm.ToolGetFXImpact:              "Calculating FX impact",
 	llm.ToolGetHistoricalPerformance: "Fetching historical performance",
 	llm.ToolSimulateScenario:         "Simulating scenario portfolio",
+	llm.ToolGetPortfolioBreakdown:    "Computing portfolio breakdown",
+	llm.ToolGetCorrelations:          "Computing portfolio correlations",
 }
 
 // Chat handles POST /api/v1/llm/chat
@@ -654,6 +665,12 @@ func (h *LLMHandler) buildExecutor(data *models.FlexQueryData, req ChatRequest, 
 		case llm.ToolSimulateScenario:
 			return h.toolSimulateScenario(ctx, req, call.Args, userHash)
 
+		case llm.ToolGetPortfolioBreakdown:
+			return h.toolGetPortfolioBreakdown(ctx, data, req)
+
+		case llm.ToolGetCorrelations:
+			return h.toolGetCorrelations(ctx, data, req, call.Args)
+
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", call.Name)
 		}
@@ -728,7 +745,7 @@ func (h *LLMHandler) toolGetRiskMetrics(_ context.Context, data *models.FlexQuer
 		rfr = req.RiskFreeRate
 	}
 	if rfr == 0 {
-		rfr = 0.05
+		rfr = h.DefaultRiskFreeRate
 	}
 
 	from, to, err := parseDateStrings(fromStr, toStr)
@@ -886,6 +903,127 @@ func (h *LLMHandler) toolGetAssetFundamentals(ctx context.Context, args map[stri
 	}, nil
 }
 
+// toolGetPortfolioBreakdown returns the aggregate portfolio breakdown by asset type, country, and sector.
+func (h *LLMHandler) toolGetPortfolioBreakdown(_ context.Context, data *models.FlexQueryData, req ChatRequest) (map[string]any, error) {
+	if h.BreakdownSvc == nil {
+		return map[string]any{"error": "breakdown service unavailable"}, nil
+	}
+
+	acctModel := models.ParseAccountingModel(req.AccountingModel)
+	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel, false)
+	if err != nil {
+		return nil, fmt.Errorf("fetching portfolio: %w", err)
+	}
+
+	// Resolve user ID for scoped fundamentals lookup.
+	var userID uint
+	if h.DB != nil {
+		var user models.User
+		if err := h.DB.Where("token_hash = ?", data.UserHash).First(&user).Error; err == nil {
+			userID = user.ID
+		}
+	}
+
+	breakdown, err := h.BreakdownSvc.Calculate(result.Positions, req.Currency, userID)
+	if err != nil {
+		return nil, fmt.Errorf("calculating breakdown: %w", err)
+	}
+
+	// Flatten sections into a map keyed by title.
+	sections := make(map[string]any, len(breakdown.Sections))
+	for _, s := range breakdown.Sections {
+		entries := make([]map[string]any, len(s.Entries))
+		for i, e := range s.Entries {
+			entries[i] = map[string]any{
+				"label":      e.Label,
+				"percentage": math.Round(e.Percentage*10) / 10,
+			}
+		}
+		sections[s.Title] = entries
+	}
+	return map[string]any{"currency": req.Currency, "breakdown": sections}, nil
+}
+
+// toolGetCorrelations computes pairwise Pearson correlations for all current holdings.
+func (h *LLMHandler) toolGetCorrelations(_ context.Context, data *models.FlexQueryData, req ChatRequest, args map[string]any) (map[string]any, error) {
+	fromStr, _ := args["from_date"].(string)
+	toStr, _ := args["to_date"].(string)
+
+	if fromStr == "" {
+		fromStr = req.From
+	}
+	if toStr == "" {
+		toStr = req.To
+	}
+	if toStr == "" {
+		toStr = time.Now().Format("2006-01-02")
+	}
+
+	from, to, err := parseDateStrings(fromStr, toStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid dates: %w", err)
+	}
+
+	acctModel := models.ParseAccountingModel(req.AccountingModel)
+	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, req.Currency, acctModel, false)
+	if err != nil {
+		return nil, fmt.Errorf("computing per-position values: %w", err)
+	}
+
+	// Convert daily values to cash-flow-adjusted returns with overlap masks.
+	perSymbolReturns := make(map[string][]float64, len(perPos.BySymbol))
+	perSymbolMask := make(map[string][]bool, len(perPos.BySymbol))
+	for sym, vals := range perPos.BySymbol {
+		if len(vals) < 2 {
+			continue
+		}
+		cfs := perPos.CashFlowsBySymbol[sym]
+		rets := make([]float64, len(vals)-1)
+		mask := make([]bool, len(vals)-1)
+		for i := 1; i < len(vals); i++ {
+			prev := vals[i-1]
+			if prev > 1e-8 {
+				cfAmount := 0.0
+				if i < len(cfs) {
+					cfAmount = cfs[i]
+				}
+				rets[i-1] = (vals[i] - cfAmount - prev) / prev
+				mask[i-1] = true
+			}
+		}
+		perSymbolReturns[sym] = rets
+		perSymbolMask[sym] = mask
+	}
+
+	result := stats.CalculateCorrelationMatrix(perSymbolReturns, perSymbolMask, 10)
+
+	// Build a concise representation: only include pairs with meaningful correlations.
+	type pair struct {
+		A, B        string  `json:"a,omitempty"`
+		Correlation float64 `json:"correlation"`
+	}
+	var highCorr, lowCorr []pair
+	for i := 0; i < len(result.Symbols); i++ {
+		for j := i + 1; j < len(result.Symbols); j++ {
+			c := math.Round(result.Matrix[i][j]*1000) / 1000
+			if c > 0.7 {
+				highCorr = append(highCorr, pair{result.Symbols[i], result.Symbols[j], c})
+			}
+			if c < 0.1 {
+				lowCorr = append(lowCorr, pair{result.Symbols[i], result.Symbols[j], c})
+			}
+		}
+	}
+
+	return map[string]any{
+		"symbols":             result.Symbols,
+		"matrix":              result.Matrix,
+		"highly_correlated":   highCorr,
+		"low_or_uncorrelated": lowCorr,
+		"period":              fmt.Sprintf("%s – %s", from.Format("Jan 2, 2006"), to.Format("Jan 2, 2006")),
+	}, nil
+}
+
 // toolGetPositionsWithCostBasis returns open positions with qty, price, average cost basis, and unrealized gl.
 func (h *LLMHandler) toolGetPositionsWithCostBasis(_ context.Context, data *models.FlexQueryData, req ChatRequest) (map[string]any, error) {
 	acctModel := models.ParseAccountingModel(req.AccountingModel)
@@ -1016,7 +1154,7 @@ func (h *LLMHandler) toolGetFXImpact(_ context.Context, data *models.FlexQueryDa
 	}, nil
 }
 
-// toolGetHistoricalPerformance gets portfolio daily value array
+// toolGetHistoricalPerformance gets portfolio daily value array with pre-computed analytics.
 func (h *LLMHandler) toolGetHistoricalPerformance(_ context.Context, data *models.FlexQueryData, req ChatRequest, args map[string]any) (map[string]any, error) {
 	fromStr, _ := args["from_date"].(string)
 	toStr, _ := args["to_date"].(string)
@@ -1032,11 +1170,72 @@ func (h *LLMHandler) toolGetHistoricalPerformance(_ context.Context, data *model
 		return nil, fmt.Errorf("invalid dates: %w", err)
 	}
 
-	resp, err := h.PortfolioService.GetDailyValues(data, from, to, req.Currency, models.ParseAccountingModel(req.AccountingModel), false)
+	acctModel := models.ParseAccountingModel(req.AccountingModel)
+
+	resp, err := h.PortfolioService.GetDailyValues(data, from, to, req.Currency, acctModel, false)
 	if err != nil {
 		return nil, fmt.Errorf("get daily values: %w", err)
 	}
 
+	// Compute daily returns for drawdown analytics.
+	portfolioReturns, _, endDates, retErr := h.PortfolioService.GetDailyReturns(data, from, to, req.Currency, acctModel, false)
+
+	// Pre-compute analytics: top 3 drawdowns, best/worst month.
+	analytics := map[string]any{}
+	if retErr == nil && len(portfolioReturns) > 0 {
+		ddSeries := stats.CalculateDrawdownSeries(portfolioReturns, endDates)
+
+		// Find top 3 drawdown troughs.
+		type drawdownEvent struct {
+			TroughDate string  `json:"trough_date"`
+			Drawdown   float64 `json:"drawdown_pct"`
+		}
+		var events []drawdownEvent
+		for _, pt := range ddSeries {
+			if pt.DrawdownPct < -0.01 { // only meaningful drawdowns
+				events = append(events, drawdownEvent{pt.Date, math.Round(pt.DrawdownPct*10000) / 100})
+			}
+		}
+		// Sort by severity (most negative first).
+		sort.Slice(events, func(i, j int) bool { return events[i].Drawdown < events[j].Drawdown })
+		if len(events) > 3 {
+			events = events[:3]
+		}
+		analytics["top_drawdowns"] = events
+
+		// Best/worst month by aggregating daily returns into calendar months.
+		type monthReturn struct {
+			Month  string  `json:"month"`
+			Return float64 `json:"return_pct"`
+		}
+		monthlyReturns := map[string]float64{}
+		for i, r := range portfolioReturns {
+			if i < len(endDates) {
+				month := endDates[i][:7] // "YYYY-MM"
+				// Chain daily returns: (1+prev)*(1+r) - 1
+				prev := monthlyReturns[month]
+				monthlyReturns[month] = (1+prev)*(1+r) - 1
+			}
+		}
+		var bestMonth, worstMonth monthReturn
+		first := true
+		for m, r := range monthlyReturns {
+			pct := math.Round(r * 10000) / 100
+			if first || pct > bestMonth.Return {
+				bestMonth = monthReturn{m, pct}
+			}
+			if first || pct < worstMonth.Return {
+				worstMonth = monthReturn{m, pct}
+			}
+			first = false
+		}
+		analytics["best_month"] = bestMonth
+		analytics["worst_month"] = worstMonth
+	}
+
+	// Sample data to keep token usage reasonable.
+	seriesData := resp.Data
+	freq := "daily"
 	if len(resp.Data) > 60 {
 		var sampled []models.DailyValue
 		for i := 0; i < len(resp.Data); i += 21 {
@@ -1045,12 +1244,15 @@ func (h *LLMHandler) toolGetHistoricalPerformance(_ context.Context, data *model
 		if len(sampled) > 0 && sampled[len(sampled)-1].Date != resp.Data[len(resp.Data)-1].Date {
 			sampled = append(sampled, resp.Data[len(resp.Data)-1])
 		}
-		return map[string]any{
-			"sampled_frequency": "monthly",
-			"data":              sampled,
-		}, nil
+		seriesData = sampled
+		freq = "monthly"
 	}
-	return map[string]any{"sampled_frequency": "daily", "data": resp.Data}, nil
+
+	return map[string]any{
+		"sampled_frequency": freq,
+		"data":              seriesData,
+		"analytics":         analytics,
+	}, nil
 }
 
 // toolSimulateScenario handles the 'simulate_scenario' tool call to build and analyze hypothetical counterfactuals.

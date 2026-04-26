@@ -393,7 +393,20 @@ func (s *Service) AnalyzePortfolioStream(
 			strings.Join(enabledTools, ", "))
 	}
 
-	instructionText := sysBase + toolHint + "\n\n" + defaultConstraints
+	constraints := BaseConstraints
+	// Only inject scenario constraint when the prompt or freeform tools include simulate_scenario.
+	if isCanned && CannedPrompts[cannedType].UsesScenarioTool {
+		constraints += ScenarioConstraint
+	} else if !isCanned {
+		for _, t := range enabledTools {
+			if t == ToolSimulateScenario {
+				constraints += ScenarioConstraint
+				break
+			}
+		}
+	}
+
+	instructionText := sysBase + toolHint + "\n\n" + constraints
 	systemParts := buildSystemParts(instructionText, portfolioJSON)
 
 	// Build contents: prior history turns + current user message.
@@ -472,10 +485,11 @@ func (s *Service) AnalyzePortfolioStream(
 		ToolConfig:        toolConfig,
 	}
 
-	// Task 4: for schema-backed canned prompts, use structured JSON output.
-	// Streaming chunks are suppressed; the full response is parsed after accumulation.
-	isStructured := isCanned && CannedPrompts[cannedType].Schema != nil && CannedPrompts[cannedType].ForcedTool == ""
-	if isStructured {
+	// For schema-backed canned prompts, use structured JSON output.
+	// When ForcedTool is set, we defer schema application until after the tool loop;
+	// when no ForcedTool, we set it from the start.
+	isStructured := isCanned && CannedPrompts[cannedType].Schema != nil
+	if isStructured && CannedPrompts[cannedType].ForcedTool == "" {
 		cfg.ResponseSchema = CannedPrompts[cannedType].Schema
 		cfg.ResponseMIMEType = "application/json"
 	}
@@ -543,6 +557,13 @@ func (s *Service) AnalyzePortfolioStream(
 		// After the first tool call round, clear any ForcedTool so the model can proceed freely.
 		if cfg.ToolConfig != nil && cfg.ToolConfig.FunctionCallingConfig != nil {
 			cfg.ToolConfig.FunctionCallingConfig = nil
+		}
+
+		// For ForcedTool prompts with Schema: apply structured output now that
+		// the tool data has been injected. The next generation turn will produce JSON.
+		if isStructured && cfg.ResponseSchema == nil && CannedPrompts[cannedType].ForcedTool != "" {
+			cfg.ResponseSchema = CannedPrompts[cannedType].Schema
+			cfg.ResponseMIMEType = "application/json"
 		}
 
 		// Execute each function call and collect responses.

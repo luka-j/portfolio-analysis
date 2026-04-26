@@ -7,8 +7,17 @@ import (
 
 // validateSpec returns an error if the ScenarioSpec is structurally invalid.
 func validateSpec(spec ScenarioSpec) error {
-	if spec.Base != BaseModeReal && spec.Base != BaseModeEmpty {
-		return fmt.Errorf("base must be %q or %q, got %q", BaseModeReal, BaseModeEmpty, spec.Base)
+	if spec.Base != BaseModeReal && spec.Base != BaseModeEmpty && spec.Base != BaseModeRedirect {
+		return fmt.Errorf("base must be %q, %q or %q, got %q", BaseModeReal, BaseModeEmpty, BaseModeRedirect, spec.Base)
+	}
+	if spec.Base == BaseModeRedirect {
+		if spec.Basket == nil {
+			return fmt.Errorf("redirect base requires a target basket")
+		}
+		if err := validateBasket(spec.Basket, false); err != nil {
+			return fmt.Errorf("redirect basket: %w", err)
+		}
+		return nil // adjustments are ignored for redirect
 	}
 	if spec.Backtest != nil {
 		if spec.Basket == nil {
@@ -20,13 +29,13 @@ func validateSpec(spec ScenarioSpec) error {
 		if spec.Backtest.Currency == "" {
 			return fmt.Errorf("backtest currency is required")
 		}
-		if err := validateBasket(spec.Basket); err != nil {
+		if err := validateBasket(spec.Basket, false); err != nil {
 			return fmt.Errorf("backtest basket: %w", err)
 		}
 		return nil // adjustments are ignored for backtests
 	}
 	if spec.Basket != nil {
-		if err := validateBasket(spec.Basket); err != nil {
+		if err := validateBasket(spec.Basket, true); err != nil {
 			return err
 		}
 	}
@@ -38,7 +47,7 @@ func validateSpec(spec ScenarioSpec) error {
 	return nil
 }
 
-func validateBasket(b *Basket) error {
+func validateBasket(b *Basket, requireNotional bool) error {
 	if len(b.Items) == 0 {
 		return fmt.Errorf("basket must have at least one item")
 	}
@@ -46,10 +55,10 @@ func validateBasket(b *Basket) error {
 		return fmt.Errorf("basket mode must be %q or %q", BasketModeQuantity, BasketModeWeight)
 	}
 	if b.Mode == BasketModeWeight {
-		if b.NotionalValue <= 0 {
+		if requireNotional && b.NotionalValue <= 0 {
 			return fmt.Errorf("basket notional_value must be positive in weight mode")
 		}
-		if b.NotionalCurrency == "" {
+		if requireNotional && b.NotionalCurrency == "" {
 			return fmt.Errorf("basket notional_currency is required in weight mode")
 		}
 		var sum float64

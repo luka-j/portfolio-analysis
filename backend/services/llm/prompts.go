@@ -18,7 +18,8 @@ type CannedPrompt struct {
 	ForcedTool string
 
 	// Schema, when non-nil, enables structured JSON output via ResponseSchema.
-	// Only applicable to prompts that do NOT use ForcedTool (tool-first prompts stream freely).
+	// For ForcedTool prompts the schema is applied on the final generation turn
+	// (after the tool loop completes). For non-tool prompts it is set from the start.
 	Schema *genai.Schema
 
 	// SectionOrder defines the ordered field keys for markdown reconstruction and frontend rendering.
@@ -27,6 +28,10 @@ type CannedPrompt struct {
 
 	// SectionTitles maps each non-thinking field key to its display title.
 	SectionTitles map[string]string
+
+	// UsesScenarioTool indicates whether this prompt may invoke simulate_scenario,
+	// so the scenario-specific constraint is injected into the system instruction.
+	UsesScenarioTool bool
 }
 
 // Render replaces {key} placeholders in Message with the provided vars.
@@ -41,17 +46,34 @@ func (cp CannedPrompt) Render(vars map[string]string) string {
 	return strings.NewReplacer(args...).Replace(cp.Message)
 }
 
-const defaultConstraints = `<constraints>
+// BaseConstraints are injected into every LLM system instruction.
+const BaseConstraints = `<constraints>
 - DO NOT provide overly specific personalized financial advice (e.g., never say "You should sell X", unless explicitly prompted).
 - DO NOT invent or hallucinate news events. If you are unsure about recent news for a ticker, state that explicitly.
 - DO NOT speculate on exact future price targets, only on ranges and only when backed up with a multitude of sources, carefully citing them.
 - TICKER SYMBOLS ARE AUTHORITATIVE: every symbol and name in the portfolio data is exact and correct. Never silently correct, substitute, or confuse a ticker with a more commonly known one (e.g. "SPP1" is the Vanguard FTSE All-World EUR-hedged ETF — it is NOT a misspelling of the S&P 500 or any S&P 500 instrument). If a ticker is unfamiliar, look it up rather than assuming it refers to something more popular. If search results conflict with the name provided in the portfolio data, the portfolio data is the ground truth — do not let search results override or reinterpret the provided ticker-to-name mapping.
 - OMIT RATHER THAN FABRICATE: if you have no meaningful, well-grounded content for a section (e.g. no relevant recent news, no clear factor tilt, no identifiable risk), write "Nothing significant to report." for that section instead of filling it with vague or speculative filler. No information is better than low-quality information.
-- SIMULATED SCENARIOS: The simulate_scenario tool builds a hypothetical portfolio for analysis. Its results are counterfactual; never present them as the user's real holdings. Always state 'in this hypothetical' when discussing its output.
 </constraints>`
+
+// ScenarioConstraint is appended only when the simulate_scenario tool is available.
+const ScenarioConstraint = `
+<scenario_constraint>
+SIMULATED SCENARIOS: The simulate_scenario tool builds a hypothetical portfolio for analysis. Its results are counterfactual; never present them as the user's real holdings. Always state 'in this hypothetical' when discussing its output.
+</scenario_constraint>`
 
 // stringSchema is a convenience helper for a simple string field schema.
 func stringSchema() *genai.Schema { return &genai.Schema{Type: genai.TypeString} }
+
+// sectionSchema builds a genai.Schema object from section keys (always includes "thinking").
+func sectionSchema(keys ...string) *genai.Schema {
+	props := map[string]*genai.Schema{"thinking": stringSchema()}
+	required := []string{"thinking"}
+	for _, k := range keys {
+		props[k] = stringSchema()
+		required = append(required, k)
+	}
+	return &genai.Schema{Type: genai.TypeObject, Properties: props, Required: required}
+}
 
 // CannedPrompts is the registry of all predefined prompts.
 var CannedPrompts = map[string]CannedPrompt{
@@ -87,7 +109,7 @@ Keep each bullet point under 30 words.`,
 		ChatAccessible:    false,
 	},
 	"add_or_trim": {
-		Message: `First, call get_current_allocations() to retrieve my portfolio holdings and weights. Then use Google Search to find current news, recent earnings, analyst sentiment, and valuation context for my holdings. You may also call get_open_positions_with_cost_basis() to see unrealized gains/losses when evaluating trim candidates — a position deep in the green may warrant profit-taking, while one deep in the red raises tax-loss or recovery questions.
+		Message: `Use Google Search to find current news, recent earnings, analyst sentiment, and valuation context for my holdings. You may also call get_open_positions_with_cost_basis() to see unrealized gains/losses when evaluating trim candidates — a position deep in the green may warrant profit-taking, while one deep in the red raises tax-loss or recovery questions.
 
 Put your reasoning in the ` + "`thinking`" + ` field: begin by listing every ticker alongside its full name exactly as provided in the portfolio data — do not paraphrase or infer names. Use this list as your reference throughout; if a search result describes a security whose name does not match the provided name for that ticker, discard it and search more specifically. Then evaluate each position's upside and downside case, weighting by current allocation size, and identify any that are already overrepresented relative to their risk/reward.
 
@@ -102,6 +124,7 @@ A holding may appear in both lists if it represents a high-conviction asymmetric
 		ForcedTool:        "get_current_allocations",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		Schema:            sectionSchema("add_weight", "trim_or_avoid"),
 		SectionOrder: []string{
 			"thinking",
 			"add_weight",
@@ -113,7 +136,7 @@ A holding may appear in both lists if it represents a high-conviction asymmetric
 		},
 	},
 	"general_analysis": {
-		Message: `First, call get_current_allocations() to retrieve my portfolio holdings and weights. Then analyze my current portfolio given current market conditions.
+		Message: `Analyze my current portfolio given current market conditions.
 
 What am I effectively betting on?
 
@@ -123,12 +146,13 @@ Then fill each field with fluent markdown prose:
 
 - **` + "`macro_environment`" + `**: Briefly summarize the overarching market regime (e.g., inflationary, rate-cutting cycle, tech-led growth) and how this portfolio aligns with it.
 - **` + "`sector_geographic_concentration`" + `**: Identify where my money is truly concentrated — do not just list percentages; group holdings by common themes like "AI infrastructure" or regional exposures like "US Tech versus European Industrials".
-- **` + "`fama_french_factor_tilts`" + `**: Provide a qualitative, one-paragraph assessment using the Fama-French five-factor framework (Market, Size, Value/Growth, Profitability, Investment). Do not attempt precise calculations — reason from the holdings' known characteristics (e.g., mega-cap growth tech = strong negative HML, strong positive RMW; broad market ETFs = near-zero SMB). Conclude with one sentence on whether the combined tilt profile is deliberate or incidental.
+- **` + "`fama_french_factor_tilts`" + `**: Provide a qualitative, one-paragraph assessment using the Fama-French five-factor framework (Market, Size, Value/Growth, Profitability, Investment). Only estimate factor tilts for holdings you confidently recognize (e.g., well-known US mega-caps, major index ETFs). For obscure, regional, or unfamiliar tickers — especially European UCITS ETFs or niche funds — explicitly state "factor exposure unknown for [ticker]" rather than guessing. Conclude with one sentence on whether the combined tilt profile appears deliberate or incidental.
 - **` + "`implicit_bets`" + `**: Based on my concentration, what specific future events, market shifts, or currency dynamics am I effectively betting heavily on to happen? What am I most vulnerable to (e.g., exposed to a weakening USD)?
 - **` + "`blind_spots`" + `**: What obvious market sectors, geographical regions, defensive assets, or FX hedges am I completely un-hedged against or missing out on entirely?`,
 		ForcedTool:     "get_current_allocations",
 		ChatAccessible: true,
 		Cacheable:      true,
+		Schema:         sectionSchema("macro_environment", "sector_geographic_concentration", "fama_french_factor_tilts", "implicit_bets", "blind_spots"),
 		SectionOrder: []string{
 			"thinking",
 			"macro_environment",
@@ -146,7 +170,7 @@ Then fill each field with fluent markdown prose:
 		},
 	},
 	"best_worst_scenarios": {
-		Message: `First, call get_current_allocations() to retrieve my portfolio holdings and weights. Then analyze my current portfolio's exposure to market volatility.
+		Message: `Analyze my current portfolio's exposure to market volatility.
 
 Put your reasoning in the ` + "`thinking`" + ` field: map out specific, realistic macroeconomic and industry-specific catalysts that could drastically affect my major holdings.
 
@@ -159,6 +183,7 @@ Then fill each field with fluent markdown prose:
 		ForcedTool:     "get_current_allocations",
 		ChatAccessible: true,
 		Cacheable:      true,
+		Schema:         sectionSchema("best_case", "worst_case", "key_indicators", "historical_precedents"),
 		SectionOrder: []string{
 			"thinking",
 			"best_case",
@@ -190,7 +215,7 @@ Provide a bolded "**Bottom Line**" summary followed by a bulleted breakdown of c
 		Cacheable:         false,
 	},
 	"risk_metrics": {
-		Message: `First, call get_risk_metrics() with the appropriate date range to retrieve the portfolio's statistical metrics. Then interpret the results in plain English, focusing on "The Story of the Money" rather than just the math.
+		Message: `Interpret the risk and return metrics in plain English, focusing on "The Story of the Money" rather than just the math.
 
 Put your reasoning in the ` + "`thinking`" + ` field: break down each metric and what it implies about the investor's behavior and risk tolerance.
 
@@ -206,6 +231,7 @@ Then fill each field with fluent markdown prose, addressed directly to the clien
 		ForcedTool:        "get_risk_metrics",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		Schema:            sectionSchema("returns_narrative", "wealth_growth", "efficiency_test", "stress_test", "investor_profile", "verdict"),
 		SectionOrder: []string{
 			"thinking",
 			"returns_narrative",
@@ -225,9 +251,9 @@ Then fill each field with fluent markdown prose, addressed directly to the clien
 		},
 	},
 	"benchmark_analysis": {
-		Message: `First, call get_benchmark_metrics() to compare my portfolio against the benchmark {benchmark}. Use the date range and risk-free rate appropriate to the user's request.
+		Message: `Compare my portfolio against the benchmark {benchmark}.
 
-Then put your reasoning in the ` + "`thinking`" + ` field: compare the portfolio metrics against the benchmark's assumed baseline, evaluating the Alpha, Beta, and Tracking Error. Consider what combinations of these metrics imply (e.g., high Tracking Error + negative Alpha = poor active management).
+Put your reasoning in the ` + "`thinking`" + ` field: compare the portfolio metrics against the benchmark's assumed baseline, evaluating the Alpha, Beta, and Tracking Error. Consider what combinations of these metrics imply (e.g., high Tracking Error + negative Alpha = poor active management).
 
 Then provide a "so what?" analysis in each field:
 
@@ -240,6 +266,7 @@ Then provide a "so what?" analysis in each field:
 		ForcedTool:        "get_benchmark_metrics",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		Schema:            sectionSchema("manager_skill_vs_luck", "risk_profile", "benchmarking", "investor_profile", "verdict"),
 		SectionOrder: []string{
 			"thinking",
 			"manager_skill_vs_luck",
@@ -284,18 +311,19 @@ Then fill each field with fluent markdown prose:
 		},
 	},
 	"geographic_sector_bottlenecks": {
-		Message: `Analyze my Geographic & Sector Bottlenecks. 
-First, call get_current_allocations() to retrieve my exact holdings. Then, meticulously loop through the major holdings using get_asset_fundamentals() to determine each asset's core country and sector breakdown.
-Synthesize this underlying data in a <thinking> block to identify my true aggregate exposure.
+		Message: `Analyze my Geographic & Sector Bottlenecks.
+Call get_portfolio_fundamentals_breakdown() to retrieve the aggregate sector, country, and asset-type breakdown of my entire portfolio in one request.
+Synthesize this data in a <thinking> block to identify my true aggregate exposure.
 
 Then fill each field with fluent markdown prose:
 - **` + "`sector_overexposure`" + `**: Identify any sectors where I am heavily concentrated (e.g., Tech, Financials). Discuss what macroeconomic factors these sectors are most vulnerable to.
 - **` + "`geographic_risks`" + `**: Identify the primary countries and regions where my money is tied up. What are the specific geopolitical or currency risks associated with this allocation?
 - **` + "`mitigation`" + `**: Suggest broad themes or asset classes (not specific financial advice or new tickers) I could use to dilute these bottlenecks.`,
 		SystemInstruction: "Act as an expert risk management analyst. Look through surface names into the underlying fundamentals.",
-		ForcedTool:        "get_current_allocations",
+		ForcedTool:        "get_portfolio_fundamentals_breakdown",
 		ChatAccessible:    true,
 		Cacheable:         true,
+		Schema:            sectionSchema("sector_overexposure", "geographic_risks", "mitigation"),
 		SectionOrder: []string{
 			"thinking",
 			"sector_overexposure",
@@ -310,7 +338,7 @@ Then fill each field with fluent markdown prose:
 	},
 	"biggest_drag_on_performance": {
 		Message: `Identify the Biggest Drag on Performance in my portfolio.
-First, call get_open_positions_with_cost_basis() to see which positions are currently operating at severe unrealized losses or flatlining relative to their cost basis. Also call get_benchmark_metrics() for at least one broad market benchmark (e.g. 'SPY' or 'VWCE.DE') to contextualize my overall portfolio performance.
+The positions with cost basis have already been loaded. Also call get_benchmark_metrics() for at least one broad market benchmark (e.g. 'SPY' or 'VWCE.DE') to contextualize my overall portfolio performance.
 
 In a <thinking> block, compare my underwater positions against the overall portfolio benchmark metrics (Alpha, Beta). Evaluate whether these losers are justifiable cyclical laggards or long-term structural failures.
 
@@ -322,6 +350,7 @@ Then fill each field with fluent markdown prose:
 		ForcedTool:        "get_open_positions_with_cost_basis",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		Schema:            sectionSchema("major_laggards", "the_why", "tax_loss_context"),
 		SectionOrder: []string{
 			"thinking",
 			"major_laggards",
@@ -336,9 +365,9 @@ Then fill each field with fluent markdown prose:
 	},
 	"stress_test_beta": {
 		Message: `Conduct a Stress Test vs. The Market (Beta Analysis).
-First, call get_benchmark_metrics() against a global baseline (like 'SPY' or 'VWCE.DE'). Use the date range appropriate to the user's request.
+The benchmark metrics have already been loaded. You may also call get_current_allocations() and get_portfolio_fundamentals_breakdown() to identify which holdings are providing the high beta vs the low beta.
 
-In a <thinking> block, analyze my portfolio Beta. If my Beta is 1.5, I move 50% more violently than the market. Project what a sudden 15% market crash (typical of an interest rate shock or recession) would mathematically do to my portfolio. Identify from get_current_allocations() and get_asset_fundamentals() which holdings are providing the high beta vs the low beta.
+In a <thinking> block, analyze my portfolio Beta. If my Beta is 1.5, I move 50% more violently than the market. Project what a sudden 15% market crash (typical of an interest rate shock or recession) would mathematically do to my portfolio.
 
 Then fill each field with fluent markdown prose:
 - **` + "`drawdown_scenario`" + `**: Based strictly on my portfolio Beta, quantify mechanically how a rapid 15% market drop would manifest in my total percentage drawdown. 
@@ -348,6 +377,7 @@ Then fill each field with fluent markdown prose:
 		ForcedTool:        "get_benchmark_metrics",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		Schema:            sectionSchema("drawdown_scenario", "beta_contributors", "defensive_evaluation"),
 		SectionOrder: []string{
 			"thinking",
 			"drawdown_scenario",

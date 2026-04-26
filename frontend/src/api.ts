@@ -314,7 +314,7 @@ export interface LLMChatResponse {
 
 // ---- Scenario types ----
 
-export type BaseMode = 'real' | 'empty';
+export type BaseMode = 'real' | 'empty' | 'redirect';
 export type AdjustmentAction = 'sell_qty' | 'sell_pct' | 'sell_all' | 'buy';
 export type BasketMode = 'quantity' | 'weight';
 export type RebalanceMode = 'none' | 'monthly' | 'quarterly' | 'annually' | 'threshold';

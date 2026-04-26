@@ -151,7 +151,7 @@ func SetupRouter(
 	api.GET("/portfolio/breakdown", bh.GetBreakdown)
 
 	// LLM endpoints.
-	lh := handlers.NewLLMHandler(repo, database, llmService, portfolioSvc, taxSvc, marketSvc, currencyGetter)
+	lh := handlers.NewLLMHandler(repo, database, llmService, portfolioSvc, taxSvc, marketSvc, currencyGetter, breakdownService, cfg.DefaultRiskFreeRate)
 	lh.ScenarioMiddleware = scenarioMiddleware
 	api.GET("/llm/available", lh.IsAvailable)
 	api.GET("/llm/summary", lh.GetSummary)

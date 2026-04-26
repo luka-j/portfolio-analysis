@@ -16,8 +16,8 @@ func TestPortfolioTools(t *testing.T) {
 	if tool == nil {
 		t.Fatal("PortfolioTools() returned nil")
 	}
-	if len(tool.FunctionDeclarations) != 9 {
-		t.Fatalf("expected 9 function declarations, got %d", len(tool.FunctionDeclarations))
+	if len(tool.FunctionDeclarations) != 12 {
+		t.Fatalf("expected 12 function declarations, got %d", len(tool.FunctionDeclarations))
 	}
 
 	expectedNames := []string{
@@ -25,11 +25,14 @@ func TestPortfolioTools(t *testing.T) {
 		llm.ToolGetRiskMetrics,
 		llm.ToolGetBenchmarkMetrics,
 		llm.ToolGetAssetFundamentals,
+		llm.ToolGetPortfolioBreakdown,
 		llm.ToolGetPositionsWithCostBasis,
 		llm.ToolGetTaxImpact,
 		llm.ToolGetRecentTransactions,
 		llm.ToolGetFXImpact,
 		llm.ToolGetHistoricalPerformance,
+		llm.ToolGetCorrelations,
+		llm.ToolSimulateScenario,
 	}
 
 	for i, decl := range tool.FunctionDeclarations {
@@ -52,11 +55,14 @@ func TestToolConstants(t *testing.T) {
 		llm.ToolGetRiskMetrics,
 		llm.ToolGetBenchmarkMetrics,
 		llm.ToolGetAssetFundamentals,
+		llm.ToolGetPortfolioBreakdown,
 		llm.ToolGetPositionsWithCostBasis,
 		llm.ToolGetTaxImpact,
 		llm.ToolGetRecentTransactions,
 		llm.ToolGetFXImpact,
 		llm.ToolGetHistoricalPerformance,
+		llm.ToolGetCorrelations,
+		llm.ToolSimulateScenario,
 	}
 
 	seen := make(map[string]bool)
@@ -182,6 +188,7 @@ func TestCannedPromptForcedTool(t *testing.T) {
 		{"best_worst_scenarios", llm.ToolGetCurrentAllocations},
 		{"risk_metrics", llm.ToolGetRiskMetrics},
 		{"benchmark_analysis", llm.ToolGetBenchmarkMetrics},
+		{"geographic_sector_bottlenecks", llm.ToolGetPortfolioBreakdown},
 	}
 
 	for _, tc := range cases {
@@ -196,12 +203,15 @@ func TestCannedPromptForcedTool(t *testing.T) {
 	}
 }
 
-// TestCannedPromptToolFirstNoSchema verifies that tool-first prompts do not have a Schema set.
-// Schema-based structured output is incompatible with streaming tool-call loops.
-func TestCannedPromptToolFirstNoSchema(t *testing.T) {
+// TestCannedPromptToolFirstSchemaCompatibility verifies that ForcedTool prompts with Schema are accepted.
+// Schema is now applied after the tool loop completes, so both can coexist.
+func TestCannedPromptToolFirstSchemaCompatibility(t *testing.T) {
 	for key, cp := range llm.CannedPrompts {
 		if cp.ForcedTool != "" && cp.Schema != nil {
-			t.Errorf("CannedPrompts[%q]: ForcedTool=%q but Schema is also set — these are mutually exclusive", key, cp.ForcedTool)
+			// This combination is now valid — verify the schema has a "thinking" field.
+			if cp.Schema.Properties == nil || cp.Schema.Properties["thinking"] == nil {
+				t.Errorf("CannedPrompts[%q]: Schema is set but missing 'thinking' field", key)
+			}
 		}
 	}
 }

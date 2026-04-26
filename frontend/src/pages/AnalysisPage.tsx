@@ -966,21 +966,31 @@ export default function AnalysisPage() {
                 </button>
                 {scenarioPickerOpen && (
                   <div className="absolute top-full mt-1 right-0 z-30 min-w-[160px] bg-panel border border-border-dim/80 rounded-xl shadow-2xl overflow-hidden">
-                    {scenarios
-                      .filter(s => s.id !== active && !scenarioBenchmarks.find(sb => sb.id === s.id))
-                      .map(s => (
+                    {(() => {
+                      const options: { id: number; name: string }[] = []
+                      if (active !== null && !scenarioBenchmarks.find(sb => sb.id === 0)) {
+                        options.push({ id: 0, name: 'Real Portfolio' })
+                      }
+                      for (const s of scenarios) {
+                        if (s.id !== active && !scenarioBenchmarks.find(sb => sb.id === s.id)) {
+                          options.push({ id: s.id, name: s.name || `Scenario ${s.id}` })
+                        }
+                      }
+
+                      if (options.length === 0) {
+                        return <p className="px-4 py-2.5 text-xs text-slate-500">No scenarios to add</p>
+                      }
+
+                      return options.map(opt => (
                         <button
-                          key={s.id}
-                          onClick={() => { addScenarioBenchmark(s.id, s.name); setScenarioPickerOpen(false) }}
+                          key={opt.id}
+                          onClick={() => { addScenarioBenchmark(opt.id, opt.name); setScenarioPickerOpen(false) }}
                           className="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 hover:text-slate-100 transition-colors"
                         >
-                          {s.name}
+                          {opt.name}
                         </button>
                       ))
-                    }
-                    {scenarios.filter(s => s.id !== active && !scenarioBenchmarks.find(sb => sb.id === s.id)).length === 0 && (
-                      <p className="px-4 py-2.5 text-xs text-slate-500">No scenarios to add</p>
-                    )}
+                    })()}
                   </div>
                 )}
               </div>
