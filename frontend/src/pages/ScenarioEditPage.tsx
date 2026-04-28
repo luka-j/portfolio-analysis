@@ -495,12 +495,69 @@ export default function ScenarioEditPage() {
     try {
       await deleteScenario(editId)
       await refresh()
+      setPendingDelete(false)
       navigate(-1)
     } catch (e) {
       setError((e as Error).message)
+    } finally {
       setSaving(false)
     }
   }
+
+  // ---- Client-side validation ----
+  // Compute a list of human-readable error strings based on the current editor state.
+  // An empty array means the spec is valid and Save should be enabled.
+  const validationErrors: string[] = (() => {
+    const errs: string[] = []
+
+    if (mode === 'basket') {
+      const filledItems = basketItems.filter(i => i.symbol.trim())
+      if (filledItems.length === 0) {
+        errs.push('Add at least one position with a symbol.')
+      }
+      if (basketMode === 'weight') {
+        const sum = basketItems.reduce((s, i) => s + (i.weight ?? 0), 0)
+        if (Math.abs(sum - 1) >= 0.001) {
+          errs.push(`Weights sum to ${(sum * 100).toFixed(1)}% — must equal 100%.`)
+        }
+        if (!notional || notional <= 0) {
+          errs.push('Notional value must be greater than 0.')
+        }
+      }
+    }
+
+    if (mode === 'redirect') {
+      const filledItems = redirectBasketItems.filter(i => i.symbol.trim())
+      if (filledItems.length === 0) {
+        errs.push('Add at least one target allocation with a symbol.')
+      }
+      const sum = redirectBasketItems.reduce((s, i) => s + (i.weight ?? 0), 0)
+      if (Math.abs(sum - 1) >= 0.001) {
+        errs.push(`Weights sum to ${(sum * 100).toFixed(1)}% — must equal 100%.`)
+      }
+    }
+
+    if (mode === 'backtest') {
+      const filledItems = btBasketItems.filter(i => i.symbol.trim())
+      if (filledItems.length === 0) {
+        errs.push('Add at least one position to the allocation basket.')
+      }
+      if (btBasketMode === 'weight') {
+        const sum = btBasketItems.reduce((s, i) => s + (i.weight ?? 0), 0)
+        if (Math.abs(sum - 1) >= 0.001) {
+          errs.push(`Allocation weights sum to ${(sum * 100).toFixed(1)}% — must equal 100%.`)
+        }
+      }
+      if (!btInitial || btInitial <= 0) {
+        errs.push('Initial amount must be greater than 0.')
+      }
+      if (!btStartDate) {
+        errs.push('Backtest start date is required.')
+      }
+    }
+
+    return errs
+  })()
 
   if (loading) {
     return (
@@ -886,11 +943,23 @@ export default function ScenarioEditPage() {
         )}
 
         {/* Footer actions */}
+        {validationErrors.length > 0 && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 space-y-1">
+            {validationErrors.map((msg, i) => (
+              <p key={i} className="text-amber-400 text-xs flex items-start gap-2">
+                <svg className="w-3.5 h-3.5 mt-0.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
+                {msg}
+              </p>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-3 pt-2 border-t border-white/5">
           <button
             onClick={() => handleSave()}
-            disabled={saving}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+            disabled={saving || validationErrors.length > 0}
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

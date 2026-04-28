@@ -210,6 +210,7 @@ type compareLLMRequest struct {
 	BID      uint   `json:"b_id"`
 	Question string `json:"question,omitempty"`
 	Currency string `json:"currency"`
+	Model    string `json:"model"`
 }
 
 // CompareLLM handles POST /api/v1/scenarios/compare-llm.
@@ -235,6 +236,12 @@ func (h *ScenarioHandler) CompareLLM(c *gin.Context) {
 	if req.Currency == "" {
 		req.Currency = "USD"
 	}
+
+	effectiveKey := req.Model
+	if effectiveKey != "flash" && effectiveKey != "pro" {
+		effectiveKey = "pro" // default to pro
+	}
+	modelKey := h.LLM.ResolveModel(effectiveKey)
 
 	// Load real portfolio data once; reused as base for both scenarios.
 	realData, err := h.Repo.LoadSaved(userHash)
@@ -300,12 +307,12 @@ func (h *ScenarioHandler) CompareLLM(c *gin.Context) {
 	specA, specB := specJSONForID(h.ScenarioRepo, user.ID, req.AID), specJSONForID(h.ScenarioRepo, user.ID, req.BID)
 	cacheKey := scenarioCompareCacheKey(specA, specB, req.Question, req.Currency)
 	var cached models.LLMCache
-	if h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, cacheKey, "pro").First(&cached).Error == nil {
+	if h.DB.Where("user_hash = ? AND prompt_type = ? AND model = ?", userHash, cacheKey, modelKey).First(&cached).Error == nil {
 		c.JSON(http.StatusOK, gin.H{"response": cached.Response, "cached": true})
 		return
 	}
 
-	response, err := h.LLM.GenerateSimple(c.Request.Context(), prompt, "pro")
+	response, err := h.LLM.GenerateSimple(c.Request.Context(), prompt, modelKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "LLM error: " + err.Error()})
 		return
@@ -315,7 +322,7 @@ func (h *ScenarioHandler) CompareLLM(c *gin.Context) {
 	h.DB.Create(&models.LLMCache{
 		UserHash:   userHash,
 		PromptType: cacheKey,
-		Model:      "pro",
+		Model:      modelKey,
 		Response:   response,
 	})
 

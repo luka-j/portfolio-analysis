@@ -37,6 +37,9 @@ const loadingLabelMap: Record<string, string> = {
   ticker_analysis: 'Researching ticker…',
   risk_metrics_comparison: 'Comparing portfolio scenarios…',
   holdings_comparison: 'Analyzing composition differences…',
+  geographic_sector_bottlenecks: 'Analyzing geographic and sector bottlenecks…',
+  biggest_drag_on_performance: 'Identifying performance drags…',
+  stress_test_beta: 'Stress-testing vs market…',
 }
 
 const examplePrompts = [
@@ -103,7 +106,8 @@ export default function LLMPage() {
   const showToolCall = useCallback((event: LLMToolCallEvent) => {
     if (toolCallTimerRef.current) clearTimeout(toolCallTimerRef.current)
     toolCallShownAt.current = Date.now()
-    setActiveToolCall(event)
+    const label = event.label || AVAILABLE_TOOLS.find(t => t.id === event.tool)?.label || event.tool
+    setActiveToolCall({ ...event, label })
   }, [])
   useEffect(() => {
     if (initialPrompt && !autoSentRef.current) {
@@ -126,7 +130,7 @@ export default function LLMPage() {
     setLoading(true)
     setLoadingLabel('Comparing scenarios…')
     try {
-      const res = await compareScenariosLLM(aId, targetId, question, 'USD')
+      const res = await compareScenariosLLM(aId, targetId, question, 'USD', model)
       setLoading(false)
       setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
     } catch (err) {

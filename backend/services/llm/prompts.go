@@ -296,6 +296,7 @@ Then fill each field with fluent markdown prose:
 		SystemInstruction: "You are an expert financial analyst. Focus strictly on near-term calendar events (next 30 days). Discard any hypothetical scenarios or long-term trends. Always use exact dates when available.",
 		ChatAccessible:    true,
 		Cacheable:         false,
+		Schema:            sectionSchema("earnings_events", "macro_events", "market_catalysts", "risks_opportunities"),
 		SectionOrder: []string{
 			"thinking",
 			"earnings_events",

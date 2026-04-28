@@ -929,11 +929,11 @@ export interface CompareScenariosLLMResponse {
 }
 
 export async function compareScenariosLLM(
-  aId: number, bId: number, question?: string, currency = 'USD'
+  aId: number, bId: number, question?: string, currency = 'USD', model = 'pro'
 ): Promise<CompareScenariosLLMResponse> {
   return request<CompareScenariosLLMResponse>('/scenarios/compare-llm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ a_id: aId, b_id: bId, question, currency }),
+    body: JSON.stringify({ a_id: aId, b_id: bId, question, currency, model }),
   });
 }

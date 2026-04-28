@@ -247,30 +247,37 @@ func (h *StatsHandler) Compare(c *gin.Context) {
 				continue
 			}
 
-			var user models.User
-			if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
-				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "user not found"})
-				continue
-			}
+			// scenarioID==0 means "Real portfolio" — use the real data directly as the benchmark.
+			var syntheticData *models.FlexQueryData
+			if scenarioID == 0 {
+				syntheticData = realData
+			} else {
+				var user models.User
+				if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+					benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "user not found"})
+					continue
+				}
 
-			row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
-			if err != nil || row == nil {
-				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "scenario not found"})
-				continue
-			}
+				row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
+				if err != nil || row == nil {
+					benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "scenario not found"})
+					continue
+				}
 
-			spec, err := scenariosvc.ParseSpec(row)
-			if err != nil {
-				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "parsing scenario: " + err.Error()})
-				continue
-			}
+				spec, err := scenariosvc.ParseSpec(row)
+				if err != nil {
+					benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "parsing scenario: " + err.Error()})
+					continue
+				}
 
-			syntheticData, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
-			if err != nil {
-				benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "building scenario: " + err.Error()})
-				continue
+				built, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
+				if err != nil {
+					benchmarks = append(benchmarks, models.BenchmarkResult{Symbol: sym, Error: "building scenario: " + err.Error()})
+					continue
+				}
+				built.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+				syntheticData = built
 			}
-			syntheticData.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
 
 			sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
 			if err != nil {
@@ -498,30 +505,37 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 					continue
 				}
 
-				var user models.User
-				if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
-					results = append(results, models.StandaloneResult{Symbol: sym, Error: "user not found"})
-					continue
-				}
+				// scenarioID==0 means "Real portfolio" — use the real data directly.
+				var syntheticData *models.FlexQueryData
+				if scenarioID == 0 {
+					syntheticData = realData
+				} else {
+					var user models.User
+					if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+						results = append(results, models.StandaloneResult{Symbol: sym, Error: "user not found"})
+						continue
+					}
 
-				row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
-				if err != nil || row == nil {
-					results = append(results, models.StandaloneResult{Symbol: sym, Error: "scenario not found"})
-					continue
-				}
+					row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
+					if err != nil || row == nil {
+						results = append(results, models.StandaloneResult{Symbol: sym, Error: "scenario not found"})
+						continue
+					}
 
-				spec, err := scenariosvc.ParseSpec(row)
-				if err != nil {
-					results = append(results, models.StandaloneResult{Symbol: sym, Error: "parsing scenario: " + err.Error()})
-					continue
-				}
+					spec, err := scenariosvc.ParseSpec(row)
+					if err != nil {
+						results = append(results, models.StandaloneResult{Symbol: sym, Error: "parsing scenario: " + err.Error()})
+						continue
+					}
 
-				syntheticData, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
-				if err != nil {
-					results = append(results, models.StandaloneResult{Symbol: sym, Error: "building scenario: " + err.Error()})
-					continue
+					built, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
+					if err != nil {
+						results = append(results, models.StandaloneResult{Symbol: sym, Error: "building scenario: " + err.Error()})
+						continue
+					}
+					built.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+					syntheticData = built
 				}
-				syntheticData.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
 
 				sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
 				if err != nil {
@@ -814,30 +828,37 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 				goto computeBeta
 			}
 
-			var user models.User
-			if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
-				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "user not found"})
-				goto computeBeta
-			}
+			// scenarioID==0 means \"Real portfolio\" — use the real data directly as the benchmark.
+			var syntheticData *models.FlexQueryData
+			if scenarioID == 0 {
+				syntheticData = realData
+			} else {
+				var user models.User
+				if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+					rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "user not found"})
+					goto computeBeta
+				}
 
-			row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
-			if err != nil || row == nil {
-				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "scenario not found"})
-				goto computeBeta
-			}
+				row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
+				if err != nil || row == nil {
+					rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "scenario not found"})
+					goto computeBeta
+				}
 
-			spec, err := scenariosvc.ParseSpec(row)
-			if err != nil {
-				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "parsing scenario: " + err.Error()})
-				goto computeBeta
-			}
+				spec, err := scenariosvc.ParseSpec(row)
+				if err != nil {
+					rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "parsing scenario: " + err.Error()})
+					goto computeBeta
+				}
 
-			syntheticData, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
-			if err != nil {
-				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "building scenario: " + err.Error()})
-				goto computeBeta
+				built, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
+				if err != nil {
+					rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "building scenario: " + err.Error()})
+					goto computeBeta
+				}
+				built.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+				syntheticData = built
 			}
-			syntheticData.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
 
 			sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
 			if err != nil {
@@ -1097,6 +1118,17 @@ func (h *StatsHandler) GetCumulative(c *gin.Context) {
 	}
 
 	results := []models.CumulativeSeriesResult{{Symbol: "Portfolio", Series: pSeries}}
+
+	// Also compute the MWR cumulative series so the frontend can overlay it on the MWR chart
+	// for hypothetical/scenario portfolios (the MWR chart needs this from GetCumulative since
+	// addScenarioBenchmark calls getCumulativeSeries to obtain both TWR and MWR series).
+	if mwrResp, err := h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel, cachedOnly); err == nil && mwrResp != nil {
+		mwrSeries := make([]models.CumulativePoint, len(mwrResp.Data))
+		for i, pt := range mwrResp.Data {
+			mwrSeries[i] = models.CumulativePoint{Date: pt.Date, Value: pt.Value}
+		}
+		results = append(results, models.CumulativeSeriesResult{Symbol: "Portfolio-MWR", Series: mwrSeries})
+	}
 
 	if symStr := strings.TrimSpace(c.Query("symbols")); symStr != "" {
 		for _, sym := range strings.Split(symStr, ",") {

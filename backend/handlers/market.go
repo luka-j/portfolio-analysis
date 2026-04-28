@@ -97,7 +97,11 @@ func (h *MarketHandler) GetHistory(c *gin.Context) {
 // GetSymbols handles GET /api/v1/market/symbols
 func (h *MarketHandler) GetSymbols(c *gin.Context) {
 	var symbols []string
-	if err := h.DB.Model(&models.MarketData{}).Where("symbol NOT LIKE '%=X'").Distinct("symbol").Pluck("symbol", &symbols).Error; err != nil {
+	// Exclude FX pairs, PENDING_CASH, and symbols whose rows are all error-sentinels (volume = -1).
+	if err := h.DB.Model(&models.MarketData{}).
+		Where("symbol NOT LIKE '%=X' AND symbol != 'PENDING_CASH' AND volume != -1").
+		Distinct("symbol").
+		Pluck("symbol", &symbols).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
