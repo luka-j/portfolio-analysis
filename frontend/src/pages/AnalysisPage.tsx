@@ -31,14 +31,6 @@ const FX_METHOD_OPTIONS = [
   { label: 'Spot',       value: 'spot'       as const, tooltip: "Applies today's FX rate to all prices. Shows current market value converted at the current exchange rate, regardless of when trades were made." },
 ]
 
-const PERIOD_OPTIONS = [
-  { label: '1M',     value: 1  },
-  { label: '3M',     value: 3  },
-  { label: '6M',     value: 6  },
-  { label: '1Y',     value: 12 },
-  { label: 'All',    value: 0  },
-  { label: 'Custom', value: -1 },
-]
 
 const CHART_MODE_OPTIONS = [
   { label: 'TWR',                value: 'twr'                as const },
@@ -123,6 +115,15 @@ export default function AnalysisPage() {
   const [acctModel, setAcctModel] = usePersistentState<'historical' | 'spot'>('analysis_acctModel', 'historical')
   const [customFrom, setCustomFrom] = useState(() => getFromDate(12))
   const [customTo,   setCustomTo]   = useState(() => formatDate(new Date()))
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+
+  const periodOptions = [
+    { label: '1M',     value: 1  },
+    { label: '3M',     value: 3  },
+    { label: '1Y',     value: 12 },
+    { label: 'All',    value: 0  },
+    { label: period === -1 ? `${customFrom.substring(2).replace(/-/g, '/')} - ${customTo.substring(2).replace(/-/g, '/')}` : 'Custom', value: -1 },
+  ]
 
   // Chart modes
   const [chartMode, setChartMode]       = usePersistentState<ChartMode>('analysis_chartMode', 'twr')
@@ -721,20 +722,40 @@ export default function AnalysisPage() {
       </div>
 
       {/* Controls */}
-      <div className={`flex flex-wrap justify-center items-end gap-4 ${period === -1 ? 'mb-4' : 'mb-20'}`}>
+      <div className="flex flex-wrap justify-center items-end gap-4 mb-20">
         <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
-        <SegmentedControl
-          label="Time Period"
-          options={PERIOD_OPTIONS}
-          value={period}
-          onChange={p => {
-            if (p === -1 && period !== -1) {
-              setCustomFrom(getFromDate(period === 0 ? 12 : period))
-              setCustomTo(formatDate(new Date()))
-            }
-            setPeriod(p)
-          }}
-        />
+        
+        <div className="relative">
+          <SegmentedControl
+            label="Time Period"
+            options={periodOptions}
+            value={period}
+            onChange={p => {
+              if (p === -1) {
+                if (period !== -1) {
+                  setCustomFrom(getFromDate(period === 0 ? 12 : period))
+                  setCustomTo(formatDate(new Date()))
+                }
+                setIsPickerOpen(true)
+              } else {
+                setIsPickerOpen(false)
+              }
+              setPeriod(p)
+            }}
+          />
+          {period === -1 && isPickerOpen && (
+            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50">
+              <DateRangePicker
+                initialFrom={customFrom}
+                initialTo={customTo}
+                minDate={portfolioHistory[0]?.date}
+                onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); setIsPickerOpen(false) }}
+                onCancel={() => setIsPickerOpen(false)}
+              />
+            </div>
+          )}
+        </div>
+
         <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
         <div className="flex flex-col items-center gap-2">
           <div className="relative group/rfr cursor-default">
@@ -774,16 +795,6 @@ export default function AnalysisPage() {
           </div>
         </div>
       </div>
-
-      {period === -1 && (
-        <div className="mb-16">
-          <DateRangePicker
-            initialFrom={customFrom}
-            initialTo={customTo}
-            onApply={(f, t) => { setCustomFrom(f); setCustomTo(t) }}
-          />
-        </div>
-      )}
 
       {error && <ErrorAlert message={error} className="mb-10" />}
 

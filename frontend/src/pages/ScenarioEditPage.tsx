@@ -362,11 +362,12 @@ export default function ScenarioEditPage() {
               }
               if (adj.action === 'buy') {
                 custom.push({
-                  symbol: adj.symbol, exchange: '', action: 'buy_amount',
+                  symbol: adj.symbol, exchange: adj.exchange || '', action: 'buy_amount',
                   value: adj.value, currency: adj.currency || 'USD', date: adj.date ?? '',
                 })
               } else {
-                rows[adj.symbol] = row
+                const key = adj.exchange ? `${adj.symbol}@${adj.exchange}` : adj.symbol
+                rows[key] = row
               }
             }
             setRowAdjustments(rows)
@@ -402,28 +403,31 @@ export default function ScenarioEditPage() {
     if (mode === 'modify') {
       const adjustments: Adjustment[] = []
       // Per-holding row actions.
-      for (const [symbol, row] of Object.entries(rowAdjustments)) {
+      for (const [key, row] of Object.entries(rowAdjustments)) {
         if (row.action === 'none') continue
+        const [symbol, exchange] = key.split('@')
+        const adjBase = { symbol, ...(exchange ? { exchange } : {}), ...(row.date ? { date: row.date } : {}) }
         if (row.action === 'sell_all') {
-          adjustments.push({ symbol, action: 'sell_all', value: 0, ...(row.date ? { date: row.date } : {}) })
+          adjustments.push({ ...adjBase, action: 'sell_all', value: 0 })
         } else if (row.action === 'sell_pct') {
           if (row.value <= 0) continue
-          adjustments.push({ symbol, action: 'sell_pct', value: row.value, ...(row.date ? { date: row.date } : {}) })
+          adjustments.push({ ...adjBase, action: 'sell_pct', value: row.value })
         } else if (row.action === 'sell_qty') {
           if (row.value <= 0) continue
-          adjustments.push({ symbol, action: 'sell_qty', value: row.value, ...(row.date ? { date: row.date } : {}) })
+          adjustments.push({ ...adjBase, action: 'sell_qty', value: row.value })
         } else if (row.action === 'buy_amount') {
           if (row.value <= 0) continue
-          adjustments.push({ symbol, action: 'buy', value: row.value, ...(row.date ? { date: row.date } : {}) })
+          adjustments.push({ ...adjBase, action: 'buy', value: row.value })
         }
       }
       // Arbitrary custom trades (buy $, sell qty for any symbol — not tied to a current holding).
       for (const t of customTrades) {
         if (!t.symbol.trim() || t.value <= 0) continue
+        const adjBase = { symbol: t.symbol.toUpperCase(), ...(t.exchange ? { exchange: t.exchange.toUpperCase() } : {}), currency: t.currency, ...(t.date ? { date: t.date } : {}) }
         if (t.action === 'buy_amount') {
-          adjustments.push({ symbol: t.symbol.toUpperCase(), action: 'buy', value: t.value, currency: t.currency, ...(t.date ? { date: t.date } : {}) })
+          adjustments.push({ ...adjBase, action: 'buy', value: t.value })
         } else {
-          adjustments.push({ symbol: t.symbol.toUpperCase(), action: 'sell_qty', value: t.value, currency: t.currency, ...(t.date ? { date: t.date } : {}) })
+          adjustments.push({ ...adjBase, action: 'sell_qty', value: t.value })
         }
       }
       return { base: modifyBase, adjustments }
@@ -662,14 +666,18 @@ export default function ScenarioEditPage() {
                       </thead>
                       <tbody className="divide-y divide-white/5">
                         {holdings.map(p => {
-                          const row = rowAdjustments[p.symbol] ?? { action: 'none' as RowAction, value: 0, date: '' }
+                          const key = p.listing_exchange ? `${p.symbol}@${p.listing_exchange}` : p.symbol
+                          const row = rowAdjustments[key] ?? { action: 'none' as RowAction, value: 0, date: '' }
                           const active = row.action !== 'none'
                           const needsValue = row.action === 'sell_pct' || row.action === 'sell_qty' || row.action === 'buy_amount'
                           return (
-                            <tr key={p.symbol} className={active ? 'bg-amber-500/5' : 'bg-surface/30'}>
+                            <tr key={key} className={active ? 'bg-amber-500/5' : 'bg-surface/30'}>
                               <td className="px-4 py-3 max-w-0">
                                 <div className="relative group flex items-baseline gap-1.5 min-w-0">
-                                  <span className="font-mono text-slate-100 shrink-0">{p.symbol}</span>
+                                  <span className="font-mono text-slate-100 shrink-0">
+                                    {p.symbol}
+                                    {p.listing_exchange && <span className="text-slate-500 text-[10px] ml-1">{p.listing_exchange}</span>}
+                                  </span>
                                   {p.name && <span className="text-slate-500 text-xs truncate">{p.name}</span>}
                                   {p.name && (
                                     <HoverTooltip align="left" className="whitespace-nowrap font-sans">
@@ -687,14 +695,14 @@ export default function ScenarioEditPage() {
                                   options={ROW_ACTION_OPTIONS.map(a => a)}
                                   labels={ROW_ACTION_OPTIONS.map(a => ROW_ACTION_LABEL[a])}
                                   value={row.action}
-                                  onChange={v => setRowAdjustments(prev => ({ ...prev, [p.symbol]: { ...row, action: v as RowAction } }))}
+                                  onChange={v => setRowAdjustments(prev => ({ ...prev, [key]: { ...row, action: v as RowAction } }))}
                                 />
                               </td>
                               <td className="px-3 py-3 text-right">
                                 {needsValue ? (
                                   <NumberInput
                                     value={row.value.toString()}
-                                    onChange={v => setRowAdjustments(prev => ({ ...prev, [p.symbol]: { ...row, value: parseFloat(v) || 0 } }))}
+                                    onChange={v => setRowAdjustments(prev => ({ ...prev, [key]: { ...row, value: parseFloat(v) || 0 } }))}
                                     min={0}
                                     step={row.action === 'sell_pct' ? 1 : 0.01}
                                     placeholder={row.action === 'sell_pct' ? '%' : row.action === 'sell_qty' ? 'qty' : '$'}
@@ -705,7 +713,7 @@ export default function ScenarioEditPage() {
                               </td>
                               <td className="px-3 py-3">
                                 {active ? (
-                                  <DatePicker value={row.date} onChange={d => setRowAdjustments(prev => ({ ...prev, [p.symbol]: { ...row, date: d } }))} />
+                                  <DatePicker value={row.date} onChange={d => setRowAdjustments(prev => ({ ...prev, [key]: { ...row, date: d } }))} />
                                 ) : (
                                   <span className="text-slate-500 text-xs">—</span>
                                 )}

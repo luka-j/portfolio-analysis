@@ -27,12 +27,6 @@ const CURRENCY_OPTIONS = [
   { label: 'Original', value: 'Original', tooltip: 'Shows each position in its native trading currency without any conversion applied. Totals cannot be aggregated across currencies.', tooltipAlign: 'right' as const },
 ]
 
-const PERIOD_OPTIONS = [
-  { label: '1D', value: '1d' },
-  { label: '1M', value: '1m' },
-  { label: '1Y', value: '1y' },
-  { label: 'Custom', value: 'custom' },
-]
 
 function getPeriodDates(period: string, customFrom: string, customTo: string): { from: string; to: string } {
   const today = formatDate(new Date())
@@ -63,6 +57,15 @@ export default function PortfolioPage() {
   const defaultCustomFrom = (() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return formatDate(d) })()
   const [customFrom, setCustomFrom] = usePersistentState('portfolio_customFrom', defaultCustomFrom)
   const [customTo, setCustomTo] = usePersistentState('portfolio_customTo', formatDate(new Date()))
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+
+  const periodOptions = [
+    { label: '1D', value: '1d' },
+    { label: '1M', value: '1m' },
+    { label: '1Y', value: '1y' },
+    { label: period === 'custom' ? `${customFrom.substring(2).replace(/-/g, '/')} - ${customTo.substring(2).replace(/-/g, '/')}` : 'Custom', value: 'custom' },
+  ]
+
   const [positions, setPositions] = useState<PositionValue[]>([])
   const [totalValue, setTotalValue] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -285,22 +288,32 @@ export default function PortfolioPage() {
           <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
           <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
           {/* Period shown here on desktop only; on mobile it moves below the table */}
-          <div className="hidden md:block">
-            <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+          <div className="hidden md:block relative">
+            <SegmentedControl
+              label="Period"
+              options={periodOptions}
+              value={period}
+              onChange={p => {
+                if (p === 'custom') {
+                  setIsPickerOpen(true)
+                } else {
+                  setIsPickerOpen(false)
+                }
+                setPeriod(p)
+              }}
+            />
+            {period === 'custom' && isPickerOpen && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50">
+                <DateRangePicker
+                  initialFrom={customFrom}
+                  initialTo={customTo}
+                  onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); setIsPickerOpen(false) }}
+                  onCancel={() => setIsPickerOpen(false)}
+                />
+              </div>
+            )}
           </div>
         </div>
-
-        {period === 'custom' && (
-          <div className="hidden md:flex justify-center mb-10">
-            <DateRangePicker
-              initialFrom={customFrom}
-              initialTo={customTo}
-              onApply={(f, t) => { setCustomFrom(f); setCustomTo(t) }}
-            />
-          </div>
-        )}
-
-        {period !== 'custom' && <div className="hidden md:block mb-10" />}
 
         {error && <ErrorAlert message={error} className="mb-10" />}
 
@@ -659,14 +672,29 @@ export default function PortfolioPage() {
         )}
 
         {/* Mobile period selector — below the table */}
-        <div className="md:hidden mt-8 flex flex-col items-center gap-4">
-          <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
-          {period === 'custom' && (
-            <DateRangePicker
-              initialFrom={customFrom}
-              initialTo={customTo}
-              onApply={(f, t) => { setCustomFrom(f); setCustomTo(t) }}
-            />
+        <div className="md:hidden mt-8 flex flex-col items-center gap-4 relative">
+          <SegmentedControl
+            label="Period"
+            options={periodOptions}
+            value={period}
+            onChange={p => {
+              if (p === 'custom') {
+                setIsPickerOpen(true)
+              } else {
+                setIsPickerOpen(false)
+              }
+              setPeriod(p)
+            }}
+          />
+          {period === 'custom' && isPickerOpen && (
+            <div className="absolute bottom-full mb-2 z-50">
+              <DateRangePicker
+                initialFrom={customFrom}
+                initialTo={customTo}
+                onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); setIsPickerOpen(false) }}
+                onCancel={() => setIsPickerOpen(false)}
+              />
+            </div>
           )}
         </div>
 

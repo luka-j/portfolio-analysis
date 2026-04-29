@@ -322,6 +322,7 @@ export type ContributionCadence = 'none' | 'monthly' | 'quarterly' | 'annually';
 
 export interface Adjustment {
   symbol: string;
+  exchange?: string;
   action: AdjustmentAction;
   value: number;
   date?: string;       // YYYY-MM-DD

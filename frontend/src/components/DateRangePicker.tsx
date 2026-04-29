@@ -17,12 +17,12 @@ function buildCells(year: number, month: number): (string | null)[] {
 }
 
 function MonthGrid({
-  year, month, from, to, hover, stage, today,
+  year, month, from, to, hover, stage, today, minDate,
   onClick, onEnter, onLeave,
 }: {
   year: number; month: number
   from: string; to: string
-  hover: string | null; stage: 'from' | 'to'; today: string
+  hover: string | null; stage: 'from' | 'to'; today: string; minDate?: string
   onClick: (d: string) => void
   onEnter: (d: string) => void
   onLeave: () => void
@@ -45,6 +45,8 @@ function MonthGrid({
         {cells.map((ds, i) => {
           if (!ds) return <div key={i} className="h-8" />
           const future  = ds > today
+          const past    = minDate ? ds < minDate : false
+          const disabled = future || past
           const isFrom  = ds === effectiveFrom
           const isTo    = ds === effectiveTo
           const inRange = ds > effectiveFrom && ds < effectiveTo
@@ -52,16 +54,16 @@ function MonthGrid({
           return (
             <button
               key={ds}
-              disabled={future}
+              disabled={disabled}
               onClick={() => onClick(ds)}
               onMouseEnter={() => onEnter(ds)}
               onMouseLeave={onLeave}
               className={[
                 'h-8 w-full text-[11px] font-semibold transition-all',
-                future ? 'text-slate-500 cursor-default' : 'cursor-pointer',
+                disabled ? 'text-slate-500 cursor-default' : 'cursor-pointer',
                 isFrom || isTo ? 'bg-indigo-600 text-white shadow-md rounded-lg relative z-10' : '',
                 inRange ? 'bg-indigo-500/15 text-indigo-300' : '',
-                !isFrom && !isTo && !inRange && !future ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-lg' : '',
+                !isFrom && !isTo && !inRange && !disabled ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-lg' : '',
                 isToday && !isFrom && !isTo ? 'ring-1 ring-inset ring-indigo-500/40 rounded-lg' : '',
               ].filter(Boolean).join(' ')}
             >
@@ -74,10 +76,12 @@ function MonthGrid({
   )
 }
 
-export default function DateRangePicker({ initialFrom, initialTo, onApply }: {
+export default function DateRangePicker({ initialFrom, initialTo, minDate, onApply, onCancel }: {
   initialFrom: string
   initialTo: string
+  minDate?: string
   onApply: (from: string, to: string) => void
+  onCancel?: () => void
 }) {
   const today = formatDate(new Date())
   const [tmpFrom, setTmpFrom] = useState(initialFrom)
@@ -110,7 +114,7 @@ export default function DateRangePicker({ initialFrom, initialTo, onApply }: {
     }
   }
 
-  const shared = { from: tmpFrom, to: tmpTo, hover, stage, today, onClick: handleClick, onEnter: setHover, onLeave: () => setHover(null) }
+  const shared = { from: tmpFrom, to: tmpTo, hover, stage, today, minDate, onClick: handleClick, onEnter: setHover, onLeave: () => setHover(null) }
 
   return (
     <div className="bg-surface border border-border-dim/70 rounded-3xl px-8 py-6 shadow-2xl flex flex-col items-center gap-4">
@@ -134,12 +138,22 @@ export default function DateRangePicker({ initialFrom, initialTo, onApply }: {
         </div>
         <button onClick={() => nav(1)} className="mt-7 p-2 text-slate-500 hover:text-slate-200 hover:bg-white/5 rounded-xl transition-all text-lg leading-none">›</button>
       </div>
-      <button
-        onClick={() => onApply(tmpFrom, tmpTo)}
-        className="px-8 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-500/20"
-      >
-        Apply Range
-      </button>
+      <div className="flex gap-4 w-full mt-2">
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2 bg-surface hover:bg-white/5 border border-border-dim/60 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all"
+          >
+            Cancel
+          </button>
+        )}
+        <button
+          onClick={() => onApply(tmpFrom, tmpTo)}
+          className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-500/20"
+        >
+          Apply Range
+        </button>
+      </div>
     </div>
   )
 }
