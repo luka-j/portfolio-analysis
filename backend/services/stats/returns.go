@@ -104,8 +104,16 @@ func CalculateMWR(cashFlows []models.CashFlow, endValue float64, endDate time.Ti
 
 	if !converged {
 		// If it broke early due to vanishing derivative, or hit max iterations, check if we're actually close to a solution.
-		// Using 1e-5 since NPV scale depends on portfolio size.
-		if math.Abs(npv(r)) > 0.01 && (math.IsNaN(r) || math.IsInf(r, 0) || !converged) {
+		// Normalize NPV by portfolio scale (ending value + absolute sum of cash flows) to make the threshold relative.
+		scale := math.Abs(endValue)
+		for _, cf := range cashFlows {
+			scale += math.Abs(cf.Amount)
+		}
+		if scale == 0 {
+			scale = 1.0
+		}
+
+		if math.Abs(npv(r))/scale > 1e-5 && (math.IsNaN(r) || math.IsInf(r, 0) || !converged) {
 			return 0, fmt.Errorf("MWR did not converge")
 		}
 	}

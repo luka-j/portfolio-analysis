@@ -371,3 +371,34 @@ func TestGetDailyValuesPerPosition_CashFlows(t *testing.T) {
 	assert.Equal(t, 100.0, cfs[0], "buy should result in $100 positive cash flow (cost)")
 	assert.Equal(t, -100.0, cfs[1], "sell should result in -$100 negative cash flow (proceeds)")
 }
+
+func TestGetDailyValues_BasicTimeSeries(t *testing.T) {
+	day1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	day2 := day1.AddDate(0, 0, 1)
+
+	data := &models.FlexQueryData{
+		UserHash: "test_user",
+		Trades: []models.Trade{
+			{Symbol: "TEST", ListingExchange: "EX", Currency: "USD", BuySell: "BUY", Quantity: 10, Price: 100, Proceeds: -1000, DateTime: day1},
+		},
+	}
+
+	mockProvider := &mockMarketProvider{
+		prices: map[string][]models.PricePoint{
+			"TEST": {
+				{Date: day1, Close: 100, AdjClose: 100},
+				{Date: day2, Close: 110, AdjClose: 110},
+			},
+		},
+	}
+
+	svc := NewService(mockProvider, nil, 0)
+	hist, err := svc.GetDailyValues(data, day1, day2, "USD", models.AccountingModelOriginal, false)
+	require.NoError(t, err)
+
+	require.Len(t, hist.Data, 2)
+	assert.Equal(t, "2024-01-01", hist.Data[0].Date)
+	assert.Equal(t, 1000.0, hist.Data[0].Value) // 10 * 100
+	assert.Equal(t, "2024-01-02", hist.Data[1].Date)
+	assert.Equal(t, 1100.0, hist.Data[1].Value) // 10 * 110
+}

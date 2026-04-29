@@ -110,11 +110,13 @@ func TestStatsHandler_CumulativeAndSymbols(t *testing.T) {
 		var resp models.CumulativeResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 
-		require.Len(t, resp.Results, 2, "should have Portfolio and SPY")
+		require.Len(t, resp.Results, 3, "should have Portfolio, Portfolio-MWR, and SPY")
 		assert.Equal(t, "Portfolio", resp.Results[0].Symbol)
-		assert.Equal(t, "SPY", resp.Results[1].Symbol)
+		assert.Equal(t, "Portfolio-MWR", resp.Results[1].Symbol)
+		assert.Equal(t, "SPY", resp.Results[2].Symbol)
 		assert.NotEmpty(t, resp.Results[0].Series)
 		assert.NotEmpty(t, resp.Results[1].Series)
+		assert.NotEmpty(t, resp.Results[2].Series)
 	})
 
 	t.Run("Drawdown", func(t *testing.T) {

@@ -10,33 +10,28 @@ import (
 	ginprometheus "github.com/zsais/go-gin-prometheus"
 	"gorm.io/gorm"
 
+	"portfolio-analysis/bootstrap"
 	"portfolio-analysis/config"
 	"portfolio-analysis/handlers"
 	"portfolio-analysis/middleware"
-	breakdownsvc "portfolio-analysis/services/breakdown"
-	"portfolio-analysis/services/flexquery"
-	"portfolio-analysis/services/fundamentals"
-	"portfolio-analysis/services/fx"
-	"portfolio-analysis/services/llm"
 	"portfolio-analysis/services/market"
-	"portfolio-analysis/services/portfolio"
 	scenariosvc "portfolio-analysis/services/scenario"
-	"portfolio-analysis/services/tax"
 )
 
-// SetupRouter creates the Gin engine with all routes wired.
-func SetupRouter(
+// SetupRouter creates the Gin engine with all routes wired using the provided service registry.
+// svc.Market is used as both market.Provider and market.CurrencyGetter.
+func SetupRouter(cfg *config.Config, database *gorm.DB, svc *bootstrap.AppServices) *gin.Engine {
+	return buildRouter(cfg, database, svc, svc.Market, svc.Market)
+}
+
+// buildRouter is the internal wiring function that accepts explicit market.Provider and
+// market.CurrencyGetter to support both production use and test injection of mock providers.
+func buildRouter(
 	cfg *config.Config,
-	repo *flexquery.Repository,
 	database *gorm.DB,
-	marketSvc market.Provider,
-	currencyGetter market.CurrencyGetter,
-	fxSvc *fx.Service,
-	portfolioSvc *portfolio.Service,
-	taxSvc *tax.Service,
-	fundamentalsSvc *fundamentals.Service,
-	breakdownService *breakdownsvc.Service,
-	llmService *llm.Service,
+	svc *bootstrap.AppServices,
+	mp market.Provider,
+	cg market.CurrencyGetter,
 ) *gin.Engine {
 	r := gin.New()
 
@@ -88,11 +83,11 @@ func SetupRouter(
 		}
 	}()
 
-	// Shared ScenarioMiddleware wired to all handlers that support scenario_id.
-	scenarioMiddleware := handlers.ScenarioMiddleware{
+	// Shared PortfolioResolver wired to all handlers that support scenario_id.
+	resolver := handlers.PortfolioResolver{
 		ScenarioRepo: scenarioRepo,
-		ScenarioMkt:  marketSvc,
-		ScenarioFX:   fxSvc,
+		ScenarioMkt:  mp,
+		ScenarioFX:   svc.FX,
 	}
 
 	// API v1 group with auth.
@@ -105,8 +100,8 @@ func SetupRouter(
 	})
 
 	// Portfolio endpoints.
-	ph := handlers.NewPortfolioHandler(repo, portfolioSvc, fxSvc)
-	ph.ScenarioMiddleware = scenarioMiddleware
+	ph := handlers.NewPortfolioHandler(svc.Repo, svc.Portfolio, svc.FX)
+	ph.PortfolioResolver = resolver
 	api.POST("/portfolio/upload", ph.Upload)
 	api.POST("/portfolio/upload/etrade/benefits", ph.UploadEtradeBenefits)
 	api.POST("/portfolio/upload/etrade/sales", ph.UploadEtradeSales)
@@ -121,14 +116,14 @@ func SetupRouter(
 	api.DELETE("/portfolio/transactions/:id", ph.DeleteTransaction)
 
 	// Market endpoints.
-	mh := handlers.NewMarketHandler(marketSvc, currencyGetter, database)
+	mh := handlers.NewMarketHandler(mp, cg, database)
 	api.GET("/market/history", mh.GetHistory)
 	api.GET("/market/security-chart", mh.GetSecurityChart)
 	api.GET("/market/symbols", mh.GetSymbols)
 
 	// Stats endpoints.
-	sh := handlers.NewStatsHandler(repo, portfolioSvc, marketSvc, fxSvc, currencyGetter)
-	sh.ScenarioMiddleware = scenarioMiddleware
+	sh := handlers.NewStatsHandler(svc.Repo, svc.Portfolio, mp, svc.FX, cg)
+	sh.PortfolioResolver = resolver
 	api.GET("/portfolio/stats", sh.GetStats)
 	api.GET("/portfolio/compare", sh.Compare)
 	api.GET("/portfolio/standalone", sh.GetStandalone)
@@ -140,26 +135,26 @@ func SetupRouter(
 
 	// Tax endpoints.
 	th := &handlers.TaxHandler{
-		ScenarioMiddleware: scenarioMiddleware,
-		Repo:               repo,
-		TaxSvc:             taxSvc,
+		PortfolioResolver: resolver,
+		Repo:              svc.Repo,
+		TaxSvc:            svc.Tax,
 	}
 	api.POST("/tax/report", th.GetReport)
 
 	// Breakdown endpoint.
-	bh := handlers.NewBreakdownHandler(repo, portfolioSvc, breakdownService, fundamentalsSvc)
-	bh.ScenarioMiddleware = scenarioMiddleware
+	bh := handlers.NewBreakdownHandler(svc.Repo, svc.Portfolio, svc.Breakdown, svc.Fundamentals)
+	bh.PortfolioResolver = resolver
 	api.GET("/portfolio/breakdown", bh.GetBreakdown)
 
 	// LLM endpoints.
-	lh := handlers.NewLLMHandler(repo, database, llmService, portfolioSvc, taxSvc, marketSvc, currencyGetter, breakdownService, cfg.DefaultRiskFreeRate)
-	lh.ScenarioMiddleware = scenarioMiddleware
+	lh := handlers.NewLLMHandler(svc.Repo, database, svc.LLM, svc.Portfolio, svc.Tax, mp, cg, svc.Breakdown, cfg.DefaultRiskFreeRate)
+	lh.PortfolioResolver = resolver
 	api.GET("/llm/available", lh.IsAvailable)
 	api.GET("/llm/summary", lh.GetSummary)
 	api.POST("/llm/chat", lh.Chat)
 
 	// Scenario endpoints.
-	sch := handlers.NewScenarioHandler(repo, database, scenarioRepo, portfolioSvc, taxSvc, marketSvc, currencyGetter, fxSvc, llmService)
+	sch := handlers.NewScenarioHandler(svc.Repo, database, scenarioRepo, svc.Portfolio, svc.Tax, mp, cg, svc.FX, svc.LLM)
 	api.GET("/scenarios", sch.List)
 	api.POST("/scenarios", sch.Create)
 	api.GET("/scenarios/:id", sch.Get)

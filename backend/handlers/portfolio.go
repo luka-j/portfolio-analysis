@@ -21,7 +21,7 @@ import (
 
 // PortfolioHandler handles portfolio-related endpoints.
 type PortfolioHandler struct {
-	ScenarioMiddleware
+	PortfolioResolver
 	Repo             *flexquery.Repository
 	PortfolioService *portfolio.Service
 	FXService        *fx.Service

@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  LineChart, Line, AreaChart, Area, BarChart, Bar, Cell,
+  LineChart, Line, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import PageLayout from '../components/PageLayout'
@@ -10,16 +10,11 @@ import SegmentedControl from '../components/SegmentedControl'
 import Spinner from '../components/Spinner'
 import DateRangePicker from '../components/DateRangePicker'
 import ErrorAlert from '../components/ErrorAlert'
-import CorrelationHeatmap from '../components/CorrelationHeatmap'
 import CompareScenariosChip from '../components/CompareScenariosChip'
-import AutocompleteInput from '../components/AutocompleteInput'
-import {
-  getPortfolioStats, getPortfolioReturns, comparePortfolio, getStandaloneMetrics,
-  getDrawdownSeries, getRollingMetric, getAttribution, getCorrelations, getCumulativeSeries,
-  getMarketSymbols,
-  type StatsResponse, type DailyValue, type BenchmarkResult, type StandaloneResult,
-  type DrawdownResult, type RollingPoint, type AttributionResult, type CumulativeSeriesResult,
-} from '../api'
+import StatCards from '../components/analysis/StatCards'
+import BenchmarkPanel from '../components/analysis/BenchmarkPanel'
+import HoldingsPanel from '../components/analysis/HoldingsPanel'
+import { getMarketSymbols } from '../api'
 import { formatDate, CURRENCIES, getFromDate, RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { useScenario } from '../context/ScenarioContext'
@@ -48,39 +43,14 @@ const WINDOW_OPTIONS = [
   { label: '6M',  value: 126 },
 ]
 
-const HOLDINGS_VIEW_OPTIONS = [
-  { label: 'Attribution', value: 'attribution' as const },
-  { label: 'Correlation', value: 'correlation' as const },
-]
-
 const COLORS = ['#818cf8', '#34d399', '#fbbf24', '#f87171', '#22d3ee', '#f472b6', '#a78bfa']
 
-
-const STAT_TOOLTIPS: Record<string, string> = {
-  twr: 'Time-weighted return. Eliminates the effect of cash flows — best for evaluating portfolio manager skill.',
-  mwr: 'Money-weighted return. Reflects your actual return including the timing and size of your deposits and withdrawals.',
-}
-
-const STANDALONE_TOOLTIPS: Record<string, string> = {
-  sharpe:     'Excess return above the risk-free rate, divided by total volatility. Higher numbers mean better risk-adjusted performance.',
-  vami:       'Value Added Monthly Index. Growth of a 1,000 investment — reflects compounded total return.',
-  volatility: 'Annualized standard deviation of daily returns. Measures how much the portfolio fluctuates.',
-  sortino:    'Like Sharpe, but only penalizes downside volatility below the risk-free rate, ignoring upside swings. Higher is better.',
-  max_drawdown: 'Largest peak-to-trough decline over the period. Measures worst-case loss from a high point.',
-}
-
-const COMPARE_TOOLTIPS: Record<string, string> = {
-  Security:      'The benchmark being compared against your portfolio.',
-  Alpha:         'Annualized excess return over the benchmark after adjusting for market risk. Positive means outperformance.',
-  Beta:          'Sensitivity to benchmark moves. Beta > 1 means your portfolio is more volatile than the benchmark.',
-  Treynor:       'Return per unit of systematic (market) risk, using beta as the risk measure. Higher is better.',
-  'Tracking Err':'Annualized deviation of your returns from the benchmark. Lower means closer tracking.',
-  'Info Ratio':  'Active return divided by tracking error. Measures the consistency of outperformance.',
-  Correlation:   'How closely your returns move with the benchmark. 1 = perfect alignment, 0 = no relationship.',
-}
-
-type ChartMode = 'twr' | 'mwr' | 'drawdown' | 'rolling_sharpe' | 'rolling_sortino' | 'rolling_volatility' | 'rolling_beta'
-type HoldingsView = 'attribution' | 'correlation'
+import { useAnalysisData } from './hooks/useAnalysisData'
+import { useBenchmarks } from './hooks/useBenchmarks'
+import { useChartModeData } from './hooks/useChartModeData'
+import { useCompareOverlay } from './hooks/useCompareOverlay'
+import { useAnalysisChartData } from './hooks/useAnalysisChartData'
+import type { ChartMode, HoldingsView } from './hooks/types'
 
 function xTickFormatter(val: string) {
   return new Date(val).toLocaleString('default', { month: 'short', year: '2-digit' })
@@ -90,15 +60,6 @@ const AXIS_STYLE = { fontSize: 10, fill: '#475569' }
 const AXIS_LABEL_STYLE = { fontSize: 10, fill: '#334155', fontWeight: 900 }
 
 const COMPARE_COLOR = '#fbbf24' // amber — scenario-active accent
-
-function formatSymbolName(sym: string, scenarios: Array<{id: number, name: string}>) {
-  if (sym.startsWith('scenario:')) {
-    const sid = parseInt(sym.replace('scenario:', ''), 10)
-    const s = scenarios.find(x => x.id === sid)
-    return s ? `[S] ${s.name}` : sym
-  }
-  return sym
-}
 
 export default function AnalysisPage() {
   const navigate = useNavigate()
@@ -130,35 +91,11 @@ export default function AnalysisPage() {
   const [rollingWindow, setRollingWindow] = usePersistentState('analysis_rollingWindow', 63)
   const [holdingsView, setHoldingsView] = usePersistentState<HoldingsView>('analysis_holdingsView', 'attribution')
 
-  // Portfolio data
-  const [stats, setStats]           = useState<StatsResponse | null>(null)
-  const [portfolioHistory, setPortfolioHistory] = useState<DailyValue[]>([])
-  const [mwrHistory, setMwrHistory]             = useState<DailyValue[]>([])
-
-  // Benchmark
+  // Benchmark input and market symbols
   const [benchmarkInput, setBenchmarkInput]     = useState('SPY')
   const [marketSymbols, setMarketSymbols]       = useState<string[]>([])
-  const [benchmarkSymbols, setBenchmarkSymbols] = useState<string[]>([])
-  const [cumulativeResults, setCumulativeResults] = useState<CumulativeSeriesResult[]>([])
-  const [compareResults, setCompareResults]     = useState<BenchmarkResult[]>([])
-  const [standaloneResults, setStandaloneResults] = useState<StandaloneResult[]>([])
 
-  // Chart-mode data
-  const [drawdownResults, setDrawdownResults]   = useState<DrawdownResult[]>([])
-  const [rollingSeries, setRollingSeries]       = useState<Record<string, RollingPoint[]>>({}) // key: 'Portfolio' or bench sym
-  const [chartModeLoading, setChartModeLoading] = useState(false)
-  const [chartModeError, setChartModeError]     = useState('')
-
-  // Holdings analysis data
-  const [attributionData, setAttributionData]       = useState<AttributionResult[]>([])
-  const [attributionTWR, setAttributionTWR]         = useState(0)
-  const [correlationData, setCorrelationData]       = useState<{ symbols: string[]; matrix: number[][] }>({ symbols: [], matrix: [] })
-  const [holdingsLoading, setHoldingsLoading]       = useState(false)
-  const [holdingsError, setHoldingsError]           = useState('')
-
-  // Scenario benchmarks (chart overlays from specific scenarios)
-  const [scenarioBenchmarks, setScenarioBenchmarks] = useState<Array<{id: number; name: string; twr: DailyValue[]; mwr: DailyValue[]}>>([])
-  const [scenarioBenchmarkLoading, setScenarioBenchmarkLoading] = useState(false)
+  // Scenario Picker
   const [scenarioPickerOpen, setScenarioPickerOpen] = useState(false)
   const scenarioPickerRef = useRef<HTMLDivElement>(null)
 
@@ -166,419 +103,43 @@ export default function AnalysisPage() {
   const [riskFreeRate, setRiskFreeRate]           = usePersistentState('analysis_riskFreeRate', 0.025)
   const [riskFreeRateInput, setRiskFreeRateInput] = usePersistentState('analysis_riskFreeRateInput', '2.50')
 
-  // Compare scenario overlay data
-  const [compareStats, setCompareStats]             = useState<StatsResponse | null>(null)
-  const [compareTwrHistory, setCompareTwrHistory]   = useState<DailyValue[]>([])
-  const [compareStandalone, setCompareStandalone]   = useState<StandaloneResult | null>(null)
-  const [compareDataLoading, setCompareDataLoading] = useState(false)
-
-  // Loading / error states
-  const [loading, setLoading]           = useState(true)
-  const [refreshing, setRefreshing]     = useState(false)
-  const [compareLoading, setCompareLoading] = useState(false)
-  const [standaloneLoading, setStandaloneLoading] = useState(false)
-  const [standaloneRefreshing, setStandaloneRefreshing] = useState(false)
-  const [error, setError]               = useState('')
-  const [compareError, setCompareError] = useState('')
-  const [standaloneError, setStandaloneError] = useState('')
-
-  const loadGenRef = useRef(0)
-
   const from = period === -1 ? customFrom : getFromDate(period)
   const to   = period === -1 ? customTo   : formatDate(new Date())
-  const effectiveFrom = period === 0 ? (portfolioHistory[0]?.date ?? from) : from
 
-  // ── Core data load (stats + cumulative returns) ─────────────────────────────
-  const loadData = useCallback(async () => {
-    loadGenRef.current += 1
-    const gen = loadGenRef.current
-    setLoading(true)
-    setRefreshing(false)
-    setError('')
-
-    let freshStats = false
-    let freshHist = false
-
-    const checkCachedDone = () => {
-      if (gen === loadGenRef.current && !freshStats && !freshHist) {
-        setLoading(false)
-        setRefreshing(true)
-      }
-    }
-
-    getPortfolioStats(from, to, currency, acctModel, true, undefined, active).then(st => {
-      if (gen === loadGenRef.current && !freshStats && Object.keys(st.statistics).length > 0) {
-        setStats(st)
-        checkCachedDone()
-      }
-    }).catch(() => {})
-
-    getPortfolioReturns(from, to, currency, acctModel, 'twr', true, undefined, active).then(hist => {
-      if (gen === loadGenRef.current && !freshHist && hist.data.length > 0) {
-        setPortfolioHistory(hist.data ?? [])
-        checkCachedDone()
-      }
-    }).catch(() => {})
-
-    Promise.all([
-      getPortfolioStats(from, to, currency, acctModel, false, undefined, active).then(st => {
-        freshStats = true
-        if (gen === loadGenRef.current) setStats(st)
-      }),
-      getPortfolioReturns(from, to, currency, acctModel, 'twr', false, undefined, active).then(hist => {
-        freshHist = true
-        if (gen === loadGenRef.current) setPortfolioHistory(hist.data ?? [])
-      }),
-      getPortfolioReturns(from, to, currency, acctModel, 'mwr', false, undefined, active).then(hist => {
-        if (gen === loadGenRef.current) setMwrHistory(hist.data ?? [])
-      }).catch(() => {}),
-    ]).catch(err => {
-      if (gen === loadGenRef.current) setError(err instanceof Error ? err.message : 'Failed to load')
-    }).finally(() => {
-      if (gen === loadGenRef.current) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    })
-  }, [currency, acctModel, from, to, active])
-
-  useEffect(() => { loadData() }, [loadData])
-
+  // We need to resolve effectiveFrom first to pass to hooks. But portfolioHistory comes from useAnalysisData.
+  // Wait, effectiveFrom depends on portfolioHistory. So we'll get it from useAnalysisData or handle it there.
+  // The hooks compute effectiveFrom internally if we pass it, but to pass it we need portfolioHistory.
+  // Actually, let's keep effectiveFrom as a let, and update it.
+  
+  // Actually, we can fetch market symbols
   useEffect(() => {
     getMarketSymbols().then(setMarketSymbols).catch(() => {})
   }, [])
 
-  // ── Standalone metrics ───────────────────────────────────────────────────────
-  const loadStandalone = useCallback(async (symbols = '') => {
-    const gen = loadGenRef.current
-    setStandaloneLoading(true)
-    setStandaloneRefreshing(false)
-    setStandaloneError('')
+  const analysisParams = { currency, acctModel, from, to, active, riskFreeRate, scenarios, effectiveFrom: from, compare }
 
-    let freshArrived = false
+  const analysisData = useAnalysisData(analysisParams)
+  const { stats, portfolioHistory, mwrHistory, loading, refreshing, error, standaloneResults, standaloneLoading, standaloneRefreshing, standaloneError, loadStandalone, attributionData, attributionTWR, correlationData, holdingsLoading, holdingsError } = analysisData
 
-    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, true, active).then(res => {
-      if (gen === loadGenRef.current && !freshArrived && res.results.length > 0) {
-        setStandaloneResults(res.results.map(r => ({ ...r, symbol: formatSymbolName(r.symbol, scenarios) })))
-        setStandaloneLoading(false)
-        setStandaloneRefreshing(true)
-      }
-    }).catch(() => {})
+  // Re-calculate effectiveFrom once we have portfolio history
+  const effectiveFrom = period === 0 ? (portfolioHistory[0]?.date ?? from) : from
+  const paramsWithEffectiveFrom = { ...analysisParams, effectiveFrom }
 
-    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, false, active).then(res => {
-      if (gen === loadGenRef.current) {
-        freshArrived = true
-        setStandaloneResults(res.results.map(r => ({ ...r, symbol: formatSymbolName(r.symbol, scenarios) })))
-      }
-    }).catch(err => {
-      if (gen === loadGenRef.current) setStandaloneError(err instanceof Error ? err.message : 'Standalone metrics failed')
-    }).finally(() => {
-      if (gen === loadGenRef.current) {
-        setStandaloneLoading(false)
-        setStandaloneRefreshing(false)
-      }
-    })
-  }, [currency, effectiveFrom, to, acctModel, riskFreeRate, active, scenarios])
+  // Update loadStandalone in analysisData to use effectiveFrom implicitly, but useBenchmarks needs it.
+  const benchmarks = useBenchmarks({ ...paramsWithEffectiveFrom, loadStandalone })
+  const { benchmarkSymbols, scenarioBenchmarks, cumulativeResults, compareResults, compareLoading, compareError, scenarioBenchmarkLoading, handleCompare, applyRiskFreeRate, handleRemoveSymbol, addScenarioBenchmark, removeScenarioBenchmark } = benchmarks
 
-  useEffect(() => {
-    const allSyms = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
-    loadStandalone(allSyms)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadStandalone])
+  const chartModeData = useChartModeData({ ...paramsWithEffectiveFrom, chartMode, rollingWindow, benchmarkSymbols, scenarioBenchmarks })
+  const { drawdownResults, rollingSeries, chartModeLoading, chartModeError } = chartModeData
 
-  // ── Chart-mode data ──────────────────────────────────────────────────────────
-  const loadChartMode = useCallback(async (mode: ChartMode, window: number, benchSyms: string[], sBenches: typeof scenarioBenchmarks) => {
-    if (mode === 'twr' || mode === 'mwr') {
-      setChartModeLoading(false)
-      setChartModeError('')
-      return
-    }
-    setChartModeLoading(true)
-    setChartModeError('')
-    try {
-      if (mode === 'drawdown') {
-        const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
-        const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, symParam, active)
-        const baseResults = res.results ?? []
-        
-        const sbRes = await Promise.all(sBenches.map(async sb => {
-          try {
-             const r = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, undefined, sb.id)
-             const pRes = (r.results ?? []).find(x => x.symbol === 'Portfolio')
-             if (pRes) return { ...pRes, symbol: `[S] ${sb.name}` }
-          } catch {}
-          return null
-        }))
-        setDrawdownResults([...baseResults, ...sbRes.filter(Boolean) as DrawdownResult[]])
-      } else {
-        const metric = mode === 'rolling_sharpe' ? 'sharpe'
-          : mode === 'rolling_volatility' ? 'volatility'
-          : mode === 'rolling_sortino' ? 'sortino'
-          : 'beta'
-        const newSeries: Record<string, RollingPoint[]> = {}
-        if (metric === 'beta') {
-          const allBenchSyms = [...benchSyms, ...sBenches.map(sb => `scenario:${sb.id}`)]
-          await Promise.all(allBenchSyms.map(async sym => {
-            const symName = formatSymbolName(sym, scenarios)
-            try {
-              const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, sym, undefined, active)
-              const result = res.results[0]
-              if (result && !result.error) newSeries[symName] = result.series
-            } catch { /* skip bad symbols */ }
-            
-            await Promise.all(sBenches.map(async sb => {
-              if (sym === `scenario:${sb.id}`) return // skip self comparison
-              try {
-                const r = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, sym, undefined, sb.id)
-                const result = r.results[0]
-                if (result && !result.error) newSeries[`[S] ${sb.name} (${symName})`] = result.series
-              } catch {}
-            }))
-          }))
-        } else {
-          const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
-          const res = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, undefined, symParam, active)
-          for (const result of res.results) {
-            if (!result.error) newSeries[result.symbol] = result.series
-          }
-          await Promise.all(sBenches.map(async sb => {
-             try {
-               const r = await getRollingMetric(metric, window, effectiveFrom, to, currency, acctModel, riskFreeRate, undefined, undefined, sb.id)
-               const pRes = r.results.find(x => x.symbol === 'Portfolio')
-               if (pRes && !pRes.error) newSeries[`[S] ${sb.name}`] = pRes.series
-             } catch {}
-          }))
-        }
-        setRollingSeries(newSeries)
-      }
-    } catch (err) {
-      setChartModeError(err instanceof Error ? err.message : 'Failed to load chart data')
-    } finally {
-      setChartModeLoading(false)
-    }
-  }, [effectiveFrom, to, currency, acctModel, riskFreeRate, active])
+  const compareOverlay = useCompareOverlay({ ...paramsWithEffectiveFrom, compare })
+  const { compareStats, compareTwrHistory, compareStandalone, compareDataLoading } = compareOverlay
 
-  useEffect(() => {
-    loadChartMode(chartMode, rollingWindow, benchmarkSymbols, scenarioBenchmarks)
-  }, [loadChartMode, chartMode, rollingWindow, benchmarkSymbols, scenarioBenchmarks])
-
-  // Auto-switch away from Rolling Beta when all benchmarks are removed
-  useEffect(() => {
-    if (benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0 && chartMode === 'rolling_beta') {
-      setChartMode('twr')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [benchmarkSymbols, scenarioBenchmarks])
-
-  // ── Holdings analysis ────────────────────────────────────────────────────────
-  const loadHoldings = useCallback(async () => {
-    setHoldingsLoading(true)
-    setHoldingsError('')
-    try {
-      const [attrRes, corrRes] = await Promise.all([
-        getAttribution(effectiveFrom, to, currency, acctModel, riskFreeRate, active),
-        getCorrelations(effectiveFrom, to, currency, acctModel, active),
-      ])
-      setAttributionData(attrRes.positions)
-      setAttributionTWR(attrRes.total_twr)
-      setCorrelationData({ symbols: corrRes.symbols, matrix: corrRes.matrix })
-    } catch (err) {
-      setHoldingsError(err instanceof Error ? err.message : 'Failed to load holdings data')
-    } finally {
-      setHoldingsLoading(false)
-    }
-  }, [effectiveFrom, to, currency, acctModel, riskFreeRate, active])
-
-  useEffect(() => { loadHoldings() }, [loadHoldings])
-
-  // ── Compare scenario overlay ─────────────────────────────────────────────────
-  const loadCompareData = useCallback(async () => {
-    if (compare === null) {
-      setCompareStats(null)
-      setCompareTwrHistory([])
-      setCompareStandalone(null)
-      return
-    }
-    setCompareDataLoading(true)
-    try {
-      // compare=0 means Real (no scenario_id); compare>0 means that scenario
-      const cid = compare > 0 ? compare : null
-      const [st, hist, sa] = await Promise.all([
-        getPortfolioStats(from, to, currency, acctModel, false, undefined, cid),
-        getPortfolioReturns(from, to, currency, acctModel, 'twr', false, undefined, cid),
-        getStandaloneMetrics('', currency, effectiveFrom, to, acctModel, riskFreeRate, false, cid),
-      ])
-      setCompareStats(st)
-      setCompareTwrHistory(hist.data ?? [])
-      setCompareStandalone(sa.results.find(r => r.symbol === 'Portfolio') ?? null)
-    } catch {
-      // swallow — compare overlay is best-effort
-    } finally {
-      setCompareDataLoading(false)
-    }
-  }, [compare, from, to, currency, acctModel, effectiveFrom, riskFreeRate])
-
-  useEffect(() => { loadCompareData() }, [loadCompareData])
-
-  // ── Benchmark refresh on date/currency change ────────────────────────────────
-  useEffect(() => {
-    if (benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0) return
-    const refresh = async () => {
-      setCompareLoading(true)
-      setCompareError('')
-      try {
-        const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
-        const [cumRes, comp] = await Promise.all([
-          benchmarkSymbols.length > 0 ? getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, benchmarkSymbols.join(','), active) : Promise.resolve({results: []}),
-          comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active),
-        ])
-        if (benchmarkSymbols.length > 0) {
-          setCumulativeResults(cumRes.results.filter(r => r.symbol !== 'Portfolio'))
-        }
-        setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
-        loadStandalone(allSymsStr)
-      } catch (err) {
-        setCompareError(err instanceof Error ? err.message : 'Comparison failed')
-      } finally {
-        setCompareLoading(false)
-      }
-    }
-    refresh()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveFrom, to, currency, acctModel])
-
-  // ── Handlers ─────────────────────────────────────────────────────────────────
-  const handleCompare = async (inputOverride?: string) => {
-    const input = inputOverride ?? benchmarkInput
-
-    // If the user typed/selected a scenario name, add it as a scenario benchmark
-    const matchedScenario = scenarios.find(s => s.name === input && s.id !== active)
-    if (matchedScenario) {
-      addScenarioBenchmark(matchedScenario.id, matchedScenario.name)
-      setBenchmarkInput('')
-      return
-    }
-
-    const inputSymbols = input.split(',').map(s => s.trim()).filter(Boolean)
-    const newSymbols = inputSymbols.filter(s => !benchmarkSymbols.includes(s))
-    if (newSymbols.length === 0) { setBenchmarkInput(''); return }
-    setCompareLoading(true)
-    setCompareError('')
-    try {
-      const allSymbols = [...benchmarkSymbols, ...newSymbols]
-      const allSymsStr = [...allSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
-      
-      const [cumRes, comp] = await Promise.all([
-        getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, newSymbols.join(','), active),
-        comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active),
-      ])
-      setCumulativeResults(prev => {
-        const merged = [...prev]
-        for (const r of cumRes.results.filter(r => r.symbol !== 'Portfolio')) {
-          if (!merged.find(m => m.symbol === r.symbol)) merged.push(r)
-        }
-        return merged
-      })
-      setBenchmarkSymbols(allSymbols)
-      setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
-      setBenchmarkInput('')
-      loadStandalone(allSymsStr)
-    } catch (err) {
-      setCompareError(err instanceof Error ? err.message : 'Comparison failed')
-    } finally {
-      setCompareLoading(false)
-    }
-  }
-
-  const applyRiskFreeRate = async (newRate: number) => {
-    setRiskFreeRateInput((newRate * 100).toFixed(2))
-    if (newRate === riskFreeRate) return
-    setRiskFreeRate(newRate)
-    const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
-    if (!allSymsStr) return
-    setCompareLoading(true)
-    setCompareError('')
-    try {
-      const comp = await comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, newRate, active)
-      setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
-      loadStandalone(allSymsStr)
-    } catch (err) {
-      setCompareError(err instanceof Error ? err.message : 'Comparison failed')
-    } finally {
-      setCompareLoading(false)
-    }
-  }
-
-  const handleRiskFreeRateBlur = () => {
-    const parsed = parseFloat(riskFreeRateInput)
-    applyRiskFreeRate(isNaN(parsed) ? riskFreeRate : Math.max(0, Math.min(20, parsed)) / 100)
-  }
-
-  const handleRemoveSymbol = (sym: string) => {
-    const remaining = benchmarkSymbols.filter(s => s !== sym)
-    setBenchmarkSymbols(remaining)
-    setCumulativeResults(prev => prev.filter(r => r.symbol !== sym))
-    
-    const allSymsStr = [...remaining, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
-    if (allSymsStr) {
-      comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active).then(comp => {
-         setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
-      })
-    } else {
-      setCompareResults([])
-    }
-    loadStandalone(allSymsStr)
-  }
-
-  // ── Scenario benchmark chart overlays ────────────────────────────────────────
-  const addScenarioBenchmark = async (id: number, name: string) => {
-    if (scenarioBenchmarks.find(sb => sb.id === id)) return
-    setScenarioBenchmarkLoading(true)
-    try {
-      const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, undefined, id)
-      const twr = res.results.find(r => r.symbol === 'Portfolio')?.series ?? []
-      const mwr = res.results.find(r => r.symbol === 'Portfolio-MWR')?.series ?? []
-      setScenarioBenchmarks(prev => [...prev, { id, name, twr, mwr }])
-      
-      const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`), `scenario:${id}`].join(',')
-      const comp = await comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active)
-      setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
-      loadStandalone(allSymsStr)
-    } catch { /* ignore */ }
-    finally { setScenarioBenchmarkLoading(false) }
-  }
-
-  const removeScenarioBenchmark = (id: number) => {
-    setScenarioBenchmarks(prev => prev.filter(sb => sb.id !== id))
-    
-    const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.filter(sb => sb.id !== id).map(sb => `scenario:${sb.id}`)].join(',')
-    if (allSymsStr) {
-      comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active).then(comp => {
-         setCompareResults(comp.benchmarks.map(b => ({ ...b, symbol: formatSymbolName(b.symbol, scenarios) })))
-      })
-    } else {
-      setCompareResults([])
-    }
-    loadStandalone(allSymsStr)
-  }
-
-  // Refresh scenario benchmark series when date/currency/acctModel changes
-  useEffect(() => {
-    if (scenarioBenchmarks.length === 0) return
-    const refresh = async () => {
-      const updated = await Promise.all(scenarioBenchmarks.map(async sb => {
-        try {
-          const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, undefined, sb.id)
-          const twr = res.results.find(r => r.symbol === 'Portfolio')?.series ?? []
-          const mwr = res.results.find(r => r.symbol === 'Portfolio-MWR')?.series ?? []
-          return { ...sb, twr, mwr }
-        } catch { return sb }
-      }))
-      setScenarioBenchmarks(updated)
-    }
-    refresh()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveFrom, to, currency, acctModel])
+  const chartData = useAnalysisChartData({
+    portfolioHistory, mwrHistory, cumulativeResults, compareTwrHistory, compareLabel,
+    scenarioBenchmarks, drawdownResults, rollingSeries, attributionData
+  })
+  const { mergedChartData, drawdownChartData, mwrChartData, rollingChartData, attrDisplay } = chartData
 
   // Close scenario picker on outside click
   useEffect(() => {
@@ -596,96 +157,15 @@ export default function AnalysisPage() {
     setTimeout(() => chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
 
-  // ── Derived chart data ───────────────────────────────────────────────────────
-  const mergedChartData = (() => {
-    if (portfolioHistory.length === 0) return []
-    const dateMap: Record<string, Record<string, number>> = {}
-    portfolioHistory.forEach(d => {
-      if (!dateMap[d.date]) dateMap[d.date] = {}
-      dateMap[d.date]['Portfolio'] = d.value
-    })
-    cumulativeResults.forEach(r => {
-      if (!r.series) return
-      r.series.forEach(pt => {
-        if (!dateMap[pt.date]) dateMap[pt.date] = {}
-        dateMap[pt.date][r.symbol] = pt.value
-      })
-    })
-    if (compareTwrHistory.length > 0 && compareLabel !== null) {
-      compareTwrHistory.forEach(d => {
-        if (!dateMap[d.date]) dateMap[d.date] = {}
-        dateMap[d.date]['Compare'] = d.value
-      })
+  const handleRiskFreeRateBlur = () => {
+    const parsed = parseFloat(riskFreeRateInput)
+    const newRate = isNaN(parsed) ? riskFreeRate : Math.max(0, Math.min(20, parsed)) / 100
+    setRiskFreeRateInput((newRate * 100).toFixed(2))
+    if (newRate !== riskFreeRate) {
+      setRiskFreeRate(newRate)
+      applyRiskFreeRate(newRate)
     }
-    scenarioBenchmarks.forEach(sb => {
-      if (!sb.twr) return
-      sb.twr.forEach(pt => {
-        if (!dateMap[pt.date]) dateMap[pt.date] = {}
-        dateMap[pt.date][`[S] ${sb.name}`] = pt.value
-      })
-    })
-    return Object.entries(dateMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, values]) => ({ date, ...values }))
-  })()
-
-  const drawdownChartData = (() => {
-    if (drawdownResults.length === 0) return []
-    const dateMap: Record<string, Record<string, number>> = {}
-    drawdownResults.forEach(r => {
-      if (!r.series) return
-      const key = r.symbol === 'Portfolio' ? 'Drawdown' : r.symbol
-      r.series.forEach(pt => {
-        if (!dateMap[pt.date]) dateMap[pt.date] = {}
-        dateMap[pt.date][key] = +(pt.drawdown_pct * 100).toFixed(3)
-      })
-    })
-    return Object.entries(dateMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, values]) => ({ date, ...values }))
-  })()
-
-  const mwrChartData = (() => {
-    if (mwrHistory.length === 0) return []
-    const dateMap: Record<string, Record<string, number>> = {}
-    mwrHistory.forEach(d => {
-      if (!dateMap[d.date]) dateMap[d.date] = {}
-      dateMap[d.date]['Portfolio'] = d.value
-    })
-    cumulativeResults.forEach(r => {
-      if (!r.series) return
-      r.series.forEach(pt => {
-        if (!dateMap[pt.date]) dateMap[pt.date] = {}
-        dateMap[pt.date][r.symbol] = pt.value
-      })
-    })
-    scenarioBenchmarks.forEach(sb => {
-      if (!sb.mwr) return
-      sb.mwr.forEach(pt => {
-        if (!dateMap[pt.date]) dateMap[pt.date] = {}
-        dateMap[pt.date][`[S] ${sb.name}`] = pt.value
-      })
-    })
-    return Object.entries(dateMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, values]) => ({ date, ...values }))
-  })()
-
-  const rollingChartData = (() => {
-    const keys = Object.keys(rollingSeries)
-    if (keys.length === 0) return []
-    const dateMap: Record<string, Record<string, number>> = {}
-    keys.forEach(sym => {
-      if (!rollingSeries[sym]) return
-      rollingSeries[sym].forEach(pt => {
-        if (!dateMap[pt.date]) dateMap[pt.date] = {}
-        dateMap[pt.date][sym] = pt.value
-      })
-    })
-    return Object.entries(dateMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, values]) => ({ date, ...values }))
-  })()
+  }
 
   const portfolioStandalone = standaloneResults[0]?.symbol === 'Portfolio' ? standaloneResults[0] : null
 
@@ -699,19 +179,6 @@ export default function AnalysisPage() {
     : chartMode === 'rolling_volatility' ? 'Volatility'
     : chartMode === 'rolling_sortino' ? 'Sortino Ratio'
     : 'Beta'
-
-  // Attribution: top 15 + "Others"
-  const MAX_ATTR = 15
-  const attrDisplay = (() => {
-    if (attributionData.length === 0) return []
-    const sorted = [...attributionData].sort((a, b) => b.contribution - a.contribution)
-    if (sorted.length <= MAX_ATTR) return sorted
-    const shown = sorted.slice(0, MAX_ATTR)
-    const othersContrib = sorted.slice(MAX_ATTR).reduce((s, r) => s + r.contribution, 0)
-    const othersWeight = sorted.slice(MAX_ATTR).reduce((s, r) => s + r.avg_weight, 0)
-    shown.push({ symbol: 'Others', avg_weight: othersWeight, return: 0, contribution: othersContrib })
-    return shown
-  })()
 
   return (
     <PageLayout>
@@ -831,309 +298,56 @@ export default function AnalysisPage() {
           )}
         </div>
 
-      {loading ? (
+        {loading ? (
           <Spinner label="Compiling statistics…" className="py-10" />
         ) : stats ? (
-          compare !== null && (compareStats !== null || compareDataLoading) ? (
-            /* ── Side-by-side comparison layout ── */
-            <div className="flex flex-col lg:flex-row gap-6">
-              {/* Active scenario column */}
-              <div className="flex-1 min-w-0">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">{activeLabel}</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {(() => {
-                    const twrVal = typeof stats.statistics['twr'] === 'number' ? stats.statistics['twr'] as number : null
-                    const mwrVal = typeof stats.statistics['mwr'] === 'number' ? stats.statistics['mwr'] as number : null
-                    return (<>
-                      {twrVal !== null && (
-                        <button onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                          <HoverTooltip className="w-56">{STAT_TOOLTIPS.twr}</HoverTooltip>
-                          <p className="text-xs font-medium text-slate-500 mb-1 uppercase">TWR</p>
-                          <p className={`text-xl font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
-                          <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                        </button>
-                      )}
-                      {mwrVal !== null && (
-                        <button onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                          <HoverTooltip className="w-56">{STAT_TOOLTIPS.mwr}</HoverTooltip>
-                          <p className="text-xs font-medium text-slate-500 mb-1 uppercase">MWR</p>
-                          <p className={`text-xl font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
-                          <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                        </button>
-                      )}
-                    </>)
-                  })()}
-                  {standaloneLoading && !portfolioStandalone && (
-                    <div className="col-span-2 flex justify-center py-2"><Spinner label="Computing…" /></div>
-                  )}
-                  {portfolioStandalone && (<>
-                    <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
-                      <p className="text-xs font-medium text-slate-500 mb-1">Sharpe</p>
-                      <p className={`text-xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
-                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                    </button>
-                    <div className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-help">
-                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
-                      <p className="text-xs font-medium text-slate-500 mb-1">VAMI</p>
-                      <p className="text-xl font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
-                    </div>
-                    <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
-                      <p className="text-xs font-medium text-slate-500 mb-1">Volatility</p>
-                      <p className="text-xl font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
-                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                    </button>
-                    <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
-                      <p className="text-xs font-medium text-slate-500 mb-1">Sortino</p>
-                      <p className={`text-xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
-                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                    </button>
-                    <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
-                      <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
-                      <p className="text-xs font-medium text-slate-500 mb-1">Max DD</p>
-                      <p className="text-xl font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
-                      <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                    </button>
-                  </>)}
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div className="hidden lg:block w-px bg-border-dim/30 self-stretch" />
-              <div className="block lg:hidden h-px bg-border-dim/30 w-full" />
-
-              {/* Compare scenario column */}
-              <div className="flex-1 min-w-0">
-                <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-[0.2em] mb-4 text-center">{compareLabel}</p>
-                {compareDataLoading ? (
-                  <div className="flex justify-center py-10"><Spinner label="Loading…" /></div>
-                ) : compareStats ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    {(() => {
-                      const twrVal = typeof compareStats.statistics['twr'] === 'number' ? compareStats.statistics['twr'] as number : null
-                      const mwrVal = typeof compareStats.statistics['mwr'] === 'number' ? compareStats.statistics['mwr'] as number : null
-                      return (<>
-                        {twrVal !== null && (
-                          <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                            <p className="text-xs font-medium text-slate-500 mb-1 uppercase">TWR</p>
-                            <p className={`text-xl font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
-                          </div>
-                        )}
-                        {mwrVal !== null && (
-                          <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                            <p className="text-xs font-medium text-slate-500 mb-1 uppercase">MWR</p>
-                            <p className={`text-xl font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
-                          </div>
-                        )}
-                      </>)
-                    })()}
-                    {compareStandalone && (<>
-                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                        <p className="text-xs font-medium text-slate-500 mb-1">Sharpe</p>
-                        <p className={`text-xl font-semibold tabular-nums ${compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sharpe_ratio.toFixed(3)}</p>
-                      </div>
-                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                        <p className="text-xs font-medium text-slate-500 mb-1">VAMI</p>
-                        <p className="text-xl font-semibold tabular-nums text-slate-100">{compareStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
-                      </div>
-                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                        <p className="text-xs font-medium text-slate-500 mb-1">Volatility</p>
-                        <p className="text-xl font-semibold tabular-nums text-slate-400">{(compareStandalone.volatility * 100).toFixed(2)}%</p>
-                      </div>
-                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                        <p className="text-xs font-medium text-slate-500 mb-1">Sortino</p>
-                        <p className={`text-xl font-semibold tabular-nums ${compareStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sortino_ratio.toFixed(3)}</p>
-                      </div>
-                      <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                        <p className="text-xs font-medium text-slate-500 mb-1">Max DD</p>
-                        <p className="text-xl font-semibold tabular-nums text-rose-400">-{(compareStandalone.max_drawdown * 100).toFixed(2)}%</p>
-                      </div>
-                    </>)}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : (
-            /* ── Original single-column grid ── */
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              {(() => {
-                const entries = Object.entries(stats.statistics)
-                const ordered = [
-                  ...entries.filter(([k]) => k === 'twr'),
-                  ...entries.filter(([k]) => k === 'mwr'),
-                  ...entries.filter(([k]) => k !== 'twr' && k !== 'mwr'),
-                ]
-                return ordered.map(([key, val]) => {
-                  const numVal = typeof val === 'number' ? val : null
-                  if (numVal === null) return null
-                  const tooltip = STAT_TOOLTIPS[key.toLowerCase()]
-                  if (key === 'twr') {
-                    const compareVal = compareStats ? compareStats.statistics['twr'] : null
-                    const delta = compareVal !== null && compareVal !== undefined ? numVal - (compareVal as number) : null
-                    return (
-                      <button key={key} onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                        {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                        <p className="text-sm font-medium text-slate-500 mb-2 uppercase">TWR</p>
-                        <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
-                        {delta !== null && <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
-                        <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                      </button>
-                    )
-                  }
-                  if (key === 'mwr') {
-                    const compareVal = compareStats ? compareStats.statistics['mwr'] : null
-                    const delta = compareVal !== null && compareVal !== undefined ? numVal - (compareVal as number) : null
-                    return (
-                      <button key={key} onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                        {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                        <p className="text-sm font-medium text-slate-500 mb-2 uppercase">MWR</p>
-                        <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
-                        {delta !== null && <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
-                        <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                      </button>
-                    )
-                  }
-                  return (
-                    <div key={key} className={`relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
-                      {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                      <p className="text-sm font-medium text-slate-500 mb-2 capitalize">{key.replace(/_/g, ' ')}</p>
-                      <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
-                    </div>
-                  )
-                })
-              })()}
-              {standaloneLoading && !portfolioStandalone && (
-                <div className="col-span-2 md:col-span-4 flex justify-center py-4"><Spinner label="Computing risk metrics…" /></div>
-              )}
-              {portfolioStandalone && (
-                <>
-                  <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
-                    <p className="text-sm font-medium text-slate-500 mb-2">Sharpe Ratio</p>
-                    <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
-                    {compareStandalone !== null && <p className={`text-xs tabular-nums mt-1 ${portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? '+' : ''}{(portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio).toFixed(3)} vs {compareLabel}</p>}
-                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                  </button>
-                  <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
-                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
-                    <p className="text-sm font-medium text-slate-500 mb-2">VAMI</p>
-                    <p className="text-2xl font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
-                  </div>
-                  <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
-                    <p className="text-sm font-medium text-slate-500 mb-2">Volatility</p>
-                    <p className="text-2xl font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
-                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                  </button>
-                  <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
-                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
-                    <p className="text-sm font-medium text-slate-500 mb-2">Sortino Ratio</p>
-                    <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
-                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
-                  </button>
-                  <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
-                    <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
-                    <p className="text-sm font-medium text-slate-500 mb-2">Max Drawdown</p>
-                    <p className="text-2xl font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
-                    <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
-                  </button>
-                </>
-              )}
-            </div>
-          )
+          <StatCards
+            stats={stats}
+            compare={compare}
+            compareStats={compareStats}
+            compareDataLoading={compareDataLoading}
+            activeLabel={activeLabel}
+            compareLabel={compareLabel}
+            handleStatCardClick={handleStatCardClick}
+            standaloneLoading={standaloneLoading}
+            portfolioStandalone={portfolioStandalone}
+            compareStandalone={compareStandalone}
+          />
         ) : (
           <p className="text-slate-500 text-center text-sm py-10">Historical context required to generate statistics.</p>
         )}
       </div>
 
       {/* ── Section 2: Benchmarking ───────────────────────────────────────────── */}
-      <div className="w-full mb-20">
-        <h2 className="text-xl font-semibold text-slate-100 mb-8 text-center">Benchmarking</h2>
-
-        <div className="flex flex-col items-center gap-3 mb-10 w-full max-w-2xl mx-auto">
-          <div className="flex flex-col sm:flex-row items-center w-full gap-4">
-            <div className="w-full">
-              <AutocompleteInput
-                options={[
-                  ...marketSymbols.map(sym => ({ value: sym, label: 'Stock Ticker' })),
-                  ...scenarios.filter(s => s.id !== active).map(s => ({ value: s.name, label: 'Scenario' })),
-                ]}
-                value={benchmarkInput}
-                onChange={setBenchmarkInput}
-                onSelect={opt => handleCompare(opt.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.defaultPrevented && handleCompare()}
-                placeholder="Symbols (SPY, QQQ) or Scenario Name"
-              />
-            </div>
-            <button
-              onClick={() => handleCompare()} disabled={compareLoading}
-              className="whitespace-nowrap px-8 py-3 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-500 transition-all disabled:opacity-50 shadow-lg"
-            >
-              {compareLoading ? 'Processing…' : 'Execute'}
-            </button>
-            {scenarios.length > 0 && (
-              <div className="relative" ref={scenarioPickerRef}>
-                <button
-                  onClick={() => setScenarioPickerOpen(p => !p)}
-                  disabled={scenarioBenchmarkLoading}
-                  className="whitespace-nowrap px-4 py-3 bg-surface border border-amber-500/30 text-amber-400 text-sm font-medium rounded-xl hover:bg-amber-500/10 transition-all disabled:opacity-50"
-                >
-                  {scenarioBenchmarkLoading ? '…' : '+ Scenario'}
-                </button>
-                {scenarioPickerOpen && (
-                  <div className="absolute top-full mt-1 right-0 z-30 min-w-[160px] bg-panel border border-border-dim/80 rounded-xl shadow-2xl overflow-hidden">
-                    {(() => {
-                      const options: { id: number; name: string }[] = []
-                      if (active !== null && !scenarioBenchmarks.find(sb => sb.id === 0)) {
-                        options.push({ id: 0, name: 'Real Portfolio' })
-                      }
-                      for (const s of scenarios) {
-                        if (s.id !== active && !scenarioBenchmarks.find(sb => sb.id === s.id)) {
-                          options.push({ id: s.id, name: s.name || `Scenario ${s.id}` })
-                        }
-                      }
-
-                      if (options.length === 0) {
-                        return <p className="px-4 py-2.5 text-xs text-slate-500">No scenarios to add</p>
-                      }
-
-                      return options.map(opt => (
-                        <button
-                          key={opt.id}
-                          onClick={() => { addScenarioBenchmark(opt.id, opt.name); setScenarioPickerOpen(false) }}
-                          className="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 hover:text-slate-100 transition-colors"
-                        >
-                          {opt.name}
-                        </button>
-                      ))
-                    })()}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          {(benchmarkSymbols.length > 0 || scenarioBenchmarks.length > 0) && (
-            <div className="flex flex-wrap gap-2 w-full">
-              {benchmarkSymbols.map(sym => (
-                <span key={sym} className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-border-dim/60 rounded-lg text-sm font-medium text-slate-300">
-                  {sym}
-                  <button onClick={() => handleRemoveSymbol(sym)} className="text-slate-500 hover:text-red-400 transition-colors leading-none" aria-label={`Remove ${sym}`}>×</button>
-                </span>
-              ))}
-              {scenarioBenchmarks.map(sb => (
-                <span key={sb.id} className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-amber-500/25 rounded-lg text-sm font-medium text-amber-400/80">
-                  {sb.name}
-                  <button onClick={() => removeScenarioBenchmark(sb.id)} className="text-amber-500/50 hover:text-red-400 transition-colors leading-none" aria-label={`Remove ${sb.name}`}>×</button>
-                </span>
-              ))}
-            </div>
-          )}
-          {compareError && (
-            <p className="w-full px-4 py-3 rounded-xl bg-red-500/10 text-red-400 text-sm border border-red-500/20">{compareError}</p>
-          )}
-        </div>
+      <BenchmarkPanel
+        marketSymbols={marketSymbols}
+        scenarios={scenarios}
+        active={active}
+        benchmarkInput={benchmarkInput}
+        setBenchmarkInput={setBenchmarkInput}
+        handleCompare={handleCompare}
+        compareLoading={compareLoading}
+        compareError={compareError}
+        benchmarkSymbols={benchmarkSymbols}
+        handleRemoveSymbol={handleRemoveSymbol}
+        addScenarioBenchmark={addScenarioBenchmark}
+        removeScenarioBenchmark={removeScenarioBenchmark}
+        scenarioPickerOpen={scenarioPickerOpen}
+        setScenarioPickerOpen={setScenarioPickerOpen}
+        scenarioBenchmarks={scenarioBenchmarks}
+        scenarioBenchmarkLoading={scenarioBenchmarkLoading}
+        standaloneResults={standaloneResults}
+        standaloneRefreshing={standaloneRefreshing}
+        standaloneError={standaloneError}
+        compareResults={compareResults}
+        portfolioStandalone={portfolioStandalone}
+        periodLabel={periodLabel}
+        effectiveFrom={effectiveFrom}
+        to={to}
+        currency={currency}
+        acctModel={acctModel}
+        riskFreeRate={riskFreeRate}
+      >
 
         {/* Chart mode controls */}
         <div ref={chartRef} className="flex flex-wrap justify-center items-center gap-4 mb-4">
@@ -1195,9 +409,9 @@ export default function AnalysisPage() {
                   <YAxis domain={['auto', 'auto']} tickFormatter={val => `${Number(val).toFixed(0)}%`} tick={AXIS_STYLE} axisLine={false} tickLine={false} width={56} label={{ value: 'Return (%)', angle: -90, position: 'insideLeft', offset: 16, ...AXIS_LABEL_STYLE }} />
                   <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE} formatter={(value, name) => [`${Number(value).toFixed(2)}%`, String(name)]} />
                   <Legend wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.15em' }} />
-                  <Line type="monotone" dataKey="Portfolio" stroke={COLORS[0]} strokeWidth={3} dot={false} animationDuration={1200} />
+                  <Line type="monotone" dataKey="Portfolio" name="Portfolio (MWR)" stroke={COLORS[0]} strokeWidth={3} dot={false} animationDuration={1200} />
                   {benchmarkSymbols.map((sym, i) => (
-                    <Line key={sym} type="monotone" dataKey={sym} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="6 6" dot={false} />
+                    <Line key={sym} type="monotone" dataKey={sym} name={`${sym} (TWR)`} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="6 6" dot={false} />
                   ))}
                 </LineChart>
               ) : chartMode === 'drawdown' ? (
@@ -1241,227 +455,30 @@ export default function AnalysisPage() {
           </div>
         )}
 
-        {/* Standalone metrics table */}
-        {standaloneResults.length > 0 && (
-          <div className="overflow-x-auto w-full mb-12 relative">
-            {standaloneRefreshing && (
-              <div className="absolute top-0 right-4 w-4 h-4 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin" />
-            )}
-            <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Standalone Metrics</p>
-            {standaloneError && <ErrorAlert message={standaloneError} className="mb-3" />}
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border-dim/60">
-                  {(['Security', 'Sharpe', 'VAMI', 'Volatility', 'Sortino', 'Max DD'] as const).map(h => {
-                    const tipKey = { Security: undefined, Sharpe: 'sharpe', VAMI: 'vami', Volatility: 'volatility', Sortino: 'sortino', 'Max DD': 'max_drawdown' }[h] as keyof typeof STANDALONE_TOOLTIPS | undefined
-                    const tip = tipKey ? STANDALONE_TOOLTIPS[tipKey] : undefined
-                    return (
-                      <th key={h} className={`py-4 px-4 text-xs font-semibold text-slate-500 ${h === 'Security' ? 'text-left' : 'text-right'}`}>
-                        {tip ? (
-                          <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
-                            {h}
-                            <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="down" className="w-56">{tip}</HoverTooltip>
-                          </span>
-                        ) : h}
-                      </th>
-                    )
-                  })}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {standaloneResults.map(r => (
-                  <tr key={r.symbol} className="hover:bg-white/2 transition-colors group">
-                    <td className={`py-4 px-4 font-semibold uppercase ${r.symbol === 'Portfolio' ? 'text-indigo-400' : 'text-slate-100 group-hover:text-indigo-400 transition-colors'}`}>{r.symbol}</td>
-                    {r.error ? (
-                      <td colSpan={5} className="py-4 px-4 text-right text-red-400 text-xs">{r.error}</td>
-                    ) : (
-                      <>
-                        <td className={`py-4 px-4 text-right font-medium tabular-nums ${r.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{r.sharpe_ratio.toFixed(3)}</td>
-                        <td className="py-4 px-4 text-right text-slate-300 font-medium tabular-nums">{r.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
-                        <td className="py-4 px-4 text-right text-slate-400 font-medium tabular-nums">{(r.volatility * 100).toFixed(2)}%</td>
-                        <td className={`py-4 px-4 text-right font-medium tabular-nums ${r.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{r.sortino_ratio.toFixed(3)}</td>
-                        <td className="py-4 px-4 text-right font-medium tabular-nums text-rose-400">-{(r.max_drawdown * 100).toFixed(2)}%</td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Benchmark comparison table */}
-        {compareResults.length > 0 && (
-          <div className="overflow-x-auto overflow-y-hidden w-full">
-            <p className="text-xs font-semibold text-slate-500 mb-4 text-center uppercase tracking-widest">Benchmark Comparison</p>
-            <table className="w-full min-w-160 text-sm">
-              <thead>
-                <tr className="border-b border-border-dim/60">
-                  {(['Security', 'Alpha', 'Beta', 'Treynor', 'Tracking Err', 'Info Ratio', 'Correlation'] as const).map(h => {
-                    const tip = COMPARE_TOOLTIPS[h]
-                    return (
-                      <th key={h} className={`py-4 px-4 text-xs font-semibold text-slate-500 ${h === 'Security' ? 'text-left' : 'text-right'}`}>
-                        {tip ? (
-                          <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
-                            {h}
-                            <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="down" className="w-56">{tip}</HoverTooltip>
-                          </span>
-                        ) : h}
-                      </th>
-                    )
-                  })}
-                  <th className="py-4 px-4 w-8 sticky right-0 bg-bg" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {compareResults.map(bm => (
-                  <tr key={bm.symbol} className="hover:bg-white/2 transition-colors group">
-                    <td className="py-4 px-4 font-semibold text-slate-100 group-hover:text-indigo-400 transition-colors uppercase">{bm.symbol}</td>
-                    <td className={`py-4 px-4 text-right font-medium tabular-nums ${bm.alpha >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{(bm.alpha * 100).toFixed(2)}%</td>
-                    <td className="py-4 px-4 text-right text-slate-400 font-medium tabular-nums">{bm.beta.toFixed(3)}</td>
-                    <td className="py-4 px-4 text-right text-slate-400 font-medium">{bm.treynor_ratio.toFixed(4)}</td>
-                    <td className="py-4 px-4 text-right text-slate-400 font-medium">{(bm.tracking_error * 100).toFixed(2)}%</td>
-                    <td className="py-4 px-4 text-right text-slate-300 font-medium tabular-nums">{bm.information_ratio.toFixed(3)}</td>
-                    <td className="py-4 px-4 text-right text-slate-400 font-medium">{bm.correlation.toFixed(3)}</td>
-                    <td className="py-4 px-4 text-right sticky right-0 bg-bg group-hover:bg-white/2 transition-colors">
-                      {portfolioStandalone && !bm.error && (
-                        <button
-                          onClick={() => navigate('/llm', { state: { initialPrompt: { promptType: 'benchmark_analysis', displayMessage: `Analyze my portfolio vs ${bm.symbol} for ${periodLabel}`, extraParams: { benchmark_symbol: bm.symbol, currency, from: effectiveFrom, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } } } })}
-                          className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
-                          title="AI benchmark analysis"
-                        >
-                          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
-                            <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
-                            <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
-                          </svg>
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      </BenchmarkPanel>
 
       {/* ── Section 3: Holdings Analysis ─────────────────────────────────────── */}
-      <div className="w-full">
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <h2 className="text-xl font-semibold text-slate-100">Holdings Analysis</h2>
-          {attributionData.length > 0 && holdingsView === 'attribution' && (
-            <div className="relative group">
-              <button
-                onClick={() => {
-                  const isComparing = compare !== null && compareStats !== null
-                  navigate('/llm', { state: { initialPrompt: isComparing
-                    ? { promptType: 'holdings_comparison', displayMessage: `Compare holdings: ${activeLabel} vs ${compareLabel}`, extraParams: { scenario_id: active ?? 0, scenario_id_a: active ?? 0, scenario_id_b: compare, currency, from: effectiveFrom, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } }
-                    : { promptType: 'biggest_drag_on_performance', displayMessage: `Identify the biggest drag on performance in my portfolio for ${periodLabel}`, extraParams: { currency, from: effectiveFrom, to, accounting_model: acctModel, risk_free_rate: riskFreeRate } }
-                  }})
-                }}
-                className="text-slate-500 hover:text-indigo-400 transition-colors p-1 rounded-xl hover:bg-white/5"
-              >
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5Z" />
-                  <path d="M19 1l.9 2.6 2.6.9-2.6.9L19 8.5l-.9-2.6L15.5 4l2.6-.9z" opacity=".6" />
-                  <path d="M5 17l.7 2.1L7.8 20l-2.1.9L5 23l-.7-2.1L2.2 20l2.1-.9z" opacity=".6" />
-                </svg>
-              </button>
-              <HoverTooltip direction="down" className="w-max whitespace-nowrap">
-                {compare !== null && compareStats !== null ? `AI comparison: ${activeLabel} vs ${compareLabel}` : 'AI attribution analysis'}
-              </HoverTooltip>
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-center mb-10">
-          <SegmentedControl
-            label="View"
-            options={HOLDINGS_VIEW_OPTIONS}
-            value={holdingsView}
-            onChange={setHoldingsView}
-          />
-        </div>
-
-        {holdingsLoading ? (
-          <Spinner label="Computing holdings data…" className="py-10" />
-        ) : holdingsError ? (
-          <ErrorAlert message={holdingsError} className="mb-6" />
-        ) : holdingsView === 'attribution' ? (
-          attributionData.length === 0 ? (
-            <p className="text-slate-500 text-center text-sm py-10">No attribution data available for this period.</p>
-          ) : (
-            <div className="w-full">
-              {/* Horizontal bar chart */}
-              <div className="h-72 mb-8 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={attrDisplay.map(r => ({ name: r.symbol.split('@')[0], value: +(r.contribution * 100).toFixed(3) }))}
-                    layout="vertical"
-                    margin={{ top: 4, right: 40, left: 60, bottom: 4 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2e42" horizontal={false} opacity={0.3} />
-                    <XAxis type="number" tickFormatter={v => `${Number(v).toFixed(1)}%`} tick={AXIS_STYLE} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" tick={{ ...AXIS_STYLE, fontSize: 9 }} axisLine={false} tickLine={false} width={56} interval={0} />
-                    <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE} formatter={(value) => [`${Number(value).toFixed(3)}%`, 'Contribution']} />
-                    <Bar dataKey="value" radius={[0, 3, 3, 0]} isAnimationActive={false}>
-                      {attrDisplay.map((r, i) => (
-                        <Cell key={i} fill={r.contribution >= 0 ? '#34d399' : '#f87171'} fillOpacity={0.85} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Attribution table */}
-              <div className="overflow-x-auto w-full">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border-dim/60">
-                      <th className="py-3 px-4 text-left text-xs font-semibold text-slate-500">Symbol</th>
-                      <th className="py-3 px-4 text-right text-xs font-semibold text-slate-500">Avg Weight</th>
-                      <th className="py-3 px-4 text-right text-xs font-semibold text-slate-500">Return</th>
-                      <th className="py-3 px-4 text-right text-xs font-semibold text-slate-500">Contribution</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {attrDisplay.map(r => (
-                      <tr key={r.symbol} className="hover:bg-white/2 transition-colors">
-                        <td className="py-3 px-4 font-semibold text-slate-100 uppercase text-sm">{r.symbol.split('@')[0]}</td>
-                        <td className="py-3 px-4 text-right text-slate-400 tabular-nums">{(r.avg_weight * 100).toFixed(1)}%</td>
-                        <td className={`py-3 px-4 text-right font-medium tabular-nums ${r.return >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {r.return >= 0 ? '+' : ''}{(r.return * 100).toFixed(2)}%
-                        </td>
-                        <td className={`py-3 px-4 text-right font-semibold tabular-nums ${r.contribution >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {r.contribution >= 0 ? '+' : ''}{(r.contribution * 100).toFixed(3)}%
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-border-dim/60">
-                      <td className="py-3 px-4 font-black text-slate-100 text-xs uppercase tracking-widest">Portfolio TWR</td>
-                      <td className="py-3 px-4 text-right text-slate-400 tabular-nums font-medium">100.0%</td>
-                      <td className="py-3 px-4" />
-                      <td className={`py-3 px-4 text-right font-black tabular-nums ${attributionTWR >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {attributionTWR >= 0 ? '+' : ''}{(attributionTWR * 100).toFixed(2)}%
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-          )
-        ) : (
-          // Correlation view
-          correlationData.symbols.length === 0 ? (
-            <p className="text-slate-500 text-center text-sm py-10">Not enough data to compute correlations for this period.</p>
-          ) : (
-            <CorrelationHeatmap symbols={correlationData.symbols} matrix={correlationData.matrix} />
-          )
-        )}
-      </div>
+      <HoldingsPanel
+        attributionData={attributionData}
+        holdingsView={holdingsView}
+        setHoldingsView={setHoldingsView}
+        holdingsLoading={holdingsLoading}
+        holdingsError={holdingsError}
+        attrDisplay={attrDisplay}
+        attributionTWR={attributionTWR}
+        correlationData={correlationData}
+        compare={compare}
+        compareStats={compareStats}
+        activeLabel={activeLabel}
+        compareLabel={compareLabel}
+        periodLabel={periodLabel}
+        effectiveFrom={effectiveFrom}
+        to={to}
+        currency={currency}
+        acctModel={acctModel}
+        riskFreeRate={riskFreeRate}
+        active={active}
+      />
     </PageLayout>
   )
 }

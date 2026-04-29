@@ -16,7 +16,7 @@ import (
 
 // BreakdownHandler handles portfolio breakdown endpoints.
 type BreakdownHandler struct {
-	ScenarioMiddleware
+	PortfolioResolver
 	Repo            *flexquery.Repository
 	PortfolioSvc    *portfolio.Service
 	BreakdownSvc    *breakdownsvc.Service

@@ -19,9 +19,9 @@ import (
 	"portfolio-analysis/services/stats"
 )
 
-// ScenarioMiddleware holds the dependencies needed to resolve an optional scenario_id
+// PortfolioResolver holds the dependencies needed to resolve an optional scenario_id
 // query parameter. Embed this in handler structs that should support scenarios.
-type ScenarioMiddleware struct {
+type PortfolioResolver struct {
 	ScenarioRepo *scenariosvc.Repository
 	ScenarioMkt  market.Provider
 	ScenarioFX   *fx.Service
@@ -38,7 +38,7 @@ type PortfolioContext struct {
 
 // loadPortfolioContext loads FlexQueryData for the authenticated user and scenario metadata.
 // The second return value is false when the handler should abort (error already written).
-func (sm *ScenarioMiddleware) loadPortfolioContext(
+func (sm *PortfolioResolver) loadPortfolioContext(
 	c *gin.Context,
 	flexRepo *flexquery.Repository,
 	userHash string,
@@ -116,7 +116,7 @@ func (sm *ScenarioMiddleware) loadPortfolioContext(
 }
 
 // loadPortfolioData backward-compatible wrapper for loadPortfolioContext.
-func (sm *ScenarioMiddleware) loadPortfolioData(
+func (sm *PortfolioResolver) loadPortfolioData(
 	c *gin.Context,
 	flexRepo *flexquery.Repository,
 	userHash string,
@@ -520,4 +520,39 @@ func computeBenchmarkComparison(
 		return stats.BenchmarkMetrics{}, fmt.Errorf("no overlapping data between portfolio and benchmark")
 	}
 	return stats.CalculateBenchmarkMetrics(pRet, bRet, riskFreeRate), nil
+}
+
+// resolveScenarioBenchmark loads and builds synthetic FlexQueryData for the given scenarioID.
+// scenarioID==0 is treated as "Real portfolio" — realData is returned directly.
+// Returns (synthData, nil) on success, or (nil, error) on failure.
+func (h *StatsHandler) resolveScenarioBenchmark(
+	userHash string,
+	scenarioID uint64,
+	realData *models.FlexQueryData,
+) (*models.FlexQueryData, error) {
+	if scenarioID == 0 {
+		return realData, nil
+	}
+
+	var user models.User
+	if err := h.Repo.DB.Where("token_hash = ?", userHash).First(&user).Error; err != nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	row, err := h.ScenarioRepo.Get(user.ID, uint(scenarioID))
+	if err != nil || row == nil {
+		return nil, fmt.Errorf("scenario not found")
+	}
+
+	spec, err := scenariosvc.ParseSpec(row)
+	if err != nil {
+		return nil, fmt.Errorf("parsing scenario: %w", err)
+	}
+
+	built, err := scenariosvc.Build(spec, realData, h.ScenarioMkt, h.ScenarioFX)
+	if err != nil {
+		return nil, fmt.Errorf("building scenario: %w", err)
+	}
+	built.UserHash = fmt.Sprintf("scenario:%d:%d:%s", scenarioID, row.UpdatedAt.UnixNano(), userHash)
+	return built, nil
 }

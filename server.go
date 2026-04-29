@@ -15,34 +15,17 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
+	"portfolio-analysis/bootstrap"
 	"portfolio-analysis/config"
 	"portfolio-analysis/db"
 	"portfolio-analysis/router"
-	breakdownsvc "portfolio-analysis/services/breakdown"
-	"portfolio-analysis/services/flexquery"
 	"portfolio-analysis/services/fundamentals"
-	"portfolio-analysis/services/fx"
-	"portfolio-analysis/services/llm"
-	"portfolio-analysis/services/market"
-	"portfolio-analysis/services/portfolio"
-	"portfolio-analysis/services/tax"
 )
 
 //go:embed all:frontend/dist
 var embeddedFrontend embed.FS
 
-type services struct {
-	market       *market.YahooFinanceService
-	fx           *fx.Service
-	repo         *flexquery.Repository
-	portfolio    *portfolio.Service
-	tax          *tax.Service
-	fundamentals *fundamentals.Service
-	breakdown    *breakdownsvc.Service
-	llm          *llm.Service
-}
 
 func main() {
 	cfg := config.Load()
@@ -52,8 +35,8 @@ func main() {
 		log.Fatalf("Database init failed: %v", err)
 	}
 
-	svc := buildServices(cfg, database)
-	r := router.SetupRouter(cfg, svc.repo, database, svc.market, svc.market, svc.fx, svc.portfolio, svc.tax, svc.fundamentals, svc.breakdown, svc.llm)
+	svc := bootstrap.Build(cfg, database)
+	r := router.SetupRouter(cfg, database, svc)
 
 	fileSystem, frontendMode := buildFrontendFS()
 	setupFrontendRoutes(r, fileSystem)
@@ -61,41 +44,9 @@ func main() {
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 
 	logStartupSummary(cfg, frontendMode)
-	runServer(srv, svc.fundamentals)
+	runServer(srv, svc.Fundamentals)
 }
 
-// buildServices wires together all application services.
-func buildServices(cfg *config.Config, database *gorm.DB) *services {
-	marketSvc := market.NewYahooFinanceService(database)
-	cnbSvc := market.NewCNBProvider(database)
-	fxSvc := fx.NewService(marketSvc, cnbSvc)
-	repo := flexquery.NewRepository(database)
-	portfolioSvc := portfolio.NewService(marketSvc, fxSvc, cfg.CashBucketExpiryDays)
-	taxSvc := tax.NewService(fxSvc)
-
-	yahooFundamentalsProvider := fundamentals.NewYahooFundamentalsProvider(marketSvc, 30)
-	yahooBreakdownProvider := fundamentals.NewYahooBreakdownProvider(marketSvc, 30, 500)
-
-	fundamentalsSvc := fundamentals.BuildFromConfig(
-		database,
-		cfg.FundamentalsProviders,
-		cfg.BreakdownProviders,
-		map[string]fundamentals.FundamentalsProvider{"Yahoo": yahooFundamentalsProvider},
-		map[string]fundamentals.ETFBreakdownProvider{"Yahoo": yahooBreakdownProvider},
-		marketSvc,
-	)
-
-	return &services{
-		market:       marketSvc,
-		fx:           fxSvc,
-		repo:         repo,
-		portfolio:    portfolioSvc,
-		tax:          taxSvc,
-		fundamentals: fundamentalsSvc,
-		breakdown:    breakdownsvc.NewService(database),
-		llm:          llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, cfg.GeminiDefaultModel, database, portfolioSvc),
-	}
-}
 
 // buildFrontendFS returns the HTTP filesystem for the frontend assets and a label describing
 // the source. If FRONTEND_DIR is set, files are served from disk (useful during development);

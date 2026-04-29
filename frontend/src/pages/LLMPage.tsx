@@ -138,7 +138,7 @@ export default function LLMPage() {
       const errMsg = (err as Error)?.message || 'Failed to compare scenarios.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
     }
-  }, [active, activeLabel, scenarios])
+  }, [active, activeLabel, scenarios, model])
 
   const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string, extraParams?: Partial<LLMChatRequest>, usePageModel = false) => {
     if (!message && promptType === 'freeform') return

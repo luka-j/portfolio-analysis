@@ -57,13 +57,8 @@ func CalculateStandaloneMetrics(returns []float64, riskFreeRate float64) Standal
 
 	sortino := 0.0
 	if downsideDev > 1e-6 {
-		// Annualise excess return via compounding (consistent with alpha in benchmark.go).
-		// Clamp pMean-dailyRf to avoid math.Pow on a base ≤ -1.
-		excessBase := pMean - dailyRf
-		if excessBase < -1.0 {
-			excessBase = -1.0
-		}
-		excessAnnual := math.Pow(1+excessBase, 252) - 1
+		// Linear annualisation (consistent with Sharpe and common industry practice).
+		excessAnnual := (pMean - dailyRf) * 252
 		sortino = excessAnnual / downsideDev
 	}
 

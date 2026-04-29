@@ -378,7 +378,7 @@ export default function ScenarioEditPage() {
       .catch(e => { if (!cancelled) setError(e.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [editId])
+  }, [editId, setPinned])
 
   // Load holdings for modify-real mode
   const loadHoldings = useCallback(async () => {

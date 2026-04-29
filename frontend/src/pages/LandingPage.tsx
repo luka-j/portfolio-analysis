@@ -268,7 +268,7 @@ export default function LandingPage() {
     }
     fetchSummary(llmForceRefresh)
     return () => { cancelled = true }
-  }, [llmPeriod, uploadCount, llmForceRefresh, shouldShowLlm])
+  }, [llmPeriod, uploadCount, llmForceRefresh, shouldShowLlm, active])
 
   const handleModalClose = useCallback(async () => {
     setShowUploadModal(false)

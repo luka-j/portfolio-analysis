@@ -388,17 +388,17 @@ func buildComparePrompt(nameA string, a *metricsBundle, nameB string, b *metrics
 	}
 	return fmt.Sprintf(`You are a senior portfolio analyst conducting a head-to-head comparison of two portfolio configurations for a single investor who is deciding which to hold. Both portfolios were evaluated over the same trailing 1-year window, in the same currency, using the same methodology. Your goal is to explain the meaningful differences and characterise the trade-off — not to rank one as "correct".
 
-## Portfolio A: %s
+## %s
 Holdings (symbol → value in base currency): %s
 Sharpe: %.3f | Sortino: %.3f | Volatility (annualised): %.2f%% | Max Drawdown: %.2f%% | VAMI (1y, base=1000): %.2f
 
-## Portfolio B: %s
+## %s
 Holdings (symbol → value in base currency): %s
 Sharpe: %.3f | Sortino: %.3f | Volatility (annualised): %.2f%% | Max Drawdown: %.2f%% | VAMI (1y, base=1000): %.2f
 
-Before writing, think step-by-step inside a <thinking> block: compute the absolute and relative deltas for each metric (e.g. "Sharpe: A 1.24 vs B 0.91 → A +0.33, +36%%"), identify which positions are unique to each side or differ materially in weight, and form a hypothesis linking those composition differences to the metric deltas. Flag any metric where the difference is marginal (<10%% relative) so you don't overstate it downstream.
+Before writing, think step-by-step inside a <thinking> block: compute the absolute and relative deltas for each metric, identify which positions are unique to each side or differ materially in weight, and form a hypothesis linking those composition differences to the metric deltas. Flag any metric where the difference is marginal (<10%% relative) so you don't overstate it downstream.
 
-Then produce the final report using EXACTLY these markdown headers in this order:
+Then produce the final report using EXACTLY these markdown headers in this order. Important: throughout the report, refer to the portfolios by their actual names ("%s" and "%s"). NEVER use "Portfolio A", "Portfolio B", "A", or "B" in your final output!
 
 ### 📊 Risk-Adjusted Return
 Compare Sharpe and Sortino directly, citing both values and the delta. State which portfolio delivers more return per unit of risk and whether the edge is meaningful or marginal. If Sortino's gap is notably wider than Sharpe's, explain what that asymmetry says about downside behaviour; if they agree, say so.
@@ -407,15 +407,16 @@ Compare Sharpe and Sortino directly, citing both values and the delta. State whi
 Compare annualised volatility and max drawdown side-by-side. Quantify the difference in both absolute percentage points AND relative terms. Say which portfolio offers the smoother ride, and whether the bumpier one is actually being compensated for that ride via higher wealth growth (VAMI) — if not, call that out as an inefficiency.
 
 ### 💰 Wealth Growth (VAMI)
-Compare the 1-year VAMI figures (base = 1000). Translate the difference into plain language (e.g. "A ended at 1120 vs B at 1080 — A grew $1000 of starting capital ~$40 more"). Attribute the winner's edge: is it offence (capturing more upside) or defence (avoiding more downside)? Reason from the drawdown and volatility deltas already established.
+Compare the 1-year VAMI figures (base = 1000). Translate the difference into plain language (e.g. "%s ended at 1120 vs %s at 1080 — %s grew $1000 of starting capital ~$40 more"). Attribute the winner's edge: is it offence (capturing more upside) or defence (avoiding more downside)? Reason from the drawdown and volatility deltas already established.
 
 ### 🧩 Composition Differences
-Identify concrete holdings-level differences: positions unique to A, positions unique to B, and shared positions whose weights differ meaningfully. Group by theme where possible (e.g. "A leans harder into large-cap US tech; B adds a bond sleeve and emerging-markets exposure"). Connect these composition differences causally to the metric deltas above — this is the "why" behind the numbers.
+Identify concrete holdings-level differences: positions unique to "%s", positions unique to "%s", and shared positions whose weights differ meaningfully. Group by theme where possible. Connect these composition differences causally to the metric deltas above — this is the "why" behind the numbers.
 
 ### ⚖️ Trade-offs & Suitability
-Summarise each portfolio's primary trade-off in one or two sentences (e.g. "A maximises growth at the cost of deeper drawdowns; B sacrifices ~X%% of return for a materially smoother path"). Close with a direct statement about which investor type each portfolio suits better — accumulation vs. preservation, high vs. low risk tolerance, long vs. shorter horizon. Do NOT recommend that the user switch or act; just characterise the fit.%s
+Summarise each portfolio's primary trade-off in one or two sentences. Close with a direct statement about which investor type each portfolio suits better — accumulation vs. preservation, high vs. low risk tolerance, long vs. shorter horizon. Do NOT recommend that the user switch or act; just characterise the fit.%s
 
 <constraints>
+- Use the actual portfolio names ("%s" and "%s") exclusively in the output. NEVER refer to them as Portfolio A or Portfolio B.
 - Every numeric claim must come directly from the metrics provided above. Do NOT invent figures, project forward returns, or introduce outside data.
 - Ticker symbols in the holdings JSON are authoritative — never silently rename or reinterpret them.
 - If a metric is zero or missing for one side (e.g. a scenario with insufficient history), state that the comparison is unavailable on that dimension rather than guessing.
@@ -425,7 +426,11 @@ Summarise each portfolio's primary trade-off in one or two sentences (e.g. "A ma
 </constraints>`,
 		nameA, a.Holdings, a.Sharpe, a.Sortino, a.Volatility*100, a.MaxDrawdown*100, a.VAMI,
 		nameB, b.Holdings, b.Sharpe, b.Sortino, b.Volatility*100, b.MaxDrawdown*100, b.VAMI,
+		nameA, nameB,
+		nameA, nameB, nameA,
+		nameA, nameB,
 		extraQuestion,
+		nameA, nameB,
 	)
 }
 

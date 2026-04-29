@@ -41,7 +41,8 @@ export function ScenarioProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
-    refresh()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh()
   }, [refresh])
 
   // If a persisted active/compare scenario no longer exists after refresh, reset it.
@@ -58,6 +59,7 @@ export function ScenarioProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useScenario() {
   return useContext(ScenarioContext)
 }

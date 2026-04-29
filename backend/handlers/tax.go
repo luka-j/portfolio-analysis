@@ -15,7 +15,7 @@ import (
 
 // TaxHandler processes tax report requests.
 type TaxHandler struct {
-	ScenarioMiddleware
+	PortfolioResolver
 	Repo   *flexquery.Repository
 	TaxSvc *tax.Service
 }

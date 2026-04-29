@@ -60,6 +60,7 @@ func CalculateBenchmarkMetrics(portfolioReturns, benchmarkReturns []float64, ris
 
 	// Treynor ratio (annualised).
 	// Same threshold as beta: near-zero beta means no systematic exposure.
+	// Uses linear annualisation of excess return (common industry practice) rather than compounding.
 	treynor := 0.0
 	if math.Abs(beta) > 1e-6 {
 		treynor = (pMean - dailyRf) * 252 / beta

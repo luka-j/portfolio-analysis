@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"portfolio-analysis/bootstrap"
 	"portfolio-analysis/config"
 	"portfolio-analysis/models"
 	"portfolio-analysis/router"
@@ -168,8 +169,20 @@ func setupTestServer(t *testing.T) (*httptest.Server, *gorm.DB, func()) {
 	fundamentalsSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals, allBreakdowns, nil)
 	breakdownService := breakdownsvc.NewService(db)
 
-	router := router.SetupRouter(cfg, repo, db, mockMarket, mockMarket, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc, breakdownService, nil)
-	ts := httptest.NewServer(router)
+	svc := &bootstrap.AppServices{
+		Market:       nil, // mock injected into handlers via resolver — unused at AppServices level
+		FX:           fxSvc,
+		Repo:         repo,
+		Portfolio:    portfolioSvc,
+		Tax:          taxSvc,
+		Fundamentals: fundamentalsSvc,
+		Breakdown:    breakdownService,
+		LLM:          nil,
+	}
+	// The mock market satisfies both market.Provider and market.CurrencyGetter; wire it
+	// in by constructing the router directly with a small shim.
+	r := router.SetupRouterWithMarket(cfg, db, svc, mockMarket)
+	ts := httptest.NewServer(r)
 
 	cleanup := func() {
 		ts.Close()
@@ -470,8 +483,17 @@ func TestCompare_FXConversionChangesMetrics(t *testing.T) {
 	fundSvc := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allF, allB, nil)
 	bkdSvc := breakdownsvc.NewService(db)
 
-	router := router.SetupRouter(cfg, repo, db, m, m, fxSvc, portfolioSvc, taxSvc, fundSvc, bkdSvc, nil)
-	ts := httptest.NewServer(router)
+	svc2 := &bootstrap.AppServices{
+		FX:           fxSvc,
+		Repo:         repo,
+		Portfolio:    portfolioSvc,
+		Tax:          taxSvc,
+		Fundamentals: fundSvc,
+		Breakdown:    bkdSvc,
+		LLM:          nil,
+	}
+	r2 := router.SetupRouterWithMarket(cfg, db, svc2, m)
+	ts := httptest.NewServer(r2)
 	defer ts.Close()
 
 	uploadFlexQuery(t, ts, testToken)
@@ -779,8 +801,17 @@ func TestCostBasisFromTradesWhenNoOpenPosition(t *testing.T) {
 	fundamentalsSvc2 := fundamentals.BuildFromConfig(db, cfg.FundamentalsProviders, cfg.BreakdownProviders, allFundamentals2, allBreakdowns2, nil)
 	breakdownService2 := breakdownsvc.NewService(db)
 
-	router := router.SetupRouter(cfg, repo, db, mockMarket, nil, fxSvc, portfolioSvc, taxSvc, fundamentalsSvc2, breakdownService2, nil)
-	tsServer := httptest.NewServer(router)
+	svc3 := &bootstrap.AppServices{
+		FX:           fxSvc,
+		Repo:         repo,
+		Portfolio:    portfolioSvc,
+		Tax:          taxSvc,
+		Fundamentals: fundamentalsSvc2,
+		Breakdown:    breakdownService2,
+		LLM:          nil,
+	}
+	r3 := router.SetupRouterWithMarket(cfg, db, svc3, mockMarket)
+	tsServer := httptest.NewServer(r3)
 	defer tsServer.Close()
 
 	token := "costbasis-test-token"
