@@ -27,7 +27,10 @@ export function useBenchmarks(params: BenchmarksParams) {
   const [compareError, setCompareError] = useState('')
 
   useEffect(() => {
-    if (benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0) return
+    if (benchmarkSymbols.length === 0 && scenarioBenchmarks.length === 0) {
+      loadStandalone('')
+      return
+    }
     const refresh = async () => {
       setCompareLoading(true)
       setCompareError('')

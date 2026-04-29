@@ -248,6 +248,19 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 	priceByKey := make(map[string]priceResult, len(holdings))
 	var priceMu sync.Mutex
 	var wg sync.WaitGroup
+
+	var inception time.Time
+	for _, t := range data.Trades {
+		if inception.IsZero() || t.DateTime.Before(inception) {
+			inception = t.DateTime
+		}
+	}
+	if inception.IsZero() {
+		inception = today.AddDate(-5, 0, 0)
+	} else {
+		inception = time.Date(inception.Year(), inception.Month(), inception.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -5)
+	}
+
 	for _, h := range holdings {
 		k := posKey(h.Symbol, h.ListingExchange)
 		querySymbol := h.Symbol
@@ -261,6 +274,16 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 			priceMu.Lock()
 			priceByKey[k] = priceResult{price: p, err: err}
 			priceMu.Unlock()
+
+			// Pre-warm caches in the background if this was a fast cached-only request.
+			// The singleflight in the market provider will collapse these background
+			// fetches with any concurrent fresh requests from other endpoints.
+			if cachedOnly {
+				go func() {
+					_, _ = s.MarketProvider.GetLatestPrice(sym, false)
+					_, _ = s.MarketProvider.GetHistory(sym, inception, today, false)
+				}()
+			}
 		}(k, querySymbol)
 	}
 	wg.Wait()
@@ -273,18 +296,12 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 		realizedGL map[string]float64
 		commission map[string]float64
 	}
+	sharedMemo := newFXMemo(s.FXService, cachedOnly)
+
 	ccyMaps := make(map[string]perCurrencyMaps, len(currencies))
 	for _, cur := range currencies {
-		memo := newFXMemo(s.FXService, cachedOnly)
-		cb, gl, comm := s.computeCurrentValueMapsMemo(data, cur, acctModel, memo)
+		cb, gl, comm := s.computeCurrentValueMapsMemo(data, cur, acctModel, sharedMemo)
 		ccyMaps[cur] = perCurrencyMaps{costBasis: cb, realizedGL: gl, commission: comm}
-	}
-
-	// Dedicated memo for the price→value conversions below, shared across currencies
-	// via a map so that each currency reuses its own memoized spot rates.
-	valueMemo := make(map[string]*fxMemo, len(currencies))
-	for _, cur := range currencies {
-		valueMemo[cur] = newFXMemo(s.FXService, cachedOnly)
 	}
 
 	// ── Phase 3: Build per-currency PositionValue slices ──────────────────────
@@ -331,11 +348,11 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 				convertedValue = nativeValue
 			} else {
 				var fxErr error
-				convertedPrice, fxErr = valueMemo[cur].ConvertSpot(latestPrice, h.Currency, cur)
+				convertedPrice, fxErr = sharedMemo.ConvertSpot(latestPrice, h.Currency, cur)
 				if fxErr != nil {
 					return nil, fmt.Errorf("converting price %s to %s: %w", h.Currency, cur, fxErr)
 				}
-				convertedValue, fxErr = valueMemo[cur].ConvertSpot(nativeValue, h.Currency, cur)
+				convertedValue, fxErr = sharedMemo.ConvertSpot(nativeValue, h.Currency, cur)
 				if fxErr != nil {
 					return nil, fmt.Errorf("converting value %s to %s: %w", h.Currency, cur, fxErr)
 				}
@@ -371,8 +388,7 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 	pendingCashByCcy := make(map[string]float64, len(currencies))
 	hasPendingCash := false
 	for _, cur := range currencies {
-		memo := newFXMemo(s.FXService, cachedOnly)
-		pendingCash, err := s.computePendingCashMemo(data, cur, acctModel, memo, today)
+		pendingCash, err := s.computePendingCashMemo(data, cur, acctModel, sharedMemo, today)
 		if err != nil {
 			log.Printf("Warning: computing pending cash for %s: %v", cur, err)
 			pendingCash = 0

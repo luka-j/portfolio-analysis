@@ -227,7 +227,7 @@ func TestStandalone_Sortino_ManualCalculation(t *testing.T) {
 
 	pMean := mean(port)
 	excessBase := pMean - dailyRf
-	excessAnnual := math.Pow(1+excessBase, 252) - 1
+	excessAnnual := excessBase * 252
 	expectedSortino := excessAnnual / downsideDev
 
 	assertDelta(t, "Sortino", m.SortinoRatio, expectedSortino, 1e-9)
@@ -267,7 +267,7 @@ func TestStandalone_Sortino_ZeroRF(t *testing.T) {
 	}
 	downsideDev := math.Sqrt(downsideSum/n) * math.Sqrt(252)
 	pMean := mean(port)
-	excessAnnual := math.Pow(1+pMean, 252) - 1
+	excessAnnual := pMean * 252
 	expected := excessAnnual / downsideDev
 
 	assertDelta(t, "Sortino_rf0", m.SortinoRatio, expected, 1e-9)

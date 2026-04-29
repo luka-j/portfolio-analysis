@@ -167,7 +167,7 @@ export default function AnalysisPage() {
     }
   }
 
-  const portfolioStandalone = standaloneResults[0]?.symbol === 'Portfolio' ? standaloneResults[0] : null
+  const portfolioStandalone = standaloneResults.find(r => r.symbol === 'Portfolio') ?? null
 
   const periodLabel = period === 0 ? 'All time'
     : period === -1 ? `${customFrom} to ${customTo}`

@@ -68,13 +68,13 @@ func (t *Transaction) BeforeCreate(_ *gorm.DB) error {
 type MarketData struct {
 	ID       uint      `gorm:"primaryKey"`
 	Symbol   string    `gorm:"uniqueIndex:idx_symbol_date;not null"`
-	Date     time.Time `gorm:"uniqueIndex:idx_symbol_date;not null"`
+	Date     time.Time `gorm:"uniqueIndex:idx_symbol_date;index:idx_date_volume;not null"`
 	Open     float64
 	High     float64
 	Low      float64
 	Close    float64
 	AdjClose float64
-	Volume   int64
+	Volume   int64 `gorm:"index:idx_date_volume"`
 	Provider string `gorm:"default:'Yahoo'"`
 }
 
