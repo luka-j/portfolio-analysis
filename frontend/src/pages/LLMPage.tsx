@@ -60,6 +60,15 @@ export default function LLMPage() {
 
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+    }
+  }, [input])
+
   const [loading, setLoading] = useState(false)
   const [loadingLabel, setLoadingLabel] = useState('')
   const [activeToolCall, setActiveToolCall] = useState<LLMToolCallEvent | null>(null)
@@ -481,21 +490,28 @@ export default function LLMPage() {
 
         {/* Input bar as contained box (#4) */}
         <form
-          className="shrink-0 flex items-center gap-2 bg-white/2.5 border border-white/[0.07] rounded-xl px-3 py-1"
+          className="shrink-0 flex items-end gap-2 bg-white/2.5 border border-white/[0.07] rounded-xl px-3 py-1"
           onSubmit={e => { e.preventDefault(); handleSend(input) }}
         >
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
             value={input}
             onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (!loading && input.trim()) handleSend(input)
+              }
+            }}
             disabled={loading}
             placeholder="Ask a question about your portfolio…"
-            className="flex-1 bg-transparent py-2.5 text-sm text-white focus:outline-none disabled:opacity-50 placeholder:text-slate-500"
+            rows={1}
+            className="flex-1 bg-transparent py-2.5 text-sm text-white focus:outline-none disabled:opacity-50 placeholder:text-slate-500 resize-none scrollbar-thin max-h-48 overflow-y-auto"
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="shrink-0 p-1.5 text-indigo-400 hover:text-indigo-300 disabled:opacity-30 transition-all active:scale-90"
+            className="shrink-0 mb-1 p-1.5 text-indigo-400 hover:text-indigo-300 disabled:opacity-30 transition-all active:scale-90"
             aria-label="Send"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

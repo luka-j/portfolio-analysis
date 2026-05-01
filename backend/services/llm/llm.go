@@ -609,12 +609,33 @@ func (s *Service) AnalyzePortfolioStream(
 		return rawText, nil, nil
 	}
 
+	// Extract the outermost JSON object in case there is leading text or markdown formatting.
+	cleanText := rawText
+	jsonStart := strings.Index(cleanText, "{")
+	jsonEnd := strings.LastIndex(cleanText, "}")
+	if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
+		cleanText = cleanText[jsonStart : jsonEnd+1]
+	}
+
 	// Parse the JSON response and build the sections slice.
 	cp := CannedPrompts[cannedType]
-	var fields map[string]string
-	if jsonErr := json.Unmarshal([]byte(rawText), &fields); jsonErr != nil {
+	var rawFields map[string]any
+	if jsonErr := json.Unmarshal([]byte(cleanText), &rawFields); jsonErr != nil {
 		log.Printf("WARN: structured response JSON parse failed [cannedType=%s]: %v — falling back to raw text", cannedType, jsonErr)
 		return rawText, nil, nil
+	}
+
+	fields := make(map[string]string)
+	for k, v := range rawFields {
+		if strVal, ok := v.(string); ok {
+			fields[k] = strVal
+		} else {
+			if b, err := json.Marshal(v); err == nil {
+				fields[k] = string(b)
+			} else {
+				fields[k] = fmt.Sprintf("%v", v)
+			}
+		}
 	}
 
 	// Build ordered sections (exclude "thinking" — it becomes the collapsible disclosure).
