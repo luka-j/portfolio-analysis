@@ -251,14 +251,49 @@ func (h *LLMHandler) buildHoldingsSummary(data *models.FlexQueryData, currency s
 	if err != nil || result.Value == 0 {
 		return "(no holdings data)"
 	}
-	var sb fmt.Stringer
-	_ = sb
+
+	var symbols []string
+	for _, p := range result.Positions {
+		if p.Value != 0 && p.Symbol != "PENDING_CASH" {
+			symbols = append(symbols, p.Symbol)
+		}
+	}
+
+	names := make(map[string]string)
+	if len(symbols) > 0 {
+		var funds []models.AssetFundamental
+		uHash := data.UserHash
+		if len(uHash) > 9 && uHash[:9] == "scenario:" {
+			colons := 0
+			for i := 0; i < len(uHash); i++ {
+				if uHash[i] == ':' {
+					colons++
+					if colons == 3 {
+						uHash = uHash[i+1:]
+						break
+					}
+				}
+			}
+		}
+		h.DB.Select("symbol, name").Where("symbol IN ?", symbols).
+			Where("user_id = (SELECT id FROM users WHERE token_hash = ?)", uHash).
+			Find(&funds)
+		for _, f := range funds {
+			names[f.Symbol] = f.Name
+		}
+	}
+
 	out := ""
 	for _, p := range result.Positions {
 		if p.Value == 0 || p.Symbol == "PENDING_CASH" {
 			continue
 		}
-		out += fmt.Sprintf("- %s: %.1f%%\n", p.Symbol, p.Value/result.Value*100)
+		name := names[p.Symbol]
+		if name != "" {
+			out += fmt.Sprintf("- %s (%s): %.1f%%\n", p.Symbol, name, p.Value/result.Value*100)
+		} else {
+			out += fmt.Sprintf("- %s: %.1f%%\n", p.Symbol, p.Value/result.Value*100)
+		}
 	}
 	if out == "" {
 		return "(no holdings data)"

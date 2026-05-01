@@ -385,6 +385,8 @@ func (s *Service) AnalyzePortfolioStream(
 		sysBase = CannedPrompts[cannedType].SystemInstruction
 	}
 
+	sysBase += fmt.Sprintf("\n\nToday's date is: %s. Always use this date as your reference point for 'current' events.", time.Now().Format("January 2, 2006"))
+
 	// For agentic freeform: add tool-use guidance to the system instruction.
 	toolHint := ""
 	if !isCanned && len(enabledTools) > 0 && executor != nil {
