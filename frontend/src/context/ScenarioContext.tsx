@@ -49,7 +49,7 @@ export function ScenarioProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const ids = new Set(scenarios.map(s => s.id))
     if (active !== null && !ids.has(active)) setActive(null)
-    if (compare !== null && !ids.has(compare)) setCompare(null)
+    if (compare !== null && compare !== 0 && !ids.has(compare)) setCompare(null)
   }, [scenarios, active, compare, setActive, setCompare])
 
   return (

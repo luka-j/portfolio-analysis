@@ -53,7 +53,7 @@ export function useBenchmarks(params: BenchmarksParams) {
     }
     refresh()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveFrom, to, currency, acctModel])
+  }, [effectiveFrom, to, currency, acctModel, active])
 
   useEffect(() => {
     if (scenarioBenchmarks.length === 0) return
@@ -174,6 +174,13 @@ export function useBenchmarks(params: BenchmarksParams) {
     }
     loadStandalone(allSymsStr)
   }
+
+  useEffect(() => {
+    if (active !== null && scenarioBenchmarks.some(sb => sb.id === active)) {
+      removeScenarioBenchmark(active)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, scenarioBenchmarks])
 
   return {
     benchmarkSymbols,

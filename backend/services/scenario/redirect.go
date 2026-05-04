@@ -44,8 +44,46 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 	expiryDays := 3
 
 	var tradeFlows []models.Trade
+	var manualFlows []models.CashFlow
+
+	targetCur := spec.Basket.NotionalCurrency
+	if targetCur == "" {
+		targetCur = "USD"
+	}
+
+	convertFn := func(amount float64, cur string, date time.Time) (float64, error) {
+		if cur == targetCur || fxSvc == nil {
+			return amount, nil
+		}
+		return fxSvc.Convert(amount, cur, targetCur, date, false)
+	}
+
 	for _, t := range realData.Trades {
-		if models.IsFXTrade(t) || t.BuySell == "TRANSFER_IN" {
+		if models.IsFXTrade(t) {
+			continue
+		}
+		if t.BuySell == "TRANSFER_IN" {
+			val := t.Quantity * t.Price
+			if val == 0 {
+				p, _ := getPriceAt(mp, t.Symbol, t.DateTime)
+				if p == 0 {
+					p, _ = mp.GetLatestPrice(t.Symbol, false)
+				}
+				if p == 0 {
+					p = 1
+				}
+				val = t.Quantity * p
+			}
+			if val > 0 {
+				cval := val
+				if t.Currency != targetCur && fxSvc != nil {
+					cval, _ = fxSvc.Convert(val, t.Currency, targetCur, t.DateTime, false)
+				}
+				manualFlows = append(manualFlows, models.CashFlow{
+					Date:   t.DateTime,
+					Amount: -cval, // Deposit
+				})
+			}
 			continue
 		}
 		tradeFlows = append(tradeFlows, t)
@@ -60,20 +98,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 		})
 	}
 
-	// We convert all cash flows to the basket's notional currency.
-	targetCur := spec.Basket.NotionalCurrency
-	if targetCur == "" {
-		targetCur = "USD"
-	}
-
-	convertFn := func(amount float64, cur string, date time.Time) (float64, error) {
-		if cur == targetCur || fxSvc == nil {
-			return amount, nil
-		}
-		return fxSvc.Convert(amount, cur, targetCur, date, false)
-	}
-
-	res, err := cashbucket.Process(tradeFlows, nil, bucketDividends, expiryDays, time.Now().UTC(), convertFn)
+	res, err := cashbucket.Process(tradeFlows, manualFlows, bucketDividends, expiryDays, time.Now().UTC(), convertFn)
 	if err != nil {
 		return nil, fmt.Errorf("processing cash flows: %w", err)
 	}

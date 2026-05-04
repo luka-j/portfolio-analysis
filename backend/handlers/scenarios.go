@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -149,6 +150,10 @@ func (h *ScenarioHandler) Create(c *gin.Context) {
 	}
 	row, err := h.ScenarioRepo.Create(user.ID, req.Spec, req.Name, req.Pinned)
 	if err != nil {
+		if errors.Is(err, scenariosvc.ErrNameExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -175,6 +180,10 @@ func (h *ScenarioHandler) Update(c *gin.Context) {
 	patch := scenariosvc.ScenarioPatch{Name: req.Name, Pinned: req.Pinned, Spec: req.Spec}
 	row, err := h.ScenarioRepo.Update(user.ID, uint(id), patch)
 	if err != nil {
+		if errors.Is(err, scenariosvc.ErrNameExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

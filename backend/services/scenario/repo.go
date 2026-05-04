@@ -11,6 +11,9 @@ import (
 	"portfolio-analysis/models"
 )
 
+// ErrNameExists is returned when attempting to create or update a scenario with a duplicate name.
+var ErrNameExists = errors.New("scenario name already exists")
+
 // Repository provides CRUD operations for ScenarioRecord rows, always scoped to a user.
 type Repository struct {
 	DB *gorm.DB
@@ -33,6 +36,16 @@ type ScenarioSummary struct {
 
 // Create persists a new scenario and returns the saved row.
 func (r *Repository) Create(userID uint, spec ScenarioSpec, name string, pinned bool) (*models.ScenarioRecord, error) {
+	if name != "" {
+		var count int64
+		if err := r.DB.Model(&models.ScenarioRecord{}).Where("user_id = ? AND name = ?", userID, name).Count(&count).Error; err != nil {
+			return nil, fmt.Errorf("checking name uniqueness: %w", err)
+		}
+		if count > 0 {
+			return nil, fmt.Errorf("%w: %q", ErrNameExists, name)
+		}
+	}
+
 	specJSON, err := json.Marshal(spec)
 	if err != nil {
 		return nil, fmt.Errorf("marshalling spec: %w", err)
@@ -101,6 +114,15 @@ func (r *Repository) Update(userID, id uint, patch ScenarioPatch) (*models.Scena
 	}
 	updates := map[string]interface{}{"updated_at": time.Now().UTC()}
 	if patch.Name != nil {
+		if *patch.Name != "" {
+			var count int64
+			if err := r.DB.Model(&models.ScenarioRecord{}).Where("user_id = ? AND name = ? AND id != ?", userID, *patch.Name, id).Count(&count).Error; err != nil {
+				return nil, fmt.Errorf("checking name uniqueness: %w", err)
+			}
+			if count > 0 {
+				return nil, fmt.Errorf("%w: %q", ErrNameExists, *patch.Name)
+			}
+		}
 		updates["name"] = *patch.Name
 	}
 	if patch.Pinned != nil {

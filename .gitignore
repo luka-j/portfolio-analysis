@@ -22,7 +22,7 @@ go.work
 go.work.sum
 
 backend/testdata/pp_export.xml
-old_codereview.md
+*review.md
 data/*
 todo.md
 run.ps1
