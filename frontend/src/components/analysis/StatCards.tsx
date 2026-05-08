@@ -48,61 +48,61 @@ export default function StatCards({
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 min-w-0">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">{activeLabel}</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-7 gap-2">
             {(() => {
               const twrVal = typeof stats.statistics['twr'] === 'number' ? stats.statistics['twr'] as number : null
               const mwrVal = typeof stats.statistics['mwr'] === 'number' ? stats.statistics['mwr'] as number : null
               return (<>
                 {twrVal !== null && (
-                  <button onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                  <button onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
                     <HoverTooltip className="w-56">{STAT_TOOLTIPS.twr}</HoverTooltip>
-                    <p className="text-xs font-medium text-slate-500 mb-1 uppercase">TWR</p>
-                    <p className={`text-xl font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
-                    <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                    <p className="text-[10px] font-medium text-slate-500 mb-1 uppercase">TWR</p>
+                    <p className={`text-base font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
+                    <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Chart →</p>
                   </button>
                 )}
                 {mwrVal !== null && (
-                  <button onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+                  <button onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
                     <HoverTooltip className="w-56">{STAT_TOOLTIPS.mwr}</HoverTooltip>
-                    <p className="text-xs font-medium text-slate-500 mb-1 uppercase">MWR</p>
-                    <p className={`text-xl font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
-                    <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                    <p className="text-[10px] font-medium text-slate-500 mb-1 uppercase">MWR</p>
+                    <p className={`text-base font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
+                    <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Chart →</p>
                   </button>
                 )}
               </>)
             })()}
             {standaloneLoading && !portfolioStandalone && (
-              <div className="col-span-2 flex justify-center py-2"><Spinner label="Computing…" /></div>
+              <div className="col-span-2 lg:col-span-7 flex justify-center py-2"><Spinner label="Computing…" /></div>
             )}
             {portfolioStandalone && (<>
-              <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+              <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
                 <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
-                <p className="text-xs font-medium text-slate-500 mb-1">Sharpe</p>
-                <p className={`text-xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
-                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                <p className="text-[10px] font-medium text-slate-500 mb-1">Sharpe</p>
+                <p className={`text-base font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
+                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Rolling →</p>
               </button>
-              <div className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-help">
+              <div className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-help">
                 <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
-                <p className="text-xs font-medium text-slate-500 mb-1">VAMI</p>
-                <p className="text-xl font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
+                <p className="text-[10px] font-medium text-slate-500 mb-1">VAMI</p>
+                <p className="text-base font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
               </div>
-              <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+              <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
                 <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
-                <p className="text-xs font-medium text-slate-500 mb-1">Volatility</p>
-                <p className="text-xl font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
-                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                <p className="text-[10px] font-medium text-slate-500 mb-1">Vol</p>
+                <p className="text-base font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
+                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Rolling →</p>
               </button>
-              <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+              <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
                 <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
-                <p className="text-xs font-medium text-slate-500 mb-1">Sortino</p>
-                <p className={`text-xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
-                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+                <p className="text-[10px] font-medium text-slate-500 mb-1">Sortino</p>
+                <p className={`text-base font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
+                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Rolling →</p>
               </button>
-              <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
+              <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
                 <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
-                <p className="text-xs font-medium text-slate-500 mb-1">Max DD</p>
-                <p className="text-xl font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
-                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                <p className="text-[10px] font-medium text-slate-500 mb-1">Max DD</p>
+                <p className="text-base font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
+                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Chart →</p>
               </button>
             </>)}
           </div>
@@ -116,45 +116,45 @@ export default function StatCards({
           {compareDataLoading ? (
             <div className="flex justify-center py-10"><Spinner label="Loading…" /></div>
           ) : compareStats ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-7 gap-2">
               {(() => {
                 const twrVal = typeof compareStats.statistics['twr'] === 'number' ? compareStats.statistics['twr'] as number : null
                 const mwrVal = typeof compareStats.statistics['mwr'] === 'number' ? compareStats.statistics['mwr'] as number : null
                 return (<>
                   {twrVal !== null && (
-                    <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                      <p className="text-xs font-medium text-slate-500 mb-1 uppercase">TWR</p>
-                      <p className={`text-xl font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
+                    <div className="bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-amber-500/10">
+                      <p className="text-[10px] font-medium text-slate-500 mb-1 uppercase">TWR</p>
+                      <p className={`text-base font-semibold tabular-nums ${twrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{twrVal >= 0 ? '+' : ''}{(twrVal * 100).toFixed(2)}%</p>
                     </div>
                   )}
                   {mwrVal !== null && (
-                    <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                      <p className="text-xs font-medium text-slate-500 mb-1 uppercase">MWR</p>
-                      <p className={`text-xl font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
+                    <div className="bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-amber-500/10">
+                      <p className="text-[10px] font-medium text-slate-500 mb-1 uppercase">MWR</p>
+                      <p className={`text-base font-semibold tabular-nums ${mwrVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{mwrVal >= 0 ? '+' : ''}{(mwrVal * 100).toFixed(2)}%</p>
                     </div>
                   )}
                 </>)
               })()}
               {compareStandalone && (<>
-                <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                  <p className="text-xs font-medium text-slate-500 mb-1">Sharpe</p>
-                  <p className={`text-xl font-semibold tabular-nums ${compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sharpe_ratio.toFixed(3)}</p>
+                <div className="bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-amber-500/10">
+                  <p className="text-[10px] font-medium text-slate-500 mb-1">Sharpe</p>
+                  <p className={`text-base font-semibold tabular-nums ${compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sharpe_ratio.toFixed(3)}</p>
                 </div>
-                <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                  <p className="text-xs font-medium text-slate-500 mb-1">VAMI</p>
-                  <p className="text-xl font-semibold tabular-nums text-slate-100">{compareStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
+                <div className="bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-amber-500/10">
+                  <p className="text-[10px] font-medium text-slate-500 mb-1">VAMI</p>
+                  <p className="text-base font-semibold tabular-nums text-slate-100">{compareStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
                 </div>
-                <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                  <p className="text-xs font-medium text-slate-500 mb-1">Volatility</p>
-                  <p className="text-xl font-semibold tabular-nums text-slate-400">{(compareStandalone.volatility * 100).toFixed(2)}%</p>
+                <div className="bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-amber-500/10">
+                  <p className="text-[10px] font-medium text-slate-500 mb-1">Vol</p>
+                  <p className="text-base font-semibold tabular-nums text-slate-400">{(compareStandalone.volatility * 100).toFixed(2)}%</p>
                 </div>
-                <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                  <p className="text-xs font-medium text-slate-500 mb-1">Sortino</p>
-                  <p className={`text-xl font-semibold tabular-nums ${compareStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sortino_ratio.toFixed(3)}</p>
+                <div className="bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-amber-500/10">
+                  <p className="text-[10px] font-medium text-slate-500 mb-1">Sortino</p>
+                  <p className={`text-base font-semibold tabular-nums ${compareStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{compareStandalone.sortino_ratio.toFixed(3)}</p>
                 </div>
-                <div className="bg-surface/40 rounded-2xl px-4 py-5 flex flex-col items-center text-center border border-amber-500/10">
-                  <p className="text-xs font-medium text-slate-500 mb-1">Max DD</p>
-                  <p className="text-xl font-semibold tabular-nums text-rose-400">-{(compareStandalone.max_drawdown * 100).toFixed(2)}%</p>
+                <div className="bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-amber-500/10">
+                  <p className="text-[10px] font-medium text-slate-500 mb-1">Max DD</p>
+                  <p className="text-base font-semibold tabular-nums text-rose-400">-{(compareStandalone.max_drawdown * 100).toFixed(2)}%</p>
                 </div>
               </>)}
             </div>
@@ -165,7 +165,7 @@ export default function StatCards({
   }
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+    <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
       {(() => {
         const entries = Object.entries(stats.statistics)
         const ordered = [
@@ -181,12 +181,12 @@ export default function StatCards({
             const compareVal = compareStats ? compareStats.statistics['twr'] : null
             const delta = compareVal !== null && compareVal !== undefined ? numVal - (compareVal as number) : null
             return (
-              <button key={key} onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+              <button key={key} onClick={() => handleStatCardClick('twr')} className="relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
                 {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                <p className="text-sm font-medium text-slate-500 mb-2 uppercase">TWR</p>
-                <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
-                {delta !== null && <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
-                <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                <p className="text-xs font-medium text-slate-500 mb-1 uppercase">TWR</p>
+                <p className={`text-lg font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
+                {delta !== null && <p className={`text-[10px] tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
+                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
               </button>
             )
           }
@@ -194,58 +194,58 @@ export default function StatCards({
             const compareVal = compareStats ? compareStats.statistics['mwr'] : null
             const delta = compareVal !== null && compareVal !== undefined ? numVal - (compareVal as number) : null
             return (
-              <button key={key} onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+              <button key={key} onClick={() => handleStatCardClick('mwr')} className="relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
                 {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-                <p className="text-sm font-medium text-slate-500 mb-2 uppercase">MWR</p>
-                <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
-                {delta !== null && <p className={`text-xs tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
-                <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+                <p className="text-xs font-medium text-slate-500 mb-1 uppercase">MWR</p>
+                <p className={`text-lg font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
+                {delta !== null && <p className={`text-[10px] tabular-nums mt-1 ${delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(2)}% vs {compareLabel}</p>}
+                <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
               </button>
             )
           }
           return (
-            <div key={key} className={`relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
+            <div key={key} className={`relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 ${tooltip ? 'cursor-help' : ''}`}>
               {tooltip && <HoverTooltip className="w-56">{tooltip}</HoverTooltip>}
-              <p className="text-sm font-medium text-slate-500 mb-2 capitalize">{key.replace(/_/g, ' ')}</p>
-              <p className={`text-2xl font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
+              <p className="text-xs font-medium text-slate-500 mb-1 capitalize">{key.replace(/_/g, ' ')}</p>
+              <p className={`text-lg font-semibold tabular-nums ${numVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{numVal >= 0 ? '+' : ''}{(numVal * 100).toFixed(2)}%</p>
             </div>
           )
         })
       })()}
       {standaloneLoading && !portfolioStandalone && (
-        <div className="col-span-2 md:col-span-4 flex justify-center py-4"><Spinner label="Computing risk metrics…" /></div>
+        <div className="col-span-2 lg:col-span-7 flex justify-center py-4"><Spinner label="Computing risk metrics…" /></div>
       )}
       {portfolioStandalone && (
         <>
-          <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+          <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
             <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sharpe}</HoverTooltip>
-            <p className="text-sm font-medium text-slate-500 mb-2">Sharpe Ratio</p>
-            <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
-            {compareStandalone !== null && <p className={`text-xs tabular-nums mt-1 ${portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? '+' : ''}{(portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio).toFixed(3)} vs {compareLabel}</p>}
-            <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+            <p className="text-xs font-medium text-slate-500 mb-1">Sharpe</p>
+            <p className={`text-lg font-semibold tabular-nums ${portfolioStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio.toFixed(3)}</p>
+            {compareStandalone !== null && <p className={`text-[10px] tabular-nums mt-1 ${portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio >= 0 ? '+' : ''}{(portfolioStandalone.sharpe_ratio - compareStandalone.sharpe_ratio).toFixed(3)} vs {compareLabel}</p>}
+            <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
           </button>
-          <div className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-help">
+          <div className="relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 cursor-help">
             <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.vami}</HoverTooltip>
-            <p className="text-sm font-medium text-slate-500 mb-2">VAMI</p>
-            <p className="text-2xl font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
+            <p className="text-xs font-medium text-slate-500 mb-1">VAMI</p>
+            <p className="text-lg font-semibold tabular-nums text-slate-100">{portfolioStandalone.vami.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</p>
           </div>
-          <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+          <button onClick={() => handleStatCardClick('rolling_volatility')} className="relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
             <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.volatility}</HoverTooltip>
-            <p className="text-sm font-medium text-slate-500 mb-2">Volatility</p>
-            <p className="text-2xl font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
-            <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+            <p className="text-xs font-medium text-slate-500 mb-1">Volatility</p>
+            <p className="text-lg font-semibold tabular-nums text-slate-400">{(portfolioStandalone.volatility * 100).toFixed(2)}%</p>
+            <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
           </button>
-          <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
+          <button onClick={() => handleStatCardClick('rolling_sortino')} className="relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
             <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.sortino}</HoverTooltip>
-            <p className="text-sm font-medium text-slate-500 mb-2">Sortino Ratio</p>
-            <p className={`text-2xl font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
-            <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
+            <p className="text-xs font-medium text-slate-500 mb-1">Sortino</p>
+            <p className={`text-lg font-semibold tabular-nums ${portfolioStandalone.sortino_ratio >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{portfolioStandalone.sortino_ratio.toFixed(3)}</p>
+            <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View rolling →</p>
           </button>
-          <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-3xl px-8 py-8 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
+          <button onClick={() => handleStatCardClick('drawdown')} className="relative group bg-surface/40 rounded-2xl px-3 py-4 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-rose-500/30 hover:bg-surface/60 transition-all">
             <HoverTooltip className="w-56">{STANDALONE_TOOLTIPS.max_drawdown}</HoverTooltip>
-            <p className="text-sm font-medium text-slate-500 mb-2">Max Drawdown</p>
-            <p className="text-2xl font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
-            <p className="text-[9px] text-slate-600 mt-2 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
+            <p className="text-xs font-medium text-slate-500 mb-1">Max DD</p>
+            <p className="text-lg font-semibold tabular-nums text-rose-400">-{(portfolioStandalone.max_drawdown * 100).toFixed(2)}%</p>
+            <p className="text-[8px] text-slate-600 mt-1 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">View chart →</p>
           </button>
         </>
       )}

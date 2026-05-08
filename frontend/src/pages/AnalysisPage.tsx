@@ -76,11 +76,13 @@ export default function AnalysisPage() {
   // Chart modes
   const [chartMode, setChartMode]       = usePersistentState<ChartMode>('analysis_chartMode', 'twr')
   const [rollingWindow, setRollingWindow] = usePersistentState('analysis_rollingWindow', 63)
-  const [holdingsView, setHoldingsView] = usePersistentState<HoldingsView>('analysis_holdingsView', 'attribution')
 
   // Benchmark input and market symbols
   const [benchmarkInput, setBenchmarkInput]     = useState('SPY')
   const [marketSymbols, setMarketSymbols]       = useState<string[]>([])
+
+  // Scroll-spy active section
+  const [activeSection, setActiveSection] = useState<string>('section-risk')
 
   // Scenario Picker
   const [scenarioPickerOpen, setScenarioPickerOpen] = useState(false)
@@ -144,6 +146,26 @@ export default function AnalysisPage() {
     setTimeout(() => chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
 
+  // Scroll-spy observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            setActiveSection(entry.target.id)
+          }
+        })
+      },
+      { rootMargin: '-40% 0px -40% 0px' }
+    )
+    const sections = ['section-risk', 'section-benchmarking', 'section-attribution', 'section-correlation']
+    sections.forEach(id => {
+      const el = document.getElementById(id)
+      if (el) observer.observe(el)
+    })
+    return () => observer.disconnect()
+  }, [])
+
   const handleRiskFreeRateBlur = () => {
     const parsed = parseFloat(riskFreeRateInput)
     const newRate = isNaN(parsed) ? riskFreeRate : Math.max(0, Math.min(20, parsed)) / 100
@@ -169,6 +191,32 @@ export default function AnalysisPage() {
 
   return (
     <PageLayout>
+      {/* Scroll-spy Navigation */}
+      <div className="fixed top-1/2 right-6 -translate-y-1/2 flex flex-col gap-4 z-50 hidden xl:flex">
+        {[
+          { id: 'section-risk', label: 'Risk & Return Metrics' },
+          { id: 'section-benchmarking', label: 'Benchmarking & Charts' },
+          { id: 'section-attribution', label: 'Performance Attribution' },
+          { id: 'section-correlation', label: 'Asset Correlation' }
+        ].map(section => (
+          <button
+            key={section.id}
+            onClick={() => {
+              const el = document.getElementById(section.id)
+              if (el) {
+                const y = el.getBoundingClientRect().top + window.scrollY - 100
+                window.scrollTo({ top: y, behavior: 'smooth' })
+              }
+            }}
+            className={`w-2.5 h-2.5 rounded-full transition-all relative group ${activeSection === section.id ? 'bg-indigo-400 scale-125' : 'bg-slate-700 hover:bg-slate-500'}`}
+          >
+            <span className="absolute right-full mr-4 top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-surface border border-white/5 shadow-xl rounded-lg text-xs font-medium text-slate-300 opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity">
+              {section.label}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* Header */}
       <div className="w-full flex flex-col items-center mb-16 text-center">
         <h1 className="text-3xl font-semibold text-slate-100">Performance Analysis</h1>
@@ -253,7 +301,7 @@ export default function AnalysisPage() {
       {error && <ErrorAlert message={error} className="mb-10" />}
 
       {/* ── Section 1: Risk & Return Metrics ─────────────────────────────────── */}
-      <div className="w-full mb-16 relative">
+      <div id="section-risk" className="w-full mb-16 relative scroll-mt-24">
         {refreshing && (
           <div className="absolute top-0 right-4 w-4 h-4 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin" />
         )}
@@ -306,8 +354,9 @@ export default function AnalysisPage() {
       </div>
 
       {/* ── Section 2: Benchmarking ───────────────────────────────────────────── */}
-      <BenchmarkPanel
-        marketSymbols={marketSymbols}
+      <div id="section-benchmarking" className="scroll-mt-24">
+        <BenchmarkPanel
+          marketSymbols={marketSymbols}
         scenarios={scenarios}
         active={active}
         benchmarkInput={benchmarkInput}
@@ -392,12 +441,11 @@ export default function AnalysisPage() {
         )}
 
       </BenchmarkPanel>
+      </div>
 
       {/* ── Section 3: Holdings Analysis ─────────────────────────────────────── */}
       <HoldingsPanel
         attributionData={attributionData}
-        holdingsView={holdingsView}
-        setHoldingsView={setHoldingsView}
         holdingsLoading={holdingsLoading}
         holdingsError={holdingsError}
         attrDisplay={attrDisplay}
