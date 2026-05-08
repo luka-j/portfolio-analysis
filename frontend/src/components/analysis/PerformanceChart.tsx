@@ -3,6 +3,8 @@ import {
   LineChart, Line, AreaChart, Area, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
+import type { Payload } from 'recharts/types/component/DefaultLegendContent'
+import type { ValueType, NameType } from 'recharts/types/component/DefaultTooltipContent'
 import { RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../../utils/format'
 import type { ChartMode } from '../../pages/hooks/types'
 
@@ -16,7 +18,7 @@ function xTickFormatter(val: string | number) {
   return new Date(val).toLocaleString('default', { month: 'short', year: '2-digit' })
 }
 
-const tooltipLabelFormatter = (label: any) => {
+const tooltipLabelFormatter = (label: number) => {
   if (!label) return '';
   const d = new Date(label);
   return isNaN(d.getTime()) ? String(label) : d.toLocaleDateString('en-CA');
@@ -32,7 +34,7 @@ const COMMON_X_AXIS_PROPS = {
   tick: AXIS_STYLE,
   axisLine: { stroke: '#2a2e42' },
   tickLine: false,
-  label: { value: 'Date', position: 'insideBottom', offset: -16, ...AXIS_LABEL_STYLE } as any
+  label: { value: 'Date', position: 'insideBottom', offset: -16, ...AXIS_LABEL_STYLE } as Record<string, unknown>
 };
 
 const COMMON_Y_AXIS_PROPS = {
@@ -56,21 +58,23 @@ const COMMON_TOOLTIP_PROPS = {
   labelFormatter: tooltipLabelFormatter
 };
 
+type ChartRow = Record<string, number | string>
+
 export interface PerformanceChartProps {
   chartMode: ChartMode
-  mergedChartData: any[]
-  mwrChartData: any[]
-  drawdownChartData: any[]
-  rollingChartData: any[]
+  mergedChartData: ChartRow[]
+  mwrChartData: ChartRow[]
+  drawdownChartData: ChartRow[]
+  rollingChartData: ChartRow[]
   rollingMetricLabel: string
   compareLabel: string | null
-  compareTwrHistory: any[]
+  compareTwrHistory: ChartRow[]
   benchmarkSymbols: string[]
   scenarioBenchmarks: { name: string }[]
-  rollingSeries: Record<string, any>
+  rollingSeries: Record<string, ChartRow[]>
 }
 
-function processAllCompareRanges(data: any[], portfolioKey: string, compareKeys: string[], invert: boolean = false) {
+function processAllCompareRanges(data: ChartRow[], portfolioKey: string, compareKeys: string[], invert: boolean = false): ChartRow[] {
   if (data.length === 0 || compareKeys.length === 0) return data;
 
   let result = [...data];
@@ -92,7 +96,7 @@ function processAllCompareRanges(data: any[], portfolioKey: string, compareKeys:
             
             const crossDateObj = new Date(prevTime + t * (currTime - prevTime));
             
-            const crossData: any = { 
+            const crossData: ChartRow = { 
               date: crossDateObj.toISOString(),
               timestamp: crossDateObj.getTime()
             };
@@ -154,7 +158,7 @@ export default function PerformanceChart({
   const [explicitCompareKey, setExplicitCompareKey] = useState<string | null>(null);
   const [hoveredCompareKey, setHoveredCompareKey] = useState<string | null>(null);
 
-  const toggleSeries = (e: any) => {
+  const toggleSeries = (e: { dataKey?: string }) => {
     if (e && e.dataKey) {
       setHiddenSeries(prev => ({
         ...prev,
@@ -173,13 +177,13 @@ export default function PerformanceChart({
 
   const activeCompareKey = hoveredCompareKey || (explicitCompareKey !== null ? (explicitCompareKey === '' ? null : explicitCompareKey) : (availableCompareKeys.length === 1 ? availableCompareKeys[0] : null));
 
-  const renderCustomLegend = (props: any) => {
+  const renderCustomLegend = (props: { payload?: Payload<string, string>[] }) => {
     const { payload } = props;
     if (!payload) return null;
     
     return (
       <ul className="flex flex-wrap justify-center gap-4 mt-6 text-[10px] text-slate-500 font-black uppercase tracking-[0.15em] cursor-pointer select-none">
-        {payload.map((entry: any, index: number) => {
+        {payload.map((entry: Payload<string, string>, index: number) => {
           if (String(entry.dataKey).startsWith('Out_') || String(entry.dataKey).startsWith('Under_')) return null;
           
           const isHidden = hiddenSeries[entry.dataKey];
@@ -208,7 +212,7 @@ export default function PerformanceChart({
     );
   };
 
-  const mapWithTimestamp = (data: any[]) => data.map(d => ({ ...d, timestamp: new Date(d.date).getTime() }));
+  const mapWithTimestamp = (data: ChartRow[]) => data.map(d => ({ ...d, timestamp: new Date(String(d.date)).getTime() }));
 
   const twrDataWithTs = useMemo(() => mapWithTimestamp(mergedChartData), [mergedChartData]);
   const mwrDataWithTs = useMemo(() => mapWithTimestamp(mwrChartData), [mwrChartData]);
@@ -240,7 +244,7 @@ export default function PerformanceChart({
           <CartesianGrid {...COMMON_GRID_PROPS} />
           <XAxis {...COMMON_X_AXIS_PROPS} />
           <YAxis {...COMMON_Y_AXIS_PROPS} domain={['auto', 'auto']} tickFormatter={val => `${Number(val).toFixed(0)}%`} label={{ value: 'Return (%)', angle: -90, position: 'insideLeft', offset: 16, ...AXIS_LABEL_STYLE }} />
-          <Tooltip {...COMMON_TOOLTIP_PROPS} formatter={(value: any, name: any) => {
+          <Tooltip {...COMMON_TOOLTIP_PROPS} formatter={(value: ValueType, name: NameType) => {
             if (String(name).startsWith('Out_') || String(name).startsWith('Under_')) return [];
             return [`${Number(value).toFixed(2)}%`, String(name)];
           }} />
@@ -309,7 +313,7 @@ export default function PerformanceChart({
           tickFormatter={val => chartMode === 'rolling_volatility' ? `${(Number(val) * 100).toFixed(0)}%` : Number(val).toFixed(2)}
           label={{ value: rollingMetricLabel, angle: -90, position: 'insideLeft', offset: 16, ...AXIS_LABEL_STYLE }}
         />
-        <Tooltip {...COMMON_TOOLTIP_PROPS} formatter={(value: any, name: any) => {
+        <Tooltip {...COMMON_TOOLTIP_PROPS} formatter={(value: ValueType, name: NameType) => {
           if (String(name).startsWith('Out_') || String(name).startsWith('Under_')) return [];
           return [
             chartMode === 'rolling_volatility' ? `${(Number(value) * 100).toFixed(2)}%` : Number(value).toFixed(3),

@@ -45,7 +45,7 @@ import { useBenchmarks } from './hooks/useBenchmarks'
 import { useChartModeData } from './hooks/useChartModeData'
 import { useCompareOverlay } from './hooks/useCompareOverlay'
 import { useAnalysisChartData } from './hooks/useAnalysisChartData'
-import type { ChartMode, HoldingsView } from './hooks/types'
+import type { ChartMode } from './hooks/types'
 import PerformanceChart from '../components/analysis/PerformanceChart'
 
 export default function AnalysisPage() {
