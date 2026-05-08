@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/genai"
@@ -395,6 +396,11 @@ func (s *Service) AnalyzePortfolioStream(
 			strings.Join(enabledTools, ", "))
 	}
 
+	// Nudge the model to plan its tool calls first so it generates them concurrently.
+	if executor != nil && (len(enabledTools) > 0 || (isCanned && CannedPrompts[cannedType].ForceToolCall)) {
+		toolHint += "\n\nBefore calling any tools, you must first write a brief `<thinking>` block outlining exactly what data you need and which tools you will call simultaneously to get it."
+	}
+
 	constraints := BaseConstraints
 	// Only inject scenario constraint when the prompt or freeform tools include simulate_scenario.
 	if isCanned && CannedPrompts[cannedType].UsesScenarioTool {
@@ -459,14 +465,13 @@ func (s *Service) AnalyzePortfolioStream(
 		hasGoogleSearch = true
 	}
 
-	// For canned prompts with a ForcedTool, configure ToolChoice to force that tool first.
+	// For canned prompts with ForceToolCall, configure ToolChoice to force tool usage first.
 	var toolConfig *genai.ToolConfig
 	if isCanned {
-		if cp := CannedPrompts[cannedType]; cp.ForcedTool != "" && executor != nil {
+		if cp := CannedPrompts[cannedType]; cp.ForceToolCall && executor != nil {
 			toolConfig = &genai.ToolConfig{
 				FunctionCallingConfig: &genai.FunctionCallingConfig{
-					Mode:                  genai.FunctionCallingConfigModeAny,
-					AllowedFunctionNames:  []string{cp.ForcedTool},
+					Mode: genai.FunctionCallingConfigModeAny,
 				},
 			}
 		}
@@ -487,10 +492,10 @@ func (s *Service) AnalyzePortfolioStream(
 	}
 
 	// For schema-backed canned prompts, use structured JSON output.
-	// When ForcedTool is set, we defer schema application until after the tool loop;
-	// when no ForcedTool, we set it from the start.
+	// When ForceToolCall is set, we defer schema application until after the tool loop;
+	// when no ForceToolCall, we set it from the start.
 	isStructured := isCanned && CannedPrompts[cannedType].Schema != nil
-	if isStructured && CannedPrompts[cannedType].ForcedTool == "" {
+	if isStructured && !CannedPrompts[cannedType].ForceToolCall {
 		cfg.ResponseSchema = CannedPrompts[cannedType].Schema
 		cfg.ResponseMIMEType = "application/json"
 	}
@@ -533,13 +538,23 @@ func (s *Service) AnalyzePortfolioStream(
 
 		// Stream any text the model produced before the tool call.
 		if chunk := roundText.String(); chunk != "" {
-			fullResponse.WriteString(chunk)
-			if !isStructured && onChunk != nil {
-				if cbErr := onChunk(fullResponse.String()); cbErr != nil {
-					slog.Debug("llm: stream chunk callback failed (client disconnected)", "err", cbErr)
-					return fullResponse.String(), nil, nil
+			if onChunk != nil {
+				// Only stream text if we're not in the final structured JSON generation round,
+				// or if we are emitting a tool call (where the model outputs <thinking>).
+				if !isStructured || finishedWithToolCall {
+					cleanChunk := chunk
+					// Strip out tool call dumps if the model hallucinates them into the text stream.
+					if idx := strings.Index(cleanChunk, "BT:\n"); idx != -1 {
+						cleanChunk = strings.TrimSpace(cleanChunk[:idx])
+					}
+					if cbErr := onChunk(cleanChunk); cbErr != nil {
+						slog.Debug("llm: stream chunk callback failed (client disconnected)", "err", cbErr)
+						return fullResponse.String(), nil, nil
+					}
 				}
 			}
+			// Always append to fullResponse so we have the complete raw string at the end.
+			fullResponse.WriteString(chunk)
 		}
 
 		if !finishedWithToolCall || len(functionCalls) == 0 {
@@ -555,50 +570,63 @@ func (s *Service) AnalyzePortfolioStream(
 		modelTurnParts = append(modelTurnParts, functionCallParts...)
 		contents = append(contents, &genai.Content{Role: genai.RoleModel, Parts: modelTurnParts})
 
-		// After the first tool call round, clear any ForcedTool so the model can proceed freely.
+		// After the first tool call round, clear any ForceToolCall so the model can proceed freely.
 		if cfg.ToolConfig != nil && cfg.ToolConfig.FunctionCallingConfig != nil {
 			cfg.ToolConfig.FunctionCallingConfig = nil
 		}
 
-		// For ForcedTool prompts with Schema: apply structured output now that
+		// For ForceToolCall prompts with Schema: apply structured output now that
 		// the tool data has been injected. The next generation turn will produce JSON.
-		if isStructured && cfg.ResponseSchema == nil && CannedPrompts[cannedType].ForcedTool != "" {
+		if isStructured && cfg.ResponseSchema == nil && CannedPrompts[cannedType].ForceToolCall {
 			cfg.ResponseSchema = CannedPrompts[cannedType].Schema
 			cfg.ResponseMIMEType = "application/json"
 		}
 
-		// Execute each function call and collect responses.
-		responseParts := make([]*genai.Part, 0, len(functionCalls))
-		for _, fc := range functionCalls {
-			slog.Debug("llm: tool_call", "name", fc.Name)
+		// Execute each function call concurrently.
+		responseParts := make([]*genai.Part, len(functionCalls))
+		var wg sync.WaitGroup
+		var mu sync.Mutex
 
-			// Notify the frontend a tool is running.
-			if onToolCall != nil {
-				if cbErr := onToolCall(fc.Name); cbErr != nil {
-					slog.Debug("llm: tool_call SSE callback failed", "err", cbErr)
+		for i, fc := range functionCalls {
+			wg.Add(1)
+			go func(idx int, call *genai.FunctionCall) {
+				defer wg.Done()
+				slog.Debug("llm: tool_call", "name", call.Name)
+
+				// Notify the frontend a tool is running.
+				if onToolCall != nil {
+					// onToolCall is not guaranteed thread-safe in the HTTP writer, but Gin SSE is usually okay
+					// if we lock it, or the caller handles it. We'll lock to be safe for SSE writes.
+					mu.Lock()
+					cbErr := onToolCall(call.Name)
+					mu.Unlock()
+					if cbErr != nil {
+						slog.Debug("llm: tool_call SSE callback failed", "err", cbErr)
+					}
 				}
-			}
 
-			var result map[string]any
-			var toolErr error
-			if executor != nil {
-				result, toolErr = executor(ctx, fc)
-			} else {
-				toolErr = fmt.Errorf("no executor configured")
-			}
+				var result map[string]any
+				var toolErr error
+				if executor != nil {
+					result, toolErr = executor(ctx, call)
+				} else {
+					toolErr = fmt.Errorf("no executor configured")
+				}
 
-			if toolErr != nil {
-				slog.Warn("llm: tool execution error", "tool", fc.Name, "err", toolErr)
-				result = map[string]any{"error": toolErr.Error()}
-			}
+				if toolErr != nil {
+					slog.Warn("llm: tool execution error", "tool", call.Name, "err", toolErr)
+					result = map[string]any{"error": toolErr.Error()}
+				}
 
-			responseParts = append(responseParts, &genai.Part{
-				FunctionResponse: &genai.FunctionResponse{
-					Name:     fc.Name,
-					Response: result,
-				},
-			})
+				responseParts[idx] = &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name:     call.Name,
+						Response: result,
+					},
+				}
+			}(i, fc)
 		}
+		wg.Wait()
 
 		// Append all tool responses as a single user turn.
 		contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: responseParts})
@@ -635,6 +663,19 @@ func (s *Service) AnalyzePortfolioStream(
 				fields[k] = string(b)
 			} else {
 				fields[k] = fmt.Sprintf("%v", v)
+			}
+		}
+	}
+
+	// If there was an initial thinking block from the tool-call turns, prepend it.
+	if planStart := strings.Index(rawText, "<thinking>"); planStart != -1 {
+		planEnd := strings.Index(rawText[planStart+10:], "</thinking>")
+		if planEnd != -1 {
+			planContent := strings.TrimSpace(rawText[planStart+10 : planStart+10+planEnd])
+			if existing, ok := fields["thinking"]; ok && existing != "" {
+				fields["thinking"] = "**Research Plan:**\n" + planContent + "\n\n**Analysis:**\n" + existing
+			} else {
+				fields["thinking"] = planContent
 			}
 		}
 	}

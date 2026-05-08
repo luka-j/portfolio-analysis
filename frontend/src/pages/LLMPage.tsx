@@ -71,7 +71,7 @@ export default function LLMPage() {
 
   const [loading, setLoading] = useState(false)
   const [loadingLabel, setLoadingLabel] = useState('')
-  const [activeToolCall, setActiveToolCall] = useState<LLMToolCallEvent | null>(null)
+  const [activeToolCalls, setActiveToolCalls] = useState<LLMToolCallEvent[]>([])
   const toolCallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toolCallShownAt = useRef<number>(0)
 
@@ -101,13 +101,13 @@ export default function LLMPage() {
   const clearToolCall = useCallback((force = false) => {
     if (toolCallTimerRef.current) clearTimeout(toolCallTimerRef.current)
     if (force) {
-      setActiveToolCall(null)
+      setActiveToolCalls([])
       return
     }
     const elapsed = Date.now() - toolCallShownAt.current
     const remaining = Math.max(0, 3000 - elapsed)
     toolCallTimerRef.current = setTimeout(() => {
-      setActiveToolCall(null)
+      setActiveToolCalls([])
     }, remaining)
   }, [])
 
@@ -116,7 +116,10 @@ export default function LLMPage() {
     if (toolCallTimerRef.current) clearTimeout(toolCallTimerRef.current)
     toolCallShownAt.current = Date.now()
     const label = event.label || AVAILABLE_TOOLS.find(t => t.id === event.tool)?.label || event.tool
-    setActiveToolCall({ ...event, label })
+    setActiveToolCalls(prev => {
+      if (prev.some(t => t.tool === event.tool)) return prev;
+      return [...prev, { ...event, label }];
+    })
   }, [])
   useEffect(() => {
     if (initialPrompt && !autoSentRef.current) {
@@ -206,7 +209,7 @@ export default function LLMPage() {
       }
     } catch (err) {
       setLoading(false)
-      setActiveToolCall(null)
+      setActiveToolCalls([])
       const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
@@ -273,7 +276,7 @@ export default function LLMPage() {
       }
     } catch (err) {
       setLoading(false)
-      setActiveToolCall(null)
+      setActiveToolCalls([])
       const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
@@ -458,17 +461,21 @@ export default function LLMPage() {
           ))}
 
           {/* Loading indicator with context label + tool call banner */}
-          {(loading || activeToolCall) && (
+          {(loading || activeToolCalls.length > 0) && (
             <div className="flex justify-start">
               <div className="px-5 py-4 flex flex-col gap-2">
-                {activeToolCall ? (
+                {activeToolCalls.length > 0 ? (
                   // Tool execution state — shown for at least 3 seconds
-                  <div className="flex items-center gap-2.5">
-                    <svg className="w-3.5 h-3.5 text-indigo-400 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                      <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <p className="text-xs text-indigo-400">{activeToolCall.label}…</p>
+                  <div className="flex flex-col gap-1.5">
+                    {activeToolCalls.map(tc => (
+                      <div key={tc.tool} className="flex items-center gap-2.5">
+                        <svg className="w-3.5 h-3.5 text-indigo-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                          <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        <p className="text-xs text-indigo-400">{tc.label}…</p>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   // Generic thinking state
@@ -478,7 +485,7 @@ export default function LLMPage() {
                     <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
                 )}
-                {(loading && !activeToolCall && loadingLabel) && (
+                {(loading && activeToolCalls.length === 0 && loadingLabel) && (
                   <p className="text-xs text-slate-500">{loadingLabel}</p>
                 )}
               </div>

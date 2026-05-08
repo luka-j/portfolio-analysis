@@ -13,9 +13,9 @@ type CannedPrompt struct {
 	ChatAccessible    bool   // if true, available as a prompt_type on POST /llm/chat
 	Cacheable         bool   // if true, responses are cached 24 h (ChatAccessible prompts only)
 
-	// ForcedTool, when non-empty, sets ToolChoice to force the model to call this tool first.
-	// This guarantees the agent fetches the required data before generating its analysis.
-	ForcedTool string
+	// ForceToolCall, when true, sets ToolChoice to force the model to call at least one tool
+	// before answering. This guarantees the agent fetches the required data before generating its analysis.
+	ForceToolCall bool
 
 	// Schema, when non-nil, enables structured JSON output via ResponseSchema.
 	// For ForcedTool prompts the schema is applied on the final generation turn
@@ -110,7 +110,7 @@ Keep each bullet point under 30 words.`,
 		ChatAccessible:    false,
 	},
 	"add_or_trim": {
-		Message: `Use Google Search to find current news, recent earnings, analyst sentiment, and valuation context for my holdings. You may also call get_open_positions_with_cost_basis() to see unrealized gains/losses when evaluating trim candidates — a position deep in the green may warrant profit-taking, while one deep in the red raises tax-loss or recovery questions.
+		Message: `First, call get_open_positions_with_cost_basis() to retrieve my current holdings and their unrealized gains/losses. Then use Google Search to find current news, recent earnings, analyst sentiment, and valuation context for my holdings. A position deep in the green may warrant profit-taking, while one deep in the red raises tax-loss or recovery questions.
 
 Put your reasoning in the ` + "`thinking`" + ` field: begin by listing every ticker alongside its full name exactly as provided in the portfolio data — do not paraphrase or infer names. Use this list as your reference throughout; if a search result describes a security whose name does not match the provided name for that ticker, discard it and search more specifically. Then evaluate each position's upside and downside case, weighting by current allocation size, and identify any that are already overrepresented relative to their risk/reward.
 
@@ -122,7 +122,7 @@ Then fill each field with fluent markdown prose:
 
 A holding may appear in both lists if it represents a high-conviction asymmetric bet — compelling upside but with an equally credible downside that warrants caution before sizing up.`,
 		SystemInstruction: "You are an expert equity analyst helping a client make capital allocation decisions within their existing portfolio. Ground your recommendations in current, real-world data from your search results. Be direct and opinionated — avoid hedging every sentence.",
-		ForcedTool:        "get_current_allocations",
+		ForceToolCall:     true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("add_weight", "trim_or_avoid"),
@@ -138,6 +138,7 @@ A holding may appear in both lists if it represents a high-conviction asymmetric
 	},
 	"general_analysis": {
 		Message: `Analyze my current portfolio given current market conditions.
+Call get_current_allocations() to retrieve my current portfolio holdings.
 
 What am I effectively betting on?
 
@@ -150,7 +151,7 @@ Then fill each field with fluent markdown prose:
 - **` + "`fama_french_factor_tilts`" + `**: Provide a qualitative, one-paragraph assessment using the Fama-French five-factor framework (Market, Size, Value/Growth, Profitability, Investment). Only estimate factor tilts for holdings you confidently recognize (e.g., well-known US mega-caps, major index ETFs). For obscure, regional, or unfamiliar tickers — especially European UCITS ETFs or niche funds — explicitly state "factor exposure unknown for [ticker]" rather than guessing. Conclude with one sentence on whether the combined tilt profile appears deliberate or incidental.
 - **` + "`implicit_bets`" + `**: Based on my concentration, what specific future events, market shifts, or currency dynamics am I effectively betting heavily on to happen? What am I most vulnerable to (e.g., exposed to a weakening USD)?
 - **` + "`blind_spots`" + `**: What obvious market sectors, geographical regions, defensive assets, or FX hedges am I completely un-hedged against or missing out on entirely?`,
-		ForcedTool:     "get_current_allocations",
+		ForceToolCall:  true,
 		ChatAccessible: true,
 		Cacheable:      true,
 		Schema:         sectionSchema("macro_environment", "sector_geographic_concentration", "fama_french_factor_tilts", "implicit_bets", "blind_spots"),
@@ -172,6 +173,7 @@ Then fill each field with fluent markdown prose:
 	},
 	"best_worst_scenarios": {
 		Message: `Analyze my current portfolio's exposure to market volatility.
+Call get_current_allocations() to retrieve my current portfolio holdings.
 
 Put your reasoning in the ` + "`thinking`" + ` field: map out specific, realistic macroeconomic and industry-specific catalysts that could drastically affect my major holdings.
 
@@ -181,7 +183,7 @@ Then fill each field with fluent markdown prose:
 - **` + "`worst_case`" + `**: Describe a realistic stress scenario (e.g., specific regulatory shifts, supply chain shocks, currency headwinds, or rate changes) that would cause this portfolio to suffer heavy drawdowns. What is the structural weakness?
 - **` + "`key_indicators`" + `**: List 2–3 specific, measurable macroeconomic or fundamental data points I should monitor closely to see which of the two scenarios is actively unfolding (e.g., upcoming inflation data, central bank meetings like the Fed or ECB, or key sector earnings).
 - **` + "`historical_precedents`" + `**: Identify 2–3 specific historical periods (e.g., the 2000 dot-com bust, 2008 GFC, 2020 COVID crash, 2022 rate-hike cycle) where a portfolio with a similar geographic, sector, and asset-type composition faced comparable conditions. For each, briefly describe how such a portfolio would likely have performed — both during the drawdown and the subsequent recovery — and what the key driver of that outcome was.`,
-		ForcedTool:     "get_current_allocations",
+		ForceToolCall:  true,
 		ChatAccessible: true,
 		Cacheable:      true,
 		Schema:         sectionSchema("best_case", "worst_case", "key_indicators", "historical_precedents"),
@@ -216,7 +218,8 @@ Provide a bolded "**Bottom Line**" summary followed by a bulleted breakdown of c
 		Cacheable:         false,
 	},
 	"risk_metrics": {
-		Message: `Interpret the risk and return metrics in plain English, focusing on "The Story of the Money" rather than just the math.
+		Message: `Call get_risk_metrics() to retrieve the risk and return metrics for my portfolio.
+Interpret the risk and return metrics in plain English, focusing on "The Story of the Money" rather than just the math.
 
 Put your reasoning in the ` + "`thinking`" + ` field: break down each metric and what it implies about the investor's behavior and risk tolerance.
 
@@ -229,7 +232,7 @@ Then fill each field with fluent markdown prose, addressed directly to the clien
 - **` + "`investor_profile`" + `**: Is this portfolio more suited for the aggressive growth investor, defensive value-preservation investor, or neither?
 - **` + "`verdict`" + `**: Is this a "smooth ride" or a "rollercoaster," and am I being rewarded for staying on it?`,
 		SystemInstruction: "Act as a private wealth manager performing a year-end review for a client. Speak directly to the client.",
-		ForcedTool:        "get_risk_metrics",
+		ForceToolCall:     true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("returns_narrative", "wealth_growth", "efficiency_test", "stress_test", "investor_profile", "verdict"),
@@ -252,7 +255,8 @@ Then fill each field with fluent markdown prose, addressed directly to the clien
 		},
 	},
 	"benchmark_analysis": {
-		Message: `Compare my portfolio against the benchmark {benchmark}.
+		Message: `Call get_benchmark_metrics() to retrieve the performance comparison against the benchmark.
+Compare my portfolio against the benchmark {benchmark}.
 
 Put your reasoning in the ` + "`thinking`" + ` field: compare the portfolio metrics against the benchmark's assumed baseline, evaluating the Alpha, Beta, and Tracking Error. Consider what combinations of these metrics imply (e.g., high Tracking Error + negative Alpha = poor active management).
 
@@ -264,7 +268,7 @@ Then provide a "so what?" analysis in each field:
 - **` + "`investor_profile`" + `**: Is this portfolio better suited for an aggressive growth investor or a defensive value-preservation investor expecting downside protection?
 - **` + "`verdict`" + `**: Give me a blunt, executive summary of whether this portfolio is efficiently managed relative to the benchmark.`,
 		SystemInstruction: "Act as an institutional portfolio analyst reviewing a fund manager's performance against a benchmark index.",
-		ForcedTool:        "get_benchmark_metrics",
+		ForceToolCall:     true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("manager_skill_vs_luck", "risk_profile", "benchmarking", "investor_profile", "verdict"),
@@ -322,7 +326,7 @@ Then fill each field with fluent markdown prose:
 - **` + "`geographic_risks`" + `**: Identify the primary countries and regions where my money is tied up. What are the specific geopolitical or currency risks associated with this allocation?
 - **` + "`mitigation`" + `**: Suggest broad themes or asset classes (not specific financial advice or new tickers) I could use to dilute these bottlenecks.`,
 		SystemInstruction: "Act as an expert risk management analyst. Look through surface names into the underlying fundamentals.",
-		ForcedTool:        "get_portfolio_fundamentals_breakdown",
+		ForceToolCall:     true,
 		ChatAccessible:    true,
 		Cacheable:         true,
 		Schema:            sectionSchema("sector_overexposure", "geographic_risks", "mitigation"),
@@ -340,7 +344,7 @@ Then fill each field with fluent markdown prose:
 	},
 	"biggest_drag_on_performance": {
 		Message: `Identify the Biggest Drag on Performance in my portfolio.
-The positions with cost basis have already been loaded. Also call get_benchmark_metrics() for at least one broad market benchmark (e.g. 'SPY' or 'VWCE.DE') to contextualize my overall portfolio performance.
+Call get_open_positions_with_cost_basis() to retrieve my underwater positions. Also call get_benchmark_metrics() for at least one broad market benchmark (e.g. 'SPY' or 'VWCE.DE') to contextualize my overall portfolio performance.
 
 In a <thinking> block, compare my underwater positions against the overall portfolio benchmark metrics (Alpha, Beta). Evaluate whether these losers are justifiable cyclical laggards or long-term structural failures.
 
@@ -349,7 +353,7 @@ Then fill each field with fluent markdown prose:
 - **` + "`the_why`" + `**: For each laggard, provide a brief analysis of *why* it's down. Is it a company-specific issue (bad earnings) or a sector-wide macro headwind? You may want to use Google Search to verify recent news.
 - **` + "`tax_loss_context`" + `**: Without giving specific financial advice, present the tax-loss harvesting framework. Discuss what kind of alternative beta or factor tilt I could achieve by re-deploying this capital.`,
 		SystemInstruction: "Act as a ruthless performance analyst parsing through a portfolio's weakest links.",
-		ForcedTool:        "get_open_positions_with_cost_basis",
+		ForceToolCall:     true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("major_laggards", "the_why", "tax_loss_context"),
@@ -367,7 +371,7 @@ Then fill each field with fluent markdown prose:
 	},
 	"stress_test_beta": {
 		Message: `Conduct a Stress Test vs. The Market (Beta Analysis).
-The benchmark metrics have already been loaded. You may also call get_current_allocations() and get_portfolio_fundamentals_breakdown() to identify which holdings are providing the high beta vs the low beta.
+Call get_benchmark_metrics() to retrieve the portfolio's beta and market metrics. You should also call get_current_allocations() and get_portfolio_fundamentals_breakdown() to identify which holdings are providing the high beta vs the low beta.
 
 In a <thinking> block, analyze my portfolio Beta. If my Beta is 1.5, I move 50% more violently than the market. Project what a sudden 15% market crash (typical of an interest rate shock or recession) would mathematically do to my portfolio.
 
@@ -376,7 +380,7 @@ Then fill each field with fluent markdown prose:
 - **` + "`beta_contributors`" + `**: Identify which categories or specific holdings are likely supercharging my volatility, and which are acting as anchors holding my portfolio steady.
 - **` + "`defensive_evaluation`" + `**: Assess if my portfolio contains adequate 'defensive' properties (e.g. bonds, utilities, cash) to survive a prolonged secular bear market, or if I am fundamentally positioned as a high-growth bull-market participant.`,
 		SystemInstruction: "Act as an institutional risk manager conducting a scenario stress test.",
-		ForcedTool:        "get_benchmark_metrics",
+		ForceToolCall:     true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("drawdown_scenario", "beta_contributors", "defensive_evaluation"),

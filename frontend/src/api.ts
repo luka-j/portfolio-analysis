@@ -94,6 +94,7 @@ export interface PortfolioValueResponse {
 export interface DailyValue {
   date: string;
   value: number;
+  [key: string]: unknown;
 }
 
 export interface PortfolioHistoryResponse {
@@ -787,6 +788,7 @@ export async function getDrawdownSeries(
 export interface RollingPoint {
   date: string;
   value: number;
+  [key: string]: unknown;
 }
 
 export interface RollingSeriesResult {
@@ -866,6 +868,7 @@ export async function getCorrelations(
 export interface CumulativePoint {
   date: string;
   value: number; // cumulative return in percent
+  [key: string]: unknown;
 }
 
 export interface CumulativeSeriesResult {

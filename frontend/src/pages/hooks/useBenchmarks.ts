@@ -4,7 +4,7 @@ import {
   comparePortfolio,
   type BenchmarkResult,
   type CumulativeSeriesResult,
-  type DailyValue,
+  type CumulativePoint,
 } from '../../api'
 import type { AnalysisParams } from './types'
 import { formatSymbolName } from './types'
@@ -20,7 +20,7 @@ export function useBenchmarks(params: BenchmarksParams) {
   const [cumulativeResults, setCumulativeResults] = useState<CumulativeSeriesResult[]>([])
   const [compareResults, setCompareResults] = useState<BenchmarkResult[]>([])
 
-  const [scenarioBenchmarks, setScenarioBenchmarks] = useState<Array<{ id: number; name: string; twr: DailyValue[]; mwr: DailyValue[] }>>([])
+  const [scenarioBenchmarks, setScenarioBenchmarks] = useState<Array<{ id: number; name: string; twr: CumulativePoint[]; mwr: CumulativePoint[] }>>([])
   const [scenarioBenchmarkLoading, setScenarioBenchmarkLoading] = useState(false)
 
   const [compareLoading, setCompareLoading] = useState(false)

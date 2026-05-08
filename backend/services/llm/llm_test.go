@@ -178,36 +178,33 @@ func TestAssetFundamentalsRequiredFields(t *testing.T) {
 	}
 }
 
-// TestCannedPromptForcedTool verifies that ForcedTool is correctly set on tool-first prompts.
-func TestCannedPromptForcedTool(t *testing.T) {
-	cases := []struct {
-		promptType string
-		wantTool   string
-	}{
-		{"general_analysis", llm.ToolGetCurrentAllocations},
-		{"best_worst_scenarios", llm.ToolGetCurrentAllocations},
-		{"risk_metrics", llm.ToolGetRiskMetrics},
-		{"benchmark_analysis", llm.ToolGetBenchmarkMetrics},
-		{"geographic_sector_bottlenecks", llm.ToolGetPortfolioBreakdown},
+// TestCannedPromptForceToolCall verifies that ForceToolCall is correctly set on tool-first prompts.
+func TestCannedPromptForceToolCall(t *testing.T) {
+	cases := []string{
+		"general_analysis",
+		"best_worst_scenarios",
+		"risk_metrics",
+		"benchmark_analysis",
+		"geographic_sector_bottlenecks",
 	}
 
-	for _, tc := range cases {
-		cp, ok := llm.CannedPrompts[tc.promptType]
+	for _, promptType := range cases {
+		cp, ok := llm.CannedPrompts[promptType]
 		if !ok {
-			t.Errorf("canned prompt %q not found", tc.promptType)
+			t.Errorf("canned prompt %q not found", promptType)
 			continue
 		}
-		if cp.ForcedTool != tc.wantTool {
-			t.Errorf("CannedPrompts[%q].ForcedTool = %q, want %q", tc.promptType, cp.ForcedTool, tc.wantTool)
+		if !cp.ForceToolCall {
+			t.Errorf("CannedPrompts[%q].ForceToolCall = false, want true", promptType)
 		}
 	}
 }
 
-// TestCannedPromptToolFirstSchemaCompatibility verifies that ForcedTool prompts with Schema are accepted.
+// TestCannedPromptToolFirstSchemaCompatibility verifies that ForceToolCall prompts with Schema are accepted.
 // Schema is now applied after the tool loop completes, so both can coexist.
 func TestCannedPromptToolFirstSchemaCompatibility(t *testing.T) {
 	for key, cp := range llm.CannedPrompts {
-		if cp.ForcedTool != "" && cp.Schema != nil {
+		if cp.ForceToolCall && cp.Schema != nil {
 			// This combination is now valid — verify the schema has a "thinking" field.
 			if cp.Schema.Properties == nil || cp.Schema.Properties["thinking"] == nil {
 				t.Errorf("CannedPrompts[%q]: Schema is set but missing 'thinking' field", key)
@@ -225,7 +222,7 @@ func TestCannedPromptMessagesHaveNoDataJSON(t *testing.T) {
 			continue
 		}
 		if strings.Contains(cp.Message, "{data_json}") {
-			t.Errorf("CannedPrompts[%q] still contains {data_json} placeholder but uses ForcedTool — should not inject raw data", key)
+			t.Errorf("CannedPrompts[%q] still contains {data_json} placeholder but uses ForceToolCall — should not inject raw data", key)
 		}
 	}
 }
