@@ -3,7 +3,7 @@ package fundamentals
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -198,13 +198,13 @@ func (s *Service) TriggerFetch() {
 //
 // All queues are built from the database each run — safe across any restart.
 func (s *Service) runFetchCycle(ctx context.Context) {
-	log.Println("fundamentals: starting fetch cycle")
+	slog.Info("fundamentals: starting fetch cycle")
 	today := todayUTC()
 
 	// Step 1 & 2: collect all relevant symbols, then bootstrap AssetType from free sources.
 	allSymbols, err := s.collectAllSymbols()
 	if err != nil {
-		log.Printf("fundamentals: collect symbols: %v", err)
+		slog.Error("fundamentals: collect symbols failed", "err", err)
 		return
 	}
 	s.bootstrapAssetTypes(ctx, allSymbols)
@@ -212,9 +212,9 @@ func (s *Service) runFetchCycle(ctx context.Context) {
 	// Step 3: fundamentals provider enrichment (name / country / sector) for stale or incomplete records.
 	funQueue := s.buildFundamentalsQueue(allSymbols, today)
 	if len(funQueue) > 0 {
-		log.Printf("fundamentals: queueing %d symbols for fundamentals enrichment", len(funQueue))
+		slog.Info("fundamentals: queueing symbols for enrichment", "count", len(funQueue))
 	} else {
-		log.Println("fundamentals: no symbols need fundamentals enrichment (all fresh or definitive)")
+		slog.Debug("fundamentals: no symbols need fundamentals enrichment (all fresh or definitive)")
 	}
 
 	for _, entry := range funQueue {
@@ -227,9 +227,9 @@ func (s *Service) runFetchCycle(ctx context.Context) {
 	// Step 4: Yahoo quoteSummary — aggregate breakdown for confirmed ETFs not updated today.
 	bdQueue := s.buildBreakdownQueue(allSymbols, today)
 	if len(bdQueue) > 0 {
-		log.Printf("fundamentals: queueing %d ETFs for breakdown enrichment", len(bdQueue))
+		slog.Info("fundamentals: queueing ETFs for breakdown enrichment", "count", len(bdQueue))
 	} else {
-		log.Println("fundamentals: no ETFs need breakdown enrichment")
+		slog.Debug("fundamentals: no ETFs need breakdown enrichment")
 	}
 
 	for _, sym := range bdQueue {
@@ -239,7 +239,7 @@ func (s *Service) runFetchCycle(ctx context.Context) {
 		s.fetchOneBreakdown(sym)
 	}
 
-	log.Println("fundamentals: fetch cycle complete")
+	slog.Info("fundamentals: fetch cycle complete")
 }
 
 // ── Symbol collection ──────────────────────────────────────────────────────────
@@ -298,7 +298,7 @@ func (s *Service) collectPortfolioSymbols() ([]symbolWithUsers, error) {
 			} else {
 				info.include = s.hasMarketData(eff)
 				if !info.include {
-					log.Printf("fundamentals: skipping %q — no YahooSymbol and no market data", eff)
+					slog.Debug("fundamentals: skipping symbol — no YahooSymbol and no market data", "symbol", eff)
 				}
 			}
 		}
@@ -377,7 +377,7 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []symbolWithU
 		if s.QuoteTypeFetcher != nil {
 			qt, name, err := s.QuoteTypeFetcher.GetQuoteType(sym)
 			if err != nil {
-				log.Printf("fundamentals: Yahoo quoteType %s error: %v", sym, err)
+				slog.Warn("fundamentals: Yahoo quoteType error", "symbol", sym, "err", err)
 			} else if qt != "" {
 				s.seedAssetType(sym, qt, "Yahoo", name, entry.UserIDs)
 				// Currency for non-IB symbols will be populated on first GetCurrency call.
@@ -387,7 +387,7 @@ func (s *Service) bootstrapAssetTypes(ctx context.Context, symbols []symbolWithU
 		}
 	}
 	if ibCount > 0 || yahooCount > 0 {
-		log.Printf("fundamentals: bootstrap complete: %d from IB, %d from Yahoo, %d already definitive", ibCount, yahooCount, skipCount)
+		slog.Info("fundamentals: bootstrap complete", "from_ib", ibCount, "from_yahoo", yahooCount, "already_definitive", skipCount)
 	}
 }
 
@@ -457,7 +457,7 @@ func (s *Service) seedConid(symbol, conid string) {
 	if err := s.DB.Model(&models.AssetFundamental{}).
 		Where("symbol = ? AND (conid IS NULL OR conid = '')", symbol).
 		Update("conid", conid).Error; err != nil {
-		log.Printf("fundamentals: seedConid %s: %v", symbol, err)
+		slog.Error("fundamentals: seedConid update failed", "symbol", symbol, "err", err)
 	}
 }
 
@@ -470,7 +470,7 @@ func (s *Service) seedISIN(conid, isin string) {
 	if err := s.DB.Model(&models.AssetFundamental{}).
 		Where("conid = ? AND (isin IS NULL OR isin = '')", conid).
 		Update("isin", isin).Error; err != nil {
-		log.Printf("fundamentals: seedISIN (conid=%s): %v", conid, err)
+		slog.Error("fundamentals: seedISIN update failed", "conid", conid, "err", err)
 	}
 }
 
@@ -484,7 +484,7 @@ func (s *Service) seedCurrency(symbol, currency string) {
 		Where("symbol = ? AND (currency IS NULL OR currency = '')", symbol).
 		Update("currency", currency)
 	if result.Error != nil {
-		log.Printf("fundamentals: seedCurrency %s: %v", symbol, result.Error)
+		slog.Error("fundamentals: seedCurrency update failed", "symbol", symbol, "err", result.Error)
 	}
 }
 
@@ -533,7 +533,7 @@ func (s *Service) seedAssetType(symbol, assetType, source, name string, userIDs 
 				newRec.Name = name
 			}
 			if err2 := s.DB.Create(&newRec).Error; err2 != nil {
-				log.Printf("fundamentals: seed create %s (user=%d): %v", symbol, userID, err2)
+				slog.Error("fundamentals: seedAssetType create failed", "symbol", symbol, "user_id", userID, "err", err2)
 			}
 			continue
 		}
@@ -555,7 +555,7 @@ func (s *Service) seedAssetType(symbol, assetType, source, name string, userIDs 
 				updates["name"] = name
 			}
 			if err := s.DB.Model(&rec).Updates(updates).Error; err != nil {
-				log.Printf("fundamentals: seed update %s (user=%d): %v", symbol, userID, err)
+				slog.Error("fundamentals: seedAssetType update failed", "symbol", symbol, "user_id", userID, "err", err)
 			}
 		}
 	}
@@ -629,22 +629,22 @@ func (s *Service) fetchOneFundamentals(entry symbolWithUsers) {
 		state := s.fundamentalsStates[p.Name()]
 		cfg := p.RateLimit()
 		if !state.available(cfg) {
-			log.Printf("fundamentals: %s rate limited, skipping fundamentals for %s", p.Name(), entry.Symbol)
+			slog.Debug("fundamentals: provider rate limited, skipping symbol", "provider", p.Name(), "symbol", entry.Symbol)
 			continue
 		}
 
-		log.Printf("fundamentals: %s fetching fundamentals for %s", p.Name(), entry.Symbol)
+		slog.Debug("fundamentals: fetching fundamentals", "provider", p.Name(), "symbol", entry.Symbol)
 		state.consume()
 		fund, err := p.FetchFundamentals(entry.Symbol)
 		if err != nil {
-			log.Printf("fundamentals: %s error for %s: %v", p.Name(), entry.Symbol, err)
+			slog.Warn("fundamentals: provider fetch error", "provider", p.Name(), "symbol", entry.Symbol, "err", err)
 			if isRateLimitErr(err) {
 				state.triggerCooldown(cfg)
 			}
 			continue
 		}
 		if fund == nil {
-			log.Printf("fundamentals: %s profile not found for %s", p.Name(), entry.Symbol)
+			slog.Debug("fundamentals: provider profile not found", "provider", p.Name(), "symbol", entry.Symbol)
 			// Provider has no profile — write a stub so we don't retry too aggressively.
 			stub := &models.AssetFundamental{
 				Symbol:      entry.Symbol,
@@ -699,15 +699,15 @@ func (s *Service) fetchOneBreakdown(fundSymbol string) {
 		state := s.breakdownStates[p.Name()]
 		cfg := p.RateLimit()
 		if !state.available(cfg) {
-			log.Printf("fundamentals: %s rate limited, skipping breakdown for %s", p.Name(), fundSymbol)
+			slog.Debug("fundamentals: provider rate limited, skipping breakdown", "provider", p.Name(), "symbol", fundSymbol)
 			continue
 		}
 
-		log.Printf("fundamentals: %s fetching breakdown for %s", p.Name(), fundSymbol)
+		slog.Debug("fundamentals: fetching breakdown", "provider", p.Name(), "symbol", fundSymbol)
 		state.consume()
 		data, err := p.FetchETFBreakdown(fundSymbol)
 		if err != nil {
-			log.Printf("fundamentals: %s breakdown error for %s: %v", p.Name(), fundSymbol, err)
+			slog.Warn("fundamentals: breakdown fetch error", "provider", p.Name(), "symbol", fundSymbol, "err", err)
 			if isRateLimitErr(err) {
 				state.triggerCooldown(cfg)
 			}
@@ -715,7 +715,7 @@ func (s *Service) fetchOneBreakdown(fundSymbol string) {
 		}
 
 		if data == nil || len(data.Rows) == 0 {
-			log.Printf("fundamentals: %s no breakdown data for %s", p.Name(), fundSymbol)
+			slog.Debug("fundamentals: no breakdown data returned", "provider", p.Name(), "symbol", fundSymbol)
 			return
 		}
 
@@ -726,12 +726,11 @@ func (s *Service) fetchOneBreakdown(fundSymbol string) {
 			var existing models.AssetFundamental
 			alreadyBondETF := s.DB.Where("symbol = ? AND asset_type = 'Bond ETF'", fundSymbol).First(&existing).Error == nil
 			if !alreadyBondETF {
-				log.Printf("fundamentals: %s is a bond ETF (duration=%.2fy), promoting asset type", fundSymbol, func() float64 {
-					if data.Duration != nil {
-						return *data.Duration
-					}
-					return 0
-				}())
+				var dur float64
+				if data.Duration != nil {
+					dur = *data.Duration
+				}
+				slog.Info("fundamentals: promoting to Bond ETF", "symbol", fundSymbol, "duration_years", dur)
 			}
 			s.updateBondETFMeta(fundSymbol, data.Duration)
 		}
@@ -745,7 +744,7 @@ func (s *Service) updateBondETFMeta(symbol string, duration *float64) {
 	if err := s.DB.Model(&models.AssetFundamental{}).
 		Where("symbol = ? AND data_source != 'User'", symbol).
 		Update("asset_type", "Bond ETF").Error; err != nil {
-		log.Printf("fundamentals: updateBondETFMeta asset_type %s: %v", symbol, err)
+		slog.Error("fundamentals: updateBondETFMeta asset_type update failed", "symbol", symbol, "err", err)
 	}
 	// duration + last_updated: always refresh — duration changes over time and users cannot set it.
 	durationUpdates := map[string]interface{}{"last_updated": time.Now().UTC()}
@@ -755,7 +754,7 @@ func (s *Service) updateBondETFMeta(symbol string, duration *float64) {
 	if err := s.DB.Model(&models.AssetFundamental{}).
 		Where("symbol = ?", symbol).
 		Updates(durationUpdates).Error; err != nil {
-		log.Printf("fundamentals: updateBondETFMeta duration %s: %v", symbol, err)
+		slog.Error("fundamentals: updateBondETFMeta duration update failed", "symbol", symbol, "err", err)
 	}
 }
 
@@ -781,18 +780,18 @@ func (s *Service) upsertFundamentals(symbol string, f *models.AssetFundamental, 
 		}),
 	}).Create(&row).Error
 	if err != nil {
-		log.Printf("fundamentals: upsert %s (user=%d): %v", symbol, userID, err)
+		slog.Error("fundamentals: upsert failed", "symbol", symbol, "user_id", userID, "err", err)
 	}
 }
 
 // upsertBreakdowns replaces all EtfBreakdown rows for a fund (delete-then-insert).
 func (s *Service) upsertBreakdowns(fundSymbol string, rows []models.EtfBreakdown) {
 	if err := s.DB.Where("fund_symbol = ?", fundSymbol).Delete(&models.EtfBreakdown{}).Error; err != nil {
-		log.Printf("fundamentals: delete breakdowns for %s: %v", fundSymbol, err)
+		slog.Error("fundamentals: delete breakdowns failed", "symbol", fundSymbol, "err", err)
 		return
 	}
 	if err := s.DB.Create(&rows).Error; err != nil {
-		log.Printf("fundamentals: insert breakdowns for %s: %v", fundSymbol, err)
+		slog.Error("fundamentals: insert breakdowns failed", "symbol", fundSymbol, "err", err)
 	}
 }
 

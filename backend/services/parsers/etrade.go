@@ -3,7 +3,7 @@ package parsers
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -382,7 +382,7 @@ func parseFloat(s string) float64 {
 	}
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		log.Printf("Warning: failed to parse float %q: %v", s, err)
+		slog.Warn("parsers: failed to parse float value", "value", s, "err", err)
 	}
 	return v
 }

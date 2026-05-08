@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ func Init(dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("connecting to database: %w", err)
 	}
 
-	log.Printf("Database: %s — running migrations", dbLabel)
+	slog.Info("database: running migrations", "driver", dbLabel)
 
 	// Drop stale llm_caches unique index if it covers only (user_hash, prompt_type) —
 	// the current schema requires all three columns (user_hash, prompt_type, model).
@@ -86,7 +87,7 @@ func Init(dsn string) (*gorm.DB, error) {
 			database.Model(&missingIDs[i]).Update("public_id", uuid.New().String())
 		}
 		if len(missingIDs) > 0 {
-			log.Printf("Backfilled PublicID for %d existing transaction rows", len(missingIDs))
+			slog.Info("database: backfilled missing PublicIDs", "count", len(missingIDs))
 		}
 	}
 

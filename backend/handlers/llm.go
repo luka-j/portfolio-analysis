@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -92,7 +92,7 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 		return
 	}
 
-	log.Printf("INFO: GetMarketSummary calling LLM [user=%s period=%s]", userHash[:8], period)
+	slog.Info("llm: GetMarketSummary calling LLM", "user", userHash[:8], "period", period)
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 130*time.Second)
 	defer cancel()
 	summary, err := h.LLM.GetMarketSummary(reqCtx, data, period)
@@ -102,11 +102,11 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			log.Printf("WARN: GetMarketSummary timed out [user=%s period=%s]", userHash[:8], period)
+			slog.Warn("llm: GetMarketSummary timed out", "user", userHash[:8], "period", period)
 			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Model timed out. The servers may be overloaded, try again later or with a different model."})
 			return
 		}
-		log.Printf("ERROR: GetMarketSummary failed [user=%s period=%s]: %v", userHash[:8], period, err)
+		slog.Error("llm: GetMarketSummary failed", "user", userHash[:8], "period", period, "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "generating summary: " + err.Error()})
 		return
 	}
@@ -123,7 +123,7 @@ func (h *LLMHandler) GetSummary(c *gin.Context) {
 	}).Create(&cacheEntry).Error
 
 	if err != nil {
-		log.Printf("WARN: GetSummary failed to save cache [user=%s period=%s]: %v", userHash[:8], period, err)
+		slog.Warn("llm: GetSummary failed to save cache", "user", userHash[:8], "period", period, "err", err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"summary": summary})
@@ -249,7 +249,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		var renderErr error
 		message, renderErr = h.renderCannedPrompt(req, data, userHash)
 		if renderErr != nil {
-			log.Printf("ERROR: renderCannedPrompt failed [user=%s type=%s]: %v", userHash[:8], cannedType, renderErr)
+			slog.Error("llm: renderCannedPrompt failed", "user", userHash[:8], "type", cannedType, "err", renderErr)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "preparing prompt: " + renderErr.Error()})
 			return
 		}
@@ -261,8 +261,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 
 	executor := h.buildExecutor(data, req, userHash)
 
-	log.Printf("INFO: AnalyzePortfolio calling LLM [user=%s prompt_type=%s model=%s currency=%s enabledToolsCount=%d]",
-		userHash[:8], req.PromptType, modelKey, req.Currency, len(req.EnabledTools))
+	slog.Info("llm: Chat calling LLM", "user", userHash[:8], "prompt_type", req.PromptType, "model", modelKey, "currency", req.Currency, "tools", len(req.EnabledTools))
 	var history []llm.ConversationTurn
 	if cannedType == "" {
 		history = req.History
@@ -296,11 +295,11 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			log.Printf("WARN: AnalyzePortfolio timed out [user=%s prompt_type=%s]", userHash[:8], req.PromptType)
+			slog.Warn("llm: Chat timed out", "user", userHash[:8], "prompt_type", req.PromptType)
 			c.SSEvent("error", gin.H{"error": "Model timed out. The servers may be overloaded, try again later or with a different model."})
 			return
 		}
-		log.Printf("ERROR: AnalyzePortfolio failed [user=%s prompt_type=%s currency=%s]: %v", userHash[:8], req.PromptType, req.Currency, err)
+		slog.Error("llm: Chat failed", "user", userHash[:8], "prompt_type", req.PromptType, "currency", req.Currency, "err", err)
 		c.SSEvent("error", gin.H{"error": "generating analysis: " + err.Error()})
 		return
 	}
@@ -318,7 +317,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		}).Create(&cacheEntry).Error
 
 		if err != nil {
-			log.Printf("WARN: Chat failed to save cache [user=%s prompt_type=%s]: %v", userHash[:8], req.PromptType, err)
+			slog.Warn("llm: Chat failed to save cache", "user", userHash[:8], "prompt_type", req.PromptType, "err", err)
 		}
 	}
 

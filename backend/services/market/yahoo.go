@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -188,8 +188,12 @@ func (s *YahooFinanceService) getHistoryUncached(symbol string, fromDate, toDate
 		points, err := s.fetchFromYahoo(symbol, rng[0], rng[1])
 		if err != nil {
 			lastErr = err
-			log.Printf("Fetching %s history [%s..%s]: %v",
-				symbol, rng[0].Format("2006-01-02"), rng[1].Format("2006-01-02"), err)
+			slog.Warn("market: Yahoo history fetch failed",
+				"symbol", symbol,
+				"from", rng[0].Format("2006-01-02"),
+				"to", rng[1].Format("2006-01-02"),
+				"err", err,
+			)
 			// Write negative-cache markers for genuinely unknown/delisted symbols so
 			// we don't re-query the same hopeless range on every request.
 			// Only do this when we have no prior data for this symbol — if we already
@@ -203,7 +207,7 @@ func (s *YahooFinanceService) getHistoryUncached(symbol string, fromDate, toDate
 						{Date: rng[0], Volume: -1},
 						{Date: rng[1], Volume: -1},
 					}); saveErr != nil {
-						log.Printf("Warning: saving negative cache for %s: %v", symbol, saveErr)
+						slog.Warn("market: saving negative cache failed", "symbol", symbol, "err", saveErr)
 					}
 				}
 			}
@@ -216,7 +220,7 @@ func (s *YahooFinanceService) getHistoryUncached(symbol string, fromDate, toDate
 				points = append(points, models.PricePoint{Date: rng[0], Volume: -1})
 			}
 			if saveErr := s.saveCache(symbol, points); saveErr != nil {
-				log.Printf("Warning: saving %d price points for %s: %v", len(points), symbol, saveErr)
+				slog.Warn("market: saving price cache failed", "symbol", symbol, "points", len(points), "err", saveErr)
 			}
 		}
 		// Empty successful response (no trading days in range) — skip silently.

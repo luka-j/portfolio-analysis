@@ -2,7 +2,7 @@ package portfolio
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -322,7 +322,7 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 		latestPrice := pr.price
 		fetchErr := pr.err
 		if fetchErr != nil {
-			log.Printf("Warning: fetching latest price for %s (mapped to %s): %v", h.Symbol, querySymbol, fetchErr)
+			slog.Warn("portfolio: latest price fetch failed", "symbol", h.Symbol, "query_symbol", querySymbol, "err", fetchErr)
 		}
 
 		var priceStatus string
@@ -390,7 +390,7 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 	for _, cur := range currencies {
 		pendingCash, err := s.computePendingCashMemo(data, cur, acctModel, sharedMemo, today)
 		if err != nil {
-			log.Printf("Warning: computing pending cash for %s: %v", cur, err)
+			slog.Warn("portfolio: pending cash computation failed", "currency", cur, "err", err)
 			pendingCash = 0
 		}
 		pendingCashByCcy[cur] = pendingCash
@@ -712,7 +712,7 @@ func (s *Service) getDailyValuesUncached(
 			fxSymbol := fmt.Sprintf("%s%s=X", fromCur, currency)
 			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
 			if err != nil {
-				log.Printf("Warning: pre-fetching FX %s: %v\n", fxSymbol, err)
+				slog.Warn("portfolio: FX history prefetch failed", "pair", fxSymbol, "err", err)
 				continue
 			}
 			fxData[pairKey] = pts // already sorted ASC by GetHistory
@@ -801,7 +801,7 @@ func (s *Service) getDailyValuesUncached(
 		querySymbol := f.querySymbol
 
 		if f.err != nil {
-			log.Printf("Warning: fetching %s historical data: %v\n", querySymbol, f.err)
+			slog.Warn("portfolio: historical price fetch failed", "symbol", querySymbol, "err", f.err)
 		}
 		prices := f.prices
 		// After this symbol's inner loop, prices is GC-eligible.
@@ -1118,7 +1118,7 @@ func (s *Service) GetDailyValuesPerPosition(
 			fxSymbol := fmt.Sprintf("%s%s=X", fromCur, currency)
 			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
 			if err != nil {
-				log.Printf("Warning: pre-fetching FX %s for per-position: %v\n", fxSymbol, err)
+				slog.Warn("portfolio: FX history prefetch failed (per-position)", "pair", fxSymbol, "err", err)
 				continue
 			}
 			fxData[pairKey] = pts
@@ -1256,7 +1256,7 @@ func (s *Service) GetDailyValuesPerPosition(
 		prices := f.prices
 
 		if f.err != nil {
-			log.Printf("Warning: fetching %s historical data for per-position: %v\n", f.querySymbol, f.err)
+			slog.Warn("portfolio: historical price fetch failed (per-position)", "symbol", f.querySymbol, "err", f.err)
 		}
 
 		nativeCurrency := ""

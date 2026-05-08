@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -283,7 +283,7 @@ func buildFXRateMap(mp market.Provider, nativeCcy, displayCcy string, from, to t
 	fxSymbol := fmt.Sprintf("%s%s=X", nativeCcy, displayCcy)
 	points, err := mp.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, false)
 	if err != nil {
-		log.Printf("Warning: pre-fetching FX %s: %v", fxSymbol, err)
+		slog.Warn("market: FX rate prefetch failed", "pair", fxSymbol, "err", err)
 		return nil
 	}
 	pc := make(map[string]float64)

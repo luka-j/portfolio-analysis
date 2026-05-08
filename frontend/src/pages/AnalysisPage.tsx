@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-} from 'recharts'
+
 import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
@@ -15,7 +12,7 @@ import StatCards from '../components/analysis/StatCards'
 import BenchmarkPanel from '../components/analysis/BenchmarkPanel'
 import HoldingsPanel from '../components/analysis/HoldingsPanel'
 import { getMarketSymbols } from '../api'
-import { formatDate, CURRENCIES, getFromDate, RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../utils/format'
+import { formatDate, CURRENCIES, getFromDate } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
 import { useScenario } from '../context/ScenarioContext'
 
@@ -28,13 +25,13 @@ const FX_METHOD_OPTIONS = [
 
 
 const CHART_MODE_OPTIONS = [
-  { label: 'TWR',                value: 'twr'                as const },
-  { label: 'MWR',                value: 'mwr'                as const },
-  { label: 'Rolling Sharpe',     value: 'rolling_sharpe'     as const },
-  { label: 'Rolling Sortino',    value: 'rolling_sortino'    as const },
-  { label: 'Rolling Volatility', value: 'rolling_volatility' as const },
-  { label: 'Rolling Beta',       value: 'rolling_beta'       as const },
-  { label: 'Drawdown',           value: 'drawdown'           as const },
+  { label: 'TWR',                value: 'twr'                as const, tooltip: 'Time-Weighted Return. Measures compound rate of growth, eliminating the distorting effects of cash inflows and outflows. Best for comparing against benchmarks.' },
+  { label: 'MWR',                value: 'mwr'                as const, tooltip: 'Money-Weighted Return (IRR). Measures the performance of your actual cash flows. Best for seeing how your timing of deposits/withdrawals affected your total return.' },
+  { label: 'Rolling Sharpe',     value: 'rolling_sharpe'     as const, tooltip: 'Risk-adjusted return over a rolling window. Higher is better.' },
+  { label: 'Rolling Sortino',    value: 'rolling_sortino'    as const, tooltip: 'Return adjusted for downside risk only over a rolling window.' },
+  { label: 'Rolling Volatility', value: 'rolling_volatility' as const, tooltip: 'Standard deviation of returns over a rolling window. Measures price fluctuations.' },
+  { label: 'Rolling Beta',       value: 'rolling_beta'       as const, tooltip: 'Measures sensitivity to benchmark movements over a rolling window. 1.0 means it moves exactly with the benchmark.' },
+  { label: 'Drawdown',           value: 'drawdown'           as const, tooltip: 'Percentage decline from the highest peak to the current value.' },
 ]
 
 const WINDOW_OPTIONS = [
@@ -43,23 +40,13 @@ const WINDOW_OPTIONS = [
   { label: '6M',  value: 126 },
 ]
 
-const COLORS = ['#818cf8', '#34d399', '#fbbf24', '#f87171', '#22d3ee', '#f472b6', '#a78bfa']
-
 import { useAnalysisData } from './hooks/useAnalysisData'
 import { useBenchmarks } from './hooks/useBenchmarks'
 import { useChartModeData } from './hooks/useChartModeData'
 import { useCompareOverlay } from './hooks/useCompareOverlay'
 import { useAnalysisChartData } from './hooks/useAnalysisChartData'
 import type { ChartMode, HoldingsView } from './hooks/types'
-
-function xTickFormatter(val: string) {
-  return new Date(val).toLocaleString('default', { month: 'short', year: '2-digit' })
-}
-
-const AXIS_STYLE = { fontSize: 10, fill: '#475569' }
-const AXIS_LABEL_STYLE = { fontSize: 10, fill: '#334155', fontWeight: 900 }
-
-const COMPARE_COLOR = '#fbbf24' // amber — scenario-active accent
+import PerformanceChart from '../components/analysis/PerformanceChart'
 
 export default function AnalysisPage() {
   const navigate = useNavigate()
@@ -383,70 +370,19 @@ export default function AnalysisPage() {
                 <Spinner label="Loading…" />
               </div>
             )}
-            <ResponsiveContainer width="100%" height="100%">
-              {chartMode === 'twr' ? (
-                <LineChart data={mergedChartData} margin={{ top: 10, right: 20, left: 10, bottom: 36 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2e42" vertical={false} opacity={0.3} />
-                  <XAxis dataKey="date" tickFormatter={xTickFormatter} minTickGap={60} tick={AXIS_STYLE} axisLine={{ stroke: '#2a2e42' }} tickLine={false} label={{ value: 'Date', position: 'insideBottom', offset: -16, ...AXIS_LABEL_STYLE }} />
-                  <YAxis domain={['auto', 'auto']} tickFormatter={val => `${Number(val).toFixed(0)}%`} tick={AXIS_STYLE} axisLine={false} tickLine={false} width={56} label={{ value: 'Return (%)', angle: -90, position: 'insideLeft', offset: 16, ...AXIS_LABEL_STYLE }} />
-                  <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE} formatter={(value, name) => [`${Number(value).toFixed(2)}%`, String(name)]} />
-                  <Legend wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.15em' }} />
-                  <Line type="monotone" dataKey="Portfolio" stroke={COLORS[0]} strokeWidth={3} dot={false} animationDuration={1200} />
-                  {compareLabel !== null && compareTwrHistory.length > 0 && (
-                    <Line type="monotone" dataKey="Compare" name={compareLabel} stroke={COMPARE_COLOR} strokeWidth={2} strokeDasharray="4 2" dot={false} opacity={0.7} />
-                  )}
-                  {benchmarkSymbols.map((sym, i) => (
-                    <Line key={sym} type="monotone" dataKey={sym} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="6 6" dot={false} />
-                  ))}
-                  {scenarioBenchmarks.map((sb, i) => (
-                    <Line key={`[S] ${sb.name}`} type="monotone" dataKey={`[S] ${sb.name}`} name={sb.name} stroke={COLORS[(benchmarkSymbols.length + i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="8 3" dot={false} opacity={0.85} />
-                  ))}
-                </LineChart>
-              ) : chartMode === 'mwr' ? (
-                <LineChart data={mwrChartData} margin={{ top: 10, right: 20, left: 10, bottom: 36 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2e42" vertical={false} opacity={0.3} />
-                  <XAxis dataKey="date" tickFormatter={xTickFormatter} minTickGap={60} tick={AXIS_STYLE} axisLine={{ stroke: '#2a2e42' }} tickLine={false} label={{ value: 'Date', position: 'insideBottom', offset: -16, ...AXIS_LABEL_STYLE }} />
-                  <YAxis domain={['auto', 'auto']} tickFormatter={val => `${Number(val).toFixed(0)}%`} tick={AXIS_STYLE} axisLine={false} tickLine={false} width={56} label={{ value: 'Return (%)', angle: -90, position: 'insideLeft', offset: 16, ...AXIS_LABEL_STYLE }} />
-                  <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE} formatter={(value, name) => [`${Number(value).toFixed(2)}%`, String(name)]} />
-                  <Legend wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.15em' }} />
-                  <Line type="monotone" dataKey="Portfolio" name="Portfolio (MWR)" stroke={COLORS[0]} strokeWidth={3} dot={false} animationDuration={1200} />
-                  {benchmarkSymbols.map((sym, i) => (
-                    <Line key={sym} type="monotone" dataKey={sym} name={`${sym} (TWR)`} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="6 6" dot={false} />
-                  ))}
-                </LineChart>
-              ) : chartMode === 'drawdown' ? (
-                <AreaChart data={drawdownChartData} margin={{ top: 10, right: 20, left: 10, bottom: 36 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2e42" vertical={false} opacity={0.3} />
-                  <XAxis dataKey="date" tickFormatter={xTickFormatter} minTickGap={60} tick={AXIS_STYLE} axisLine={{ stroke: '#2a2e42' }} tickLine={false} label={{ value: 'Date', position: 'insideBottom', offset: -16, ...AXIS_LABEL_STYLE }} />
-                  <YAxis domain={['auto', 0]} tickFormatter={val => `${Number(val).toFixed(0)}%`} tick={AXIS_STYLE} axisLine={false} tickLine={false} width={56} label={{ value: 'Drawdown (%)', angle: -90, position: 'insideLeft', offset: 16, ...AXIS_LABEL_STYLE }} />
-                  <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE} formatter={(value, name) => [`${Number(value).toFixed(2)}%`, String(name)]} />
-                  {benchmarkSymbols.length > 0 && <Legend wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.15em' }} />}
-                  <Area type="monotone" dataKey="Drawdown" stroke="#f87171" strokeWidth={1.5} fill="#f87171" fillOpacity={0.15} dot={false} animationDuration={1000} />
-                  {benchmarkSymbols.map((sym, i) => (
-                    <Line key={sym} type="monotone" dataKey={sym} stroke={COLORS[(i + 1) % COLORS.length]} strokeWidth={1.5} strokeDasharray="6 6" dot={false} />
-                  ))}
-                </AreaChart>
-              ) : (
-                <LineChart data={rollingChartData} margin={{ top: 10, right: 20, left: 10, bottom: 36 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2e42" vertical={false} opacity={0.3} />
-                  <XAxis dataKey="date" tickFormatter={xTickFormatter} minTickGap={60} tick={AXIS_STYLE} axisLine={{ stroke: '#2a2e42' }} tickLine={false} label={{ value: 'Date', position: 'insideBottom', offset: -16, ...AXIS_LABEL_STYLE }} />
-                  <YAxis domain={['auto', 'auto']} tick={AXIS_STYLE} axisLine={false} tickLine={false} width={56}
-                    tickFormatter={val => chartMode === 'rolling_volatility' ? `${(Number(val) * 100).toFixed(0)}%` : Number(val).toFixed(2)}
-                    label={{ value: rollingMetricLabel, angle: -90, position: 'insideLeft', offset: 16, ...AXIS_LABEL_STYLE }}
-                  />
-                  <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} labelStyle={RECHARTS_LABEL_STYLE} itemStyle={RECHARTS_ITEM_STYLE}
-                    formatter={(value, name) => [
-                      chartMode === 'rolling_volatility' ? `${(Number(value) * 100).toFixed(2)}%` : Number(value).toFixed(3),
-                      String(name)
-                    ]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: '10px', color: '#64748b', paddingTop: '30px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.15em' }} />
-                  {Object.keys(rollingSeries).map((sym, i) => (
-                    <Line key={sym} type="monotone" dataKey={sym} stroke={COLORS[i % COLORS.length]} strokeWidth={sym === 'Portfolio' ? 2.5 : 1.5} strokeDasharray={sym === 'Portfolio' ? undefined : '6 6'} dot={false} />
-                  ))}
-                </LineChart>
-              )}
-            </ResponsiveContainer>
+            <PerformanceChart
+              chartMode={chartMode}
+              mergedChartData={mergedChartData}
+              mwrChartData={mwrChartData}
+              drawdownChartData={drawdownChartData}
+              rollingChartData={rollingChartData}
+              rollingMetricLabel={rollingMetricLabel}
+              compareLabel={compareLabel}
+              compareTwrHistory={compareTwrHistory}
+              benchmarkSymbols={benchmarkSymbols}
+              scenarioBenchmarks={scenarioBenchmarks}
+              rollingSeries={rollingSeries}
+            />
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-500 opacity-60 mb-10">

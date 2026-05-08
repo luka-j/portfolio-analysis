@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -111,7 +111,7 @@ func (s *Service) lookupFundamentals(userHash string, symbols []string) map[stri
 		q = q.Where("user_id = (SELECT id FROM users WHERE token_hash = ?)", realUserHash(userHash))
 	}
 	if err := q.Find(&rows).Error; err != nil {
-		log.Printf("WARN: llm fundamentals lookup failed: %v", err)
+		slog.Warn("llm: fundamentals lookup failed", "err", err)
 		return result
 	}
 	for _, r := range rows {
@@ -156,7 +156,7 @@ func (s *Service) lookupNames(userHash string, symbols []string) map[string]stri
 func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) string {
 	result, err := s.PortfolioService.GetCurrentValue(data, currency, acctModel, false)
 	if err != nil {
-		log.Printf("WARN: getPortfolioJSON failed to get current value: %v", err)
+		slog.Warn("llm: getPortfolioJSON failed to get current value", "err", err)
 		return ""
 	}
 
@@ -192,7 +192,7 @@ func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, 
 
 	b, err := json.Marshal(items)
 	if err != nil {
-		log.Printf("WARN: getPortfolioJSON failed to marshal JSON: %v", err)
+		slog.Warn("llm: getPortfolioJSON marshal failed", "err", err)
 		return ""
 	}
 	return string(b)
@@ -206,12 +206,12 @@ func (s *Service) callGemini(ctx context.Context, model, callType string, conten
 		return "", fmt.Errorf("creating genai client: %w", err)
 	}
 
-	log.Printf("callGemini [model=%s callType=%s turns=%d]", model, callType, len(contents))
+	slog.Info("llm: callGemini", "model", model, "call_type", callType, "turns", len(contents))
 	start := time.Now()
 	resp, err := client.Models.GenerateContent(ctx, model, contents, cfg)
 	elapsed := time.Since(start)
 	if err != nil {
-		log.Printf("ERROR: Gemini GenerateContent failed [model=%s]: %v", model, err)
+		slog.Error("llm: Gemini GenerateContent failed", "model", model, "err", err)
 		geminiRequests.WithLabelValues(model, callType, "error").Inc()
 		geminiRequestDuration.WithLabelValues(model, callType).Observe(elapsed.Seconds())
 		return "", fmt.Errorf("generating content: %w", err)
@@ -229,12 +229,12 @@ func (s *Service) callGemini(ctx context.Context, model, callType string, conten
 		if len(resp.Candidates) > 0 {
 			reason = string(resp.Candidates[0].FinishReason)
 		}
-		log.Printf("WARN: Gemini returned no content [model=%s finishReason=%s]", model, reason)
+		slog.Warn("llm: Gemini returned no content", "model", model, "finish_reason", reason)
 		return "", fmt.Errorf("no response generated (finish reason: %s)", reason)
 	}
 
 	if fr := resp.Candidates[0].FinishReason; fr != "STOP" && fr != "" {
-		log.Printf("WARN: Gemini finished with non-STOP reason [model=%s finishReason=%s]", model, fr)
+		slog.Warn("llm: Gemini finished with non-STOP reason", "model", model, "finish_reason", fr)
 	}
 
 	var parts []string
@@ -431,8 +431,7 @@ func (s *Service) AnalyzePortfolioStream(
 		Parts: []*genai.Part{{Text: message}},
 	})
 
-	log.Printf("DEBUG: AnalyzePortfolioStream [model=%s cannedType=%s historyTurns=%d enabledToolsCount=%d executor=%v]",
-		model, cannedType, len(history), len(enabledTools), executor != nil)
+
 
 	// Build tool list: dynamically filter portfolio tools + Google Search
 	var tools []*genai.Tool
@@ -537,7 +536,7 @@ func (s *Service) AnalyzePortfolioStream(
 			fullResponse.WriteString(chunk)
 			if !isStructured && onChunk != nil {
 				if cbErr := onChunk(fullResponse.String()); cbErr != nil {
-					log.Printf("WARN: stream chunk callback failed, client disconnected: %v", cbErr)
+					slog.Debug("llm: stream chunk callback failed (client disconnected)", "err", cbErr)
 					return fullResponse.String(), nil, nil
 				}
 			}
@@ -571,12 +570,12 @@ func (s *Service) AnalyzePortfolioStream(
 		// Execute each function call and collect responses.
 		responseParts := make([]*genai.Part, 0, len(functionCalls))
 		for _, fc := range functionCalls {
-			log.Printf("INFO: tool_call [name=%s args=%v]", fc.Name, fc.Args)
+			slog.Debug("llm: tool_call", "name", fc.Name)
 
 			// Notify the frontend a tool is running.
 			if onToolCall != nil {
 				if cbErr := onToolCall(fc.Name); cbErr != nil {
-					log.Printf("WARN: tool_call SSE callback failed: %v", cbErr)
+					slog.Debug("llm: tool_call SSE callback failed", "err", cbErr)
 				}
 			}
 
@@ -589,7 +588,7 @@ func (s *Service) AnalyzePortfolioStream(
 			}
 
 			if toolErr != nil {
-				log.Printf("WARN: tool %s execution error: %v", fc.Name, toolErr)
+				slog.Warn("llm: tool execution error", "tool", fc.Name, "err", toolErr)
 				result = map[string]any{"error": toolErr.Error()}
 			}
 
@@ -623,7 +622,7 @@ func (s *Service) AnalyzePortfolioStream(
 	cp := CannedPrompts[cannedType]
 	var rawFields map[string]any
 	if jsonErr := json.Unmarshal([]byte(cleanText), &rawFields); jsonErr != nil {
-		log.Printf("WARN: structured response JSON parse failed [cannedType=%s]: %v — falling back to raw text", cannedType, jsonErr)
+		slog.Warn("llm: structured response JSON parse failed, falling back to raw text", "canned_type", cannedType, "err", jsonErr)
 		return rawText, nil, nil
 	}
 

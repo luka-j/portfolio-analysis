@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -32,7 +32,8 @@ func main() {
 
 	database, err := db.Init(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Database init failed: %v", err)
+		slog.Error("database init failed", "err", err)
+		os.Exit(1)
 	}
 
 	svc := bootstrap.Build(cfg, database)
@@ -57,7 +58,8 @@ func buildFrontendFS() (http.FileSystem, string) {
 	}
 	sub, err := fs.Sub(embeddedFrontend, "frontend/dist")
 	if err != nil {
-		log.Fatalf("Failed to access embedded frontend: %v", err)
+		slog.Error("failed to access embedded frontend", "err", err)
+		os.Exit(1)
 	}
 	return http.FS(sub), "embedded"
 }
@@ -113,13 +115,15 @@ func logStartupSummary(cfg *config.Config, frontendMode string) {
 	if cfg.GeminiAPIKey != "" {
 		llmStatus = fmt.Sprintf("enabled (flash=%s, pro=%s)", cfg.GeminiFlashModel, cfg.GeminiProModel)
 	}
-	log.Printf("portfolio-analysis starting on :%s", cfg.Port)
-	log.Printf("  Open:      http://localhost:%s", cfg.Port)
-	log.Printf("  Database:  %s", dbLabel)
-	log.Printf("  Auth:      %s", authMode)
-	log.Printf("  LLM:       %s", llmStatus)
-	log.Printf("  Frontend:  %s", frontendMode)
-	log.Printf("  Metrics:   http://localhost:%s/metrics", cfg.MetricsPort)
+	slog.Info("portfolio-analysis starting",
+		"addr", ":"+cfg.Port,
+		"url", "http://localhost:"+cfg.Port,
+		"database", dbLabel,
+		"auth", authMode,
+		"llm", llmStatus,
+		"frontend", frontendMode,
+		"metrics", "http://localhost:"+cfg.MetricsPort+"/metrics",
+	)
 }
 
 // runServer starts the background fundamentals fetcher, serves HTTP, and blocks until
@@ -130,21 +134,23 @@ func runServer(srv *http.Server, fundamentalsSvc *fundamentals.Service) {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			slog.Error("HTTP server failed", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("Shutting down server...")
+	slog.Info("shutting down server")
 
 	cancelFundamentals()
 
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
 	if err := srv.Shutdown(ctx2); err != nil {
-		log.Fatal("Server forced to shutdown: ", err)
+		slog.Error("server forced to shutdown", "err", err)
+		os.Exit(1)
 	}
-	log.Println("Server exiting")
+	slog.Info("server exited")
 }

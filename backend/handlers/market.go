@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -74,7 +74,7 @@ func (h *MarketHandler) GetHistory(c *gin.Context) {
 	if currency != "" && (acctModel == models.AccountingModelHistorical || acctModel == "") && h.CurrencyGetter != nil {
 		nativeCcy, err := h.CurrencyGetter.GetCurrency(symbol)
 		if err != nil {
-			log.Printf("Warning: could not determine currency for %s: %v", symbol, err)
+			slog.Warn("market: could not determine native currency", "symbol", symbol, "err", err)
 		} else if fxRates := buildFXRateMap(h.MarketProvider, nativeCcy, currency, from, to); fxRates != nil {
 			for i := range points {
 				if r, ok := fxRates[points[i].Date.Format("2006-01-02")]; ok && r != 0 {
@@ -182,7 +182,7 @@ func (h *MarketHandler) GetSecurityChart(c *gin.Context) {
 	if currency != "" && acctModel != models.AccountingModelOriginal && h.CurrencyGetter != nil {
 		nativeCcy, ccyErr := h.CurrencyGetter.GetCurrency(effectiveSym)
 		if ccyErr != nil {
-			log.Printf("Warning: could not determine currency for %s: %v", effectiveSym, ccyErr)
+			slog.Warn("market: could not determine native currency", "symbol", effectiveSym, "err", ccyErr)
 		} else if nativeCcy != currency {
 			// For spot model use today's rate for all points; historical model uses per-day rates.
 			var fxRates map[string]float64

@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -226,7 +226,7 @@ func (h *LLMHandler) toolGetAssetFundamentals(ctx context.Context, args map[stri
 			return result, nil
 		}
 		if !isNotFound(err) {
-			log.Printf("WARN: toolGetAssetFundamentals DB error for %s: %v", symbol, err)
+			slog.Warn("llm: toolGetAssetFundamentals DB lookup error", "symbol", symbol, "err", err)
 		}
 	}
 
