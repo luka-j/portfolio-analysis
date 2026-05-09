@@ -56,11 +56,12 @@ type Service struct {
 
 // NewService creates a new LLM Service.
 func NewService(apiKey, flashModel, proModel, cannedModelKey string, db *gorm.DB, ps *portfolio.Service) *Service {
-	transport := &http.Transport{
-		IdleConnTimeout:     10 * time.Second,
-		MaxIdleConns:        20,
-		MaxIdleConnsPerHost: 5,
-	}
+	// Clone DefaultTransport to preserve ForceAttemptHTTP2, KeepAlive, and DialContext
+	// which are critical for stable SSE streams from Google APIs.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.IdleConnTimeout = 10 * time.Second
+	transport.MaxIdleConns = 20
+	transport.MaxIdleConnsPerHost = 5
 	if cannedModelKey != "pro" {
 		cannedModelKey = "flash"
 	}
@@ -632,24 +633,44 @@ func (s *Service) AnalyzePortfolioStream(
 		contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: responseParts})
 	}
 
-	rawText := fullResponse.String()
+	rawText := strings.TrimSpace(fullResponse.String())
+	if rawText == "" {
+		return "", nil, fmt.Errorf("model returned an empty response (this typically occurs if the model struggles with the complex schema or triggers a safety filter)")
+	}
 
 	if !isStructured {
 		return rawText, nil, nil
 	}
 
 	// Extract the outermost JSON object in case there is leading text or markdown formatting.
+	// Since earlier tool-call rounds might have injected <thinking> blocks containing '{',
+	// we iteratively try to unmarshal starting from each '{' until we find a valid JSON object.
 	cleanText := rawText
-	jsonStart := strings.Index(cleanText, "{")
-	jsonEnd := strings.LastIndex(cleanText, "}")
-	if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
-		cleanText = cleanText[jsonStart : jsonEnd+1]
-	}
-
-	// Parse the JSON response and build the sections slice.
 	cp := CannedPrompts[cannedType]
 	var rawFields map[string]any
-	if jsonErr := json.Unmarshal([]byte(cleanText), &rawFields); jsonErr != nil {
+	var jsonErr error
+	parsed := false
+
+	startIdx := strings.Index(cleanText, "{")
+	for startIdx != -1 {
+		jsonEnd := strings.LastIndex(cleanText, "}")
+		if jsonEnd > startIdx {
+			attempt := cleanText[startIdx : jsonEnd+1]
+			if err := json.Unmarshal([]byte(attempt), &rawFields); err == nil {
+				parsed = true
+				break
+			}
+		}
+		nextStart := strings.Index(cleanText[startIdx+1:], "{")
+		if nextStart == -1 {
+			break
+		}
+		startIdx += 1 + nextStart
+	}
+
+	if !parsed {
+		// Try one last time on the raw text to capture the actual error for logging
+		jsonErr = json.Unmarshal([]byte(cleanText), &rawFields)
 		slog.Warn("llm: structured response JSON parse failed, falling back to raw text", "canned_type", cannedType, "err", jsonErr)
 		return rawText, nil, nil
 	}
