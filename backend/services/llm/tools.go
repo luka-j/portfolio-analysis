@@ -20,12 +20,58 @@ const (
 	ToolSimulateScenario            = "simulate_scenario"
 	ToolGetPortfolioBreakdown       = "get_portfolio_fundamentals_breakdown"
 	ToolGetCorrelations             = "get_portfolio_correlations"
+
+	// ToolSubmitThinking is a synthetic tool that forces the model to record its reasoning
+	// and self-critique before generating the final structured answer.
+	// It is handled entirely by the backend (no executor call) and acts as a thinking gate.
+	ToolSubmitThinking = "submit_thinking"
 )
 
 // ToolExecutor is a callback invoked by the LLM loop when the model requests a function call.
 // It receives the raw genai.FunctionCall and must return a JSON-serialisable result map (or an error).
 // Returning an error causes an error payload to be fed back to the model so it can recover gracefully.
 type ToolExecutor func(ctx context.Context, call *genai.FunctionCall) (map[string]any, error)
+
+// ThinkingCapture holds the fields extracted from a submit_thinking tool call.
+type ThinkingCapture struct {
+	Thinking             string `json:"thinking"`
+	SelfCritique         string `json:"self_critique"`
+	ConfidenceScoreValue int    `json:"confidence_score_value"`
+	MissingDataContext   string `json:"missing_data_context"`
+}
+
+// SubmitThinkingDecl returns the genai.FunctionDeclaration for the submit_thinking synthetic tool.
+// The model is required to call this before the final structured generation turn.
+func SubmitThinkingDecl() *genai.FunctionDeclaration {
+	return &genai.FunctionDeclaration{
+		Name: ToolSubmitThinking,
+		Description: "Call this after gathering all required data and before writing your final analysis. " +
+			"Record your full reasoning, your devil's advocate self-critique, and your confidence level. " +
+			"The content you write here directly shapes the quality of the final answer.",
+		Parameters: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"thinking": {
+					Type:        genai.TypeString,
+					Description: "Your complete research synthesis: what you found, how the data fits together, and the key reasoning behind your upcoming conclusions.",
+				},
+				"self_critique": {
+					Type:        genai.TypeString,
+					Description: "Devil's advocate: identify the single weakest assumption in your thinking above. What unexpected data or market shift could prove your analysis wrong?",
+				},
+				"confidence_score_value": {
+					Type:        genai.TypeInteger,
+					Description: "Integer from 1 to 10 representing your confidence in the upcoming analysis. Be honest: penalise for missing data, short time windows, or uncertain macro conditions.",
+				},
+				"missing_data_context": {
+					Type:        genai.TypeString,
+					Description: "If confidence_score_value < 7, explain exactly what data is missing or what would increase your confidence. Otherwise leave empty.",
+				},
+			},
+			Required: []string{"thinking", "self_critique", "confidence_score_value", "missing_data_context"},
+		},
+	}
+}
 
 // PortfolioTools returns the genai.Tool bundle containing all native portfolio function declarations.
 // These are passed verbatim to the Gemini API; no external calls are made at declaration time.

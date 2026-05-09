@@ -177,6 +177,8 @@ type LLMCache struct {
 	UserHash   string    `gorm:"uniqueIndex:idx_llmcache_user_prompt;not null"`
 	PromptType string    `gorm:"uniqueIndex:idx_llmcache_user_prompt;not null"` // e.g. "summary_1d", "canned_analysis"
 	Model      string    `gorm:"uniqueIndex:idx_llmcache_user_prompt;not null"` // "flash" | "pro"
-	Response   string    // The markdown/text response
-	CreatedAt  time.Time `gorm:"index"`
+	Response     string    // The markdown/text response
+	SectionsJSON string    // JSON-encoded sections
+	ExtrasJSON   string    // JSON-encoded extras
+	CreatedAt    time.Time `gorm:"index"`
 }

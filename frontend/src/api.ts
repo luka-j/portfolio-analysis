@@ -311,6 +311,8 @@ export interface LLMChatResponse {
   response: string;
   cached?: boolean;
   sections?: LLMResponseSection[];
+  confidence_score_value?: number;
+  missing_data_context?: string;
 }
 
 // ---- Scenario types ----

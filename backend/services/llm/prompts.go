@@ -17,9 +17,16 @@ type CannedPrompt struct {
 	// before answering. This guarantees the agent fetches the required data before generating its analysis.
 	ForceToolCall bool
 
-	// Schema, when non-nil, enables structured JSON output via ResponseSchema.
-	// For ForcedTool prompts the schema is applied on the final generation turn
-	// (after the tool loop completes). For non-tool prompts it is set from the start.
+	// UseSubmitThinking, when true, adds the submit_thinking synthetic tool to the request.
+	// The model is required to call it (thinking gate) before the final structured JSON generation turn.
+	// This guarantees that reasoning and self-critique are generated BEFORE the main content fields,
+	// and that GoogleSearch can run freely in early rounds without conflicting with ResponseSchema.
+	UseSubmitThinking bool
+
+	// Schema, when non-nil, enables structured JSON output via ResponseSchema on the final turn.
+	// For UseSubmitThinking prompts the schema contains only the main content fields;
+	// thinking/self_critique/confidence are captured from the submit_thinking tool call arguments.
+	// For text-injection-only prompts (no tools), Schema may include "thinking" directly.
 	Schema *genai.Schema
 
 	// SectionOrder defines the ordered field keys for markdown reconstruction and frontend rendering.
@@ -53,7 +60,7 @@ const BaseConstraints = `<constraints>
 - DO NOT speculate on exact future price targets, only on ranges and only when backed up with a multitude of sources, carefully citing them.
 - TICKER SYMBOLS ARE AUTHORITATIVE: every symbol and name in the portfolio data is exact and correct. Never silently correct, substitute, or confuse a ticker with a more commonly known one (e.g. "SPP1" is the Vanguard FTSE All-World EUR-hedged ETF — it is NOT a misspelling of the S&P 500 or any S&P 500 instrument). If a ticker is unfamiliar, look it up rather than assuming it refers to something more popular. If search results conflict with the name provided in the portfolio data, the portfolio data is the ground truth — do not let search results override or reinterpret the provided ticker-to-name mapping.
 - ALWAYS RELY ON THE FULL ASSET NAME, NOT JUST THE TICKER. Many tickers (especially European ones like XDW0 or XDEV) may be obscure or share abbreviations with completely different assets. If you have the get_asset_fundamentals tool available, call it immediately to verify the asset's true sector, geography, and category before making any assumptions based solely on the ticker. Do not assume an ETF's focus without checking its name or fundamentals.
-- OMIT RATHER THAN FABRICATE: if you have no meaningful, well-grounded content for a section (e.g. no relevant recent news, no clear factor tilt, no identifiable risk), write "Nothing significant to report." for that section instead of filling it with vague or speculative filler. No information is better than low-quality information.
+- OMIT RATHER THAN FABRICATE: if you have no meaningful, well-grounded content for a section (e.g. no relevant recent news, no clear factor tilt, no identifiable risk), write "Nothing significant to report." for that section instead of filling it with vague or speculative filler. However, if your confidence in this assessment is low (e.g. 5 or below), you MUST briefly explain *why* (e.g., conflicting signals, lack of data, unclear macro conditions) instead of just leaving it at "Nothing significant to report." Do not invent information.
 </constraints>`
 
 // ScenarioConstraint is appended only when the simulate_scenario tool is available.
@@ -65,10 +72,13 @@ SIMULATED SCENARIOS: The simulate_scenario tool builds a hypothetical portfolio 
 // stringSchema is a convenience helper for a simple string field schema.
 func stringSchema() *genai.Schema { return &genai.Schema{Type: genai.TypeString} }
 
-// sectionSchema builds a genai.Schema object from section keys (always includes "thinking").
+// sectionSchema builds a genai.Schema for the MAIN content fields only.
+// For UseSubmitThinking prompts: thinking/self_critique/confidence are captured from the tool call;
+// this schema intentionally omits them so the final JSON is purely content.
+// For text-injection-only prompts: "thinking" can be passed explicitly as the first key.
 func sectionSchema(keys ...string) *genai.Schema {
-	props := map[string]*genai.Schema{"thinking": stringSchema()}
-	required := []string{"thinking"}
+	props := map[string]*genai.Schema{}
+	required := make([]string, 0, len(keys))
 	for _, k := range keys {
 		props[k] = stringSchema()
 		required = append(required, k)
@@ -120,9 +130,12 @@ Then fill each field with fluent markdown prose:
 
 - **` + "`trim_or_avoid`" + `**: Pick exactly three holdings from my portfolio where the case for adding more money is weakest — either due to a credible downside story, stretched valuation, or because the position is already overrepresented relative to the rest of the portfolio. For each, write 2–4 sentences covering: the core concern, what conditions would make this thesis wrong, and whether this is a full exit candidate or just a "don't add" signal. Lead each entry with the ticker in bold.
 
+- **` + "`confidence_score_value`" + `**: Assign a confidence score from 1 to 10 (integer). - **` + "`missing_data_context`" + `**: If score < 7, state what data is missing. Otherwise empty string.
+
 A holding may appear in both lists if it represents a high-conviction asymmetric bet — compelling upside but with an equally credible downside that warrants caution before sizing up.`,
 		SystemInstruction: "You are an expert equity analyst helping a client make capital allocation decisions within their existing portfolio. Ground your recommendations in current, real-world data from your search results. Be direct and opinionated — avoid hedging every sentence.",
 		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("add_weight", "trim_or_avoid"),
@@ -150,11 +163,14 @@ Then fill each field with fluent markdown prose:
 - **` + "`sector_geographic_concentration`" + `**: Identify where my money is truly concentrated — do not just list percentages; group holdings by common themes like "AI infrastructure" or regional exposures like "US Tech versus European Industrials".
 - **` + "`fama_french_factor_tilts`" + `**: Provide a qualitative, one-paragraph assessment using the Fama-French five-factor framework (Market, Size, Value/Growth, Profitability, Investment). Only estimate factor tilts for holdings you confidently recognize (e.g., well-known US mega-caps, major index ETFs). For obscure, regional, or unfamiliar tickers — especially European UCITS ETFs or niche funds — explicitly state "factor exposure unknown for [ticker]" rather than guessing. Conclude with one sentence on whether the combined tilt profile appears deliberate or incidental.
 - **` + "`implicit_bets`" + `**: Based on my concentration, what specific future events, market shifts, or currency dynamics am I effectively betting heavily on to happen? What am I most vulnerable to (e.g., exposed to a weakening USD)?
-- **` + "`blind_spots`" + `**: What obvious market sectors, geographical regions, defensive assets, or FX hedges am I completely un-hedged against or missing out on entirely?`,
-		ForceToolCall:  true,
-		ChatAccessible: true,
-		Cacheable:      true,
-		Schema:         sectionSchema("macro_environment", "sector_geographic_concentration", "fama_french_factor_tilts", "implicit_bets", "blind_spots"),
+- **` + "`blind_spots`" + `**: What obvious market sectors, geographical regions, defensive assets, or FX hedges am I completely un-hedged against or missing out on entirely?
+
+- **` + "`confidence_score_value`" + `**: Assign a confidence score from 1 to 10 (integer). - **` + "`missing_data_context`" + `**: If score < 7, state what data is missing. Otherwise empty string.`,
+		ForceToolCall:     true,
+		UseSubmitThinking: true,
+		ChatAccessible:    true,
+		Cacheable:         true,
+		Schema:            sectionSchema("macro_environment", "sector_geographic_concentration", "fama_french_factor_tilts", "implicit_bets", "blind_spots"),
 		SectionOrder: []string{
 			"thinking",
 			"macro_environment",
@@ -183,10 +199,11 @@ Then fill each field with fluent markdown prose:
 - **` + "`worst_case`" + `**: Describe a realistic stress scenario (e.g., specific regulatory shifts, supply chain shocks, currency headwinds, or rate changes) that would cause this portfolio to suffer heavy drawdowns. What is the structural weakness?
 - **` + "`key_indicators`" + `**: List 2–3 specific, measurable macroeconomic or fundamental data points I should monitor closely to see which of the two scenarios is actively unfolding (e.g., upcoming inflation data, central bank meetings like the Fed or ECB, or key sector earnings).
 - **` + "`historical_precedents`" + `**: Identify 2–3 specific historical periods (e.g., the 2000 dot-com bust, 2008 GFC, 2020 COVID crash, 2022 rate-hike cycle) where a portfolio with a similar geographic, sector, and asset-type composition faced comparable conditions. For each, briefly describe how such a portfolio would likely have performed — both during the drawdown and the subsequent recovery — and what the key driver of that outcome was.`,
-		ForceToolCall:  true,
-		ChatAccessible: true,
-		Cacheable:      true,
-		Schema:         sectionSchema("best_case", "worst_case", "key_indicators", "historical_precedents"),
+		ForceToolCall:     true,
+		UseSubmitThinking: true,
+		ChatAccessible:    true,
+		Cacheable:         true,
+		Schema:            sectionSchema("best_case", "worst_case", "key_indicators", "historical_precedents"),
 		SectionOrder: []string{
 			"thinking",
 			"best_case",
@@ -204,18 +221,39 @@ Then fill each field with fluent markdown prose:
 	"ticker_analysis": {
 		Message: `You are analyzing the asset: {label}.
 
-First, use a <thinking> block and open it by stating the ticker symbol and its full name exactly as provided above — this is your ground truth. Then use the Google Search tool to find the most recent financial news, earnings reports, and current sentiment analysis, searching specifically for that ticker symbol and name. If a search result describes a different security, discard it and refine your search. Synthesize only findings that unambiguously match the provided ticker and name.
+First, use the Google Search tool to find the most recent financial news, earnings reports, and current sentiment analysis, searching specifically for the ticker symbol and its full name exactly as provided above. If a search result describes a different security, discard it and refine your search. Synthesize only findings that unambiguously match the provided ticker and name.
 
-Then, analyze the asset through four specific lenses:
-1. **Catalysts:** (Recent earnings, regulatory filings, product launches, or macro shifts impacts).
-2. **Sentiment:** (Shift in institutional vs. retail buzz, analyst upgrades/downgrades).
-3. **Peer Comparison & Valuation:** (How is it performing relative to its closest competitors or sector averages? Note any obvious valuation metrics if found in recent news).
-4. **Technical Context:** (Where does the price currently hover relative to recent historical highs/lows or moving averages?).
+Then fill each field with fluent markdown prose:
 
-Provide a bolded "**Bottom Line**" summary followed by a bulleted breakdown of clear **Risks** and **Opportunities**.`,
+- **` + "`catalysts`" + `**: Detail recent earnings, regulatory filings, product launches, or macro shifts impacting the asset.
+- **` + "`sentiment`" + `**: Describe shifts in institutional vs. retail buzz, and analyst upgrades or downgrades.
+- **` + "`peer_comparison`" + `**: How is it performing relative to its closest competitors or sector averages? Note any obvious valuation metrics if found in recent news.
+- **` + "`technical_context`" + `**: Where does the price currently hover relative to recent historical highs/lows or moving averages?
+- **` + "`bottom_line`" + `**: Provide a bolded executive summary.
+- **` + "`risks_opportunities`" + `**: Provide a bulleted breakdown of clear risks and opportunities.`,
 		SystemInstruction: "You are an expert equity research analyst. Always ground your analysis in recent, real-world data across the broader market. Actively use search tools.",
+		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         false,
+		Schema:            sectionSchema("catalysts", "sentiment", "peer_comparison", "technical_context", "bottom_line", "risks_opportunities"),
+		SectionOrder: []string{
+			"thinking",
+			"catalysts",
+			"sentiment",
+			"peer_comparison",
+			"technical_context",
+			"bottom_line",
+			"risks_opportunities",
+		},
+		SectionTitles: map[string]string{
+			"catalysts":           "🚀 Catalysts",
+			"sentiment":           "🎭 Sentiment",
+			"peer_comparison":     "⚖️ Peer Comparison & Valuation",
+			"technical_context":   "📉 Technical Context",
+			"bottom_line":         "📝 Bottom Line",
+			"risks_opportunities": "⚠️ Risks & Opportunities",
+		},
 	},
 	"risk_metrics": {
 		Message: `Call get_risk_metrics() to retrieve the risk and return metrics for my portfolio.
@@ -233,6 +271,7 @@ Then fill each field with fluent markdown prose, addressed directly to the clien
 - **` + "`verdict`" + `**: Is this a "smooth ride" or a "rollercoaster," and am I being rewarded for staying on it?`,
 		SystemInstruction: "Act as a private wealth manager performing a year-end review for a client. Speak directly to the client.",
 		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("returns_narrative", "wealth_growth", "efficiency_test", "stress_test", "investor_profile", "verdict"),
@@ -269,6 +308,7 @@ Then provide a "so what?" analysis in each field:
 - **` + "`verdict`" + `**: Give me a blunt, executive summary of whether this portfolio is efficiently managed relative to the benchmark.`,
 		SystemInstruction: "Act as an institutional portfolio analyst reviewing a fund manager's performance against a benchmark index.",
 		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("manager_skill_vs_luck", "risk_profile", "benchmarking", "investor_profile", "verdict"),
@@ -291,7 +331,7 @@ Then provide a "so what?" analysis in each field:
 	"upcoming_events": {
 		Message: `Analyze the upcoming events that may impact my current portfolio over the next 30 days. Today's date is {current_date}.
 
-First, use the Google Search tool to find scheduled earnings reports, upcoming macroeconomic data releases (e.g., inflation prints, central bank meetings like the Fed/ECB), and pertinent geopolitical events scheduled to occur within the next month that directly affect my major holdings. Use a <thinking> block to synthesize your findings, drop any events outside the 30-day window, and verify you have exact dates where possible.
+First, use the Google Search tool to find scheduled earnings reports, upcoming macroeconomic data releases (e.g., inflation prints, central bank meetings like the Fed/ECB), and pertinent geopolitical events scheduled to occur within the next month that directly affect my major holdings. Drop any events outside the 30-day window, and verify you have exact dates where possible.
 
 Then fill each field with fluent markdown prose:
 - **` + "`earnings_events`" + `**: List key upcoming earnings or shareholder meetings within the next 30 days for my holdings. Include specific dates. Explain briefly why each is critical.
@@ -299,6 +339,8 @@ Then fill each field with fluent markdown prose:
 - **` + "`market_catalysts`" + `**: Highlight broader global events or ongoing developments reaching critical milestones this month that could influence my portfolio composition.
 - **` + "`risks_opportunities`" + `**: Summarize the most significant short-term risks or opportunities based specifically on this 30-day calendar of events.`,
 		SystemInstruction: "You are an expert financial analyst. Focus strictly on near-term calendar events (next 30 days). Discard any hypothetical scenarios or long-term trends. Always use exact dates when available.",
+		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("earnings_events", "macro_events", "market_catalysts", "risks_opportunities"),
@@ -327,6 +369,7 @@ Then fill each field with fluent markdown prose:
 - **` + "`mitigation`" + `**: Suggest broad themes or asset classes (not specific financial advice or new tickers) I could use to dilute these bottlenecks.`,
 		SystemInstruction: "Act as an expert risk management analyst. Look through surface names into the underlying fundamentals.",
 		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         true,
 		Schema:            sectionSchema("sector_overexposure", "geographic_risks", "mitigation"),
@@ -354,6 +397,7 @@ Then fill each field with fluent markdown prose:
 - **` + "`tax_loss_context`" + `**: Without giving specific financial advice, present the tax-loss harvesting framework. Discuss what kind of alternative beta or factor tilt I could achieve by re-deploying this capital.`,
 		SystemInstruction: "Act as a ruthless performance analyst parsing through a portfolio's weakest links.",
 		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("major_laggards", "the_why", "tax_loss_context"),
@@ -376,11 +420,12 @@ Call get_benchmark_metrics() to retrieve the portfolio's beta and market metrics
 In a <thinking> block, analyze my portfolio Beta. If my Beta is 1.5, I move 50% more violently than the market. Project what a sudden 15% market crash (typical of an interest rate shock or recession) would mathematically do to my portfolio.
 
 Then fill each field with fluent markdown prose:
-- **` + "`drawdown_scenario`" + `**: Based strictly on my portfolio Beta, quantify mechanically how a rapid 15% market drop would manifest in my total percentage drawdown. 
+- **` + "`drawdown_scenario`" + `**: Based strictly on my portfolio Beta, quantify mechanically how a rapid 15% market drop would manifest in my total percentage drawdown.
 - **` + "`beta_contributors`" + `**: Identify which categories or specific holdings are likely supercharging my volatility, and which are acting as anchors holding my portfolio steady.
 - **` + "`defensive_evaluation`" + `**: Assess if my portfolio contains adequate 'defensive' properties (e.g. bonds, utilities, cash) to survive a prolonged secular bear market, or if I am fundamentally positioned as a high-growth bull-market participant.`,
 		SystemInstruction: "Act as an institutional risk manager conducting a scenario stress test.",
 		ForceToolCall:     true,
+		UseSubmitThinking: true,
 		ChatAccessible:    true,
 		Cacheable:         false,
 		Schema:            sectionSchema("drawdown_scenario", "beta_contributors", "defensive_evaluation"),
@@ -417,7 +462,7 @@ Then fill each field with fluent markdown prose:
 - Annualised Volatility: {b_vol}
 - Max Drawdown: {b_dd}
 
-In the ` + "`thinking`" + ` field, reason through what these numbers tell you — which portfolio delivered more return per unit of risk, which had shallower drawdowns, which compounded wealth faster, and what the spread between MWR and TWR signals about investment timing.
+Generate the ` + "`thinking`" + ` field first before any other fields. Reason through what these numbers tell you — which portfolio delivered more return per unit of risk, which had shallower drawdowns, which compounded wealth faster, and what the spread between MWR and TWR signals about investment timing.
 
 Then fill each field with fluent markdown prose, addressed directly to the investor:
 
@@ -431,17 +476,7 @@ Then fill each field with fluent markdown prose, addressed directly to the inves
 		SystemInstruction: "Act as a private wealth manager performing a comparative performance review for a client. Speak directly to the client. Focus on what the numbers mean in practical terms, not just what they are.",
 		ChatAccessible:    true,
 		Cacheable:         false,
-		Schema: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"thinking":           stringSchema(),
-				"returns_comparison": stringSchema(),
-				"risk_efficiency":    stringSchema(),
-				"wealth_growth":      stringSchema(),
-				"verdict":            stringSchema(),
-			},
-			Required: []string{"thinking", "returns_comparison", "risk_efficiency", "wealth_growth", "verdict"},
-		},
+		Schema:            sectionSchema("thinking", "returns_comparison", "risk_efficiency", "wealth_growth", "verdict"),
 		SectionOrder: []string{
 			"thinking",
 			"returns_comparison",
@@ -465,7 +500,7 @@ Then fill each field with fluent markdown prose, addressed directly to the inves
 **Portfolio B — {name_b}:**
 {holdings_b}
 
-In the ` + "`thinking`" + ` field, identify the major composition differences — different sectors, geographies, concentration levels, or asset types — and reason through how those structural differences might translate into different performance, risk, and future sensitivity.
+Generate the ` + "`thinking`" + ` field first before any other fields. Identify the major composition differences — different sectors, geographies, concentration levels, or asset types — and reason through how those structural differences might translate into different performance, risk, and future sensitivity.
 
 Then fill each field with fluent markdown prose, addressed directly to the investor:
 
@@ -477,16 +512,7 @@ Then fill each field with fluent markdown prose, addressed directly to the inves
 		SystemInstruction: "Act as an expert portfolio construction analyst comparing two investment portfolios. Speak directly to the client. Focus on the structural differences and their real-world implications.",
 		ChatAccessible:    true,
 		Cacheable:         false,
-		Schema: &genai.Schema{
-			Type: genai.TypeObject,
-			Properties: map[string]*genai.Schema{
-				"thinking":               stringSchema(),
-				"composition_differences": stringSchema(),
-				"performance_drivers":    stringSchema(),
-				"verdict":                stringSchema(),
-			},
-			Required: []string{"thinking", "composition_differences", "performance_drivers", "verdict"},
-		},
+		Schema:            sectionSchema("thinking", "composition_differences", "performance_drivers", "verdict"),
 		SectionOrder: []string{
 			"thinking",
 			"composition_differences",

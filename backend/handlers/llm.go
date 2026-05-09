@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -238,7 +239,24 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 			c.Writer.Header().Set("Content-Type", "text/event-stream")
 			c.Writer.Header().Set("Cache-Control", "no-cache")
 			c.Writer.Header().Set("Connection", "keep-alive")
-			c.SSEvent("message", gin.H{"response": cacheEntry.Response, "cached": true})
+			
+			payload := gin.H{"response": cacheEntry.Response, "cached": true}
+			if cacheEntry.SectionsJSON != "" {
+				var sections []llm.ResponseSection
+				if err := json.Unmarshal([]byte(cacheEntry.SectionsJSON), &sections); err == nil {
+					payload["sections"] = sections
+				}
+			}
+			if cacheEntry.ExtrasJSON != "" {
+				var extras map[string]any
+				if err := json.Unmarshal([]byte(cacheEntry.ExtrasJSON), &extras); err == nil {
+					for k, v := range extras {
+						payload[k] = v
+					}
+				}
+			}
+			
+			c.SSEvent("message", payload)
 			c.Writer.Flush()
 			return
 		}
@@ -270,7 +288,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
 	defer cancel()
 
-	response, sections, err := h.LLM.AnalyzePortfolioStream(
+	response, sections, extras, err := h.LLM.AnalyzePortfolioStream(
 		reqCtx, data, req.Currency, cannedType, message,
 		modelKey, req.EnabledTools, history, req.AccountingModel,
 		executor,
@@ -309,11 +327,21 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		cacheEntry.PromptType = cacheKey
 		cacheEntry.Model = modelKey
 		cacheEntry.Response = response
+		if sections != nil {
+			if b, err := json.Marshal(sections); err == nil {
+				cacheEntry.SectionsJSON = string(b)
+			}
+		}
+		if extras != nil {
+			if b, err := json.Marshal(extras); err == nil {
+				cacheEntry.ExtrasJSON = string(b)
+			}
+		}
 		cacheEntry.CreatedAt = time.Now()
 
 		err = h.DB.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "user_hash"}, {Name: "prompt_type"}, {Name: "model"}},
-			DoUpdates: clause.AssignmentColumns([]string{"response", "created_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"response", "sections_json", "extras_json", "created_at"}),
 		}).Create(&cacheEntry).Error
 
 		if err != nil {
@@ -324,6 +352,11 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	donePayload := gin.H{"response": response}
 	if sections != nil {
 		donePayload["sections"] = sections
+	}
+	if extras != nil {
+		for k, v := range extras {
+			donePayload[k] = v
+		}
 	}
 	c.SSEvent("done", donePayload)
 	c.Writer.Flush()

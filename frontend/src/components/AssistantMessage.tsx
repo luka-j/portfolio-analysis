@@ -39,10 +39,53 @@ function ThinkingDisclosure({ content }: { content: string }) {
   )
 }
 
+function ConfidencePill({ score }: { score: number }) {
+  const clamped = Math.max(1, Math.min(10, score))
+  const color =
+    clamped >= 8 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' :
+    clamped >= 5 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300' :
+                   'bg-rose-500/15 border-rose-500/30 text-rose-300'
+  const label =
+    clamped >= 8 ? 'High confidence' :
+    clamped >= 5 ? 'Moderate confidence' : 'Low confidence'
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-semibold ${color}`}>
+      <span className="opacity-70 text-[10px]">Confidence</span>
+      {clamped}/10
+      <span className="opacity-60">·</span>
+      <span className="font-medium opacity-80">{label}</span>
+    </span>
+  )
+}
+
+interface AssistantMessageProps {
+  content: string
+  sections?: LLMResponseSection[]
+  confidenceScore?: number
+  missingDataContext?: string
+}
+
 /** Renders an assistant message. When structured sections are present (schema-backed prompts),
  * each section is rendered individually with its title. Otherwise falls back to parsing
  * the raw markdown string, collapsing any <thinking> blocks into a disclosure. */
-export default function AssistantMessage({ content, sections }: { content: string; sections?: LLMResponseSection[] }) {
+export default function AssistantMessage({ content, sections, confidenceScore, missingDataContext }: AssistantMessageProps) {
+  const confidenceFooter = (
+    <>
+      {confidenceScore != null && (
+        <div className="mt-4 pt-3 border-t border-white/6 flex flex-col gap-2">
+          <ConfidencePill score={confidenceScore} />
+          {missingDataContext && missingDataContext.trim() !== '' && (
+            <div className="mt-1 flex items-center gap-2.5 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2.5">
+              <span className="text-amber-400 shrink-0">⚠</span>
+              <p className="text-xs text-amber-200/80 leading-relaxed">{missingDataContext}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+
   if (sections && sections.length > 0) {
     const thinkingSection = sections.find(s => s.key === 'thinking')
     const bodySections = sections.filter(s => s.key !== 'thinking')
@@ -64,6 +107,7 @@ export default function AssistantMessage({ content, sections }: { content: strin
             </ReactMarkdown>
           </div>
         ))}
+        {confidenceFooter}
       </>
     )
   }
@@ -87,6 +131,8 @@ export default function AssistantMessage({ content, sections }: { content: strin
           </ReactMarkdown>
         )
       })}
+      {confidenceFooter}
     </>
   )
 }
+

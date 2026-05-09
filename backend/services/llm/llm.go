@@ -356,11 +356,12 @@ func (s *Service) AnalyzePortfolioStream(
 	executor ToolExecutor,
 	onChunk func(string) error,
 	onToolCall func(toolName string) error,
-) (response string, sections []ResponseSection, err error) {
+) (response string, sections []ResponseSection, extras map[string]any, err error) {
 	if !s.isAvailable() {
-		return "", nil, ErrNotConfigured
+		return "", nil, nil, ErrNotConfigured
 	}
 
+	slog.Info("llm: AnalyzePortfolioStream started", "model", model)
 	isCanned := cannedType != ""
 
 	// Resolve portfolio data (either custom or live) and serialize to JSON.
@@ -460,6 +461,11 @@ func (s *Service) AnalyzePortfolioStream(
 		}
 	}
 
+	if isCanned && CannedPrompts[cannedType].UseSubmitThinking {
+		tools = append(tools, &genai.Tool{FunctionDeclarations: []*genai.FunctionDeclaration{SubmitThinkingDecl()}})
+		hasFuncs = true
+	}
+
 	hasGoogleSearch := false
 	if cannedType == "upcoming_events" || cannedType == "ticker_analysis" || cannedType == "long_market_summary" || cannedType == "add_or_trim" || cannedType == "biggest_drag_on_performance" {
 		tools = append(tools, &genai.Tool{GoogleSearch: &genai.GoogleSearch{}})
@@ -503,11 +509,12 @@ func (s *Service) AnalyzePortfolioStream(
 
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: s.APIKey, HTTPClient: s.HTTPClient})
 	if err != nil {
-		return "", nil, fmt.Errorf("creating genai client: %w", err)
+		return "", nil, nil, fmt.Errorf("creating genai client: %w", err)
 	}
 
 	// --- Multi-turn agentic tool loop ---
 	var fullResponse strings.Builder
+	var thinkingCapture *ThinkingCapture
 
 	for round := 0; round < maxToolRounds; round++ {
 		iter := client.Models.GenerateContentStream(ctx, model, contents, cfg)
@@ -515,25 +522,29 @@ func (s *Service) AnalyzePortfolioStream(
 		// Collect the complete response for this round.
 		var roundText strings.Builder
 		var functionCalls []*genai.FunctionCall
-		var functionCallParts []*genai.Part
 		finishedWithToolCall := false
 
+		var modelTurnParts []*genai.Part
 		for resp, iterErr := range iter {
 			if iterErr != nil {
-				return fullResponse.String(), nil, fmt.Errorf("generating content stream: %w", iterErr)
+				return fullResponse.String(), nil, nil, fmt.Errorf("generating content stream: %w", iterErr)
 			}
 			if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
 				continue
 			}
 			var chunkDelta string
 			for _, pt := range resp.Candidates[0].Content.Parts {
+				// Prevent empty parts (which lack a valid oneof data field) from triggering serialization errors.
+				if pt.Text == "" && pt.FunctionCall == nil && pt.ExecutableCode == nil && pt.ToolCall == nil && pt.InlineData == nil && pt.FileData == nil {
+					continue
+				}
+				modelTurnParts = append(modelTurnParts, pt)
 				if pt.Text != "" {
 					chunkDelta += pt.Text
 					roundText.WriteString(pt.Text)
 				}
 				if pt.FunctionCall != nil {
 					functionCalls = append(functionCalls, pt.FunctionCall)
-					functionCallParts = append(functionCallParts, pt)
 					finishedWithToolCall = true
 				}
 			}
@@ -552,7 +563,7 @@ func (s *Service) AnalyzePortfolioStream(
 					if cleanChunk != "" {
 						if cbErr := onChunk(cleanChunk); cbErr != nil {
 							slog.Debug("llm: stream chunk callback failed (client disconnected)", "err", cbErr)
-							return fullResponse.String(), nil, nil
+							return fullResponse.String(), nil, nil, nil
 						}
 					}
 				}
@@ -569,25 +580,8 @@ func (s *Service) AnalyzePortfolioStream(
 			break
 		}
 
-		// Append the model's tool-call turn to the conversation.
-		var modelTurnParts []*genai.Part
-		if roundText.Len() > 0 {
-			modelTurnParts = append(modelTurnParts, &genai.Part{Text: roundText.String()})
-		}
-		modelTurnParts = append(modelTurnParts, functionCallParts...)
+		// Append the model's tool-call turn to the conversation using the exact parts it generated.
 		contents = append(contents, &genai.Content{Role: genai.RoleModel, Parts: modelTurnParts})
-
-		// After the first tool call round, clear any ForceToolCall so the model can proceed freely.
-		if cfg.ToolConfig != nil && cfg.ToolConfig.FunctionCallingConfig != nil {
-			cfg.ToolConfig.FunctionCallingConfig = nil
-		}
-
-		// For ForceToolCall prompts with Schema: apply structured output now that
-		// the tool data has been injected. The next generation turn will produce JSON.
-		if isStructured && cfg.ResponseSchema == nil && CannedPrompts[cannedType].ForceToolCall {
-			cfg.ResponseSchema = CannedPrompts[cannedType].Schema
-			cfg.ResponseMIMEType = "application/json"
-		}
 
 		// Execute each function call concurrently.
 		responseParts := make([]*genai.Part, len(functionCalls))
@@ -599,6 +593,24 @@ func (s *Service) AnalyzePortfolioStream(
 			go func(idx int, call *genai.FunctionCall) {
 				defer wg.Done()
 				slog.Debug("llm: tool_call", "name", call.Name)
+
+				if call.Name == ToolSubmitThinking {
+					var tc ThinkingCapture
+					if b, err := json.Marshal(call.Args); err == nil {
+						json.Unmarshal(b, &tc)
+					}
+					mu.Lock()
+					thinkingCapture = &tc
+					mu.Unlock()
+
+					responseParts[idx] = &genai.Part{
+						FunctionResponse: &genai.FunctionResponse{
+							Name:     call.Name,
+							Response: map[string]any{"status": "acknowledged, proceed with analysis"},
+						},
+					}
+					return
+				}
 
 				// Notify the frontend a tool is running.
 				if onToolCall != nil {
@@ -637,15 +649,44 @@ func (s *Service) AnalyzePortfolioStream(
 
 		// Append all tool responses as a single user turn.
 		contents = append(contents, &genai.Content{Role: genai.RoleUser, Parts: responseParts})
+
+		// Transition logic for the next round
+		if thinkingCapture != nil {
+			if isStructured && cfg.ResponseSchema == nil {
+				cfg.ResponseSchema = CannedPrompts[cannedType].Schema
+				cfg.ResponseMIMEType = "application/json"
+			}
+			cfg.Tools = nil
+			cfg.ToolConfig = nil
+		} else if isCanned && CannedPrompts[cannedType].UseSubmitThinking {
+			cfg.ToolConfig = &genai.ToolConfig{
+				FunctionCallingConfig: &genai.FunctionCallingConfig{
+					Mode:                 genai.FunctionCallingConfigModeAny,
+					AllowedFunctionNames: []string{ToolSubmitThinking},
+				},
+			}
+			if hasGoogleSearch {
+				t := true
+				cfg.ToolConfig.IncludeServerSideToolInvocations = &t
+			}
+		} else {
+			if cfg.ToolConfig != nil && cfg.ToolConfig.FunctionCallingConfig != nil {
+				cfg.ToolConfig.FunctionCallingConfig = nil
+			}
+			if isStructured && cfg.ResponseSchema == nil && CannedPrompts[cannedType].ForceToolCall {
+				cfg.ResponseSchema = CannedPrompts[cannedType].Schema
+				cfg.ResponseMIMEType = "application/json"
+			}
+		}
 	}
 
 	rawText := strings.TrimSpace(fullResponse.String())
 	if rawText == "" {
-		return "", nil, fmt.Errorf("model returned an empty response (this typically occurs if the model struggles with the complex schema or triggers a safety filter)")
+		return "", nil, nil, fmt.Errorf("model returned an empty response (this typically occurs if the model struggles with the complex schema or triggers a safety filter)")
 	}
 
 	if !isStructured {
-		return rawText, nil, nil
+		return rawText, nil, nil, nil
 	}
 
 	// Extract the outermost JSON object in case there is leading text or markdown formatting.
@@ -678,7 +719,7 @@ func (s *Service) AnalyzePortfolioStream(
 		// Try one last time on the raw text to capture the actual error for logging
 		jsonErr = json.Unmarshal([]byte(cleanText), &rawFields)
 		slog.Warn("llm: structured response JSON parse failed, falling back to raw text", "canned_type", cannedType, "err", jsonErr)
-		return rawText, nil, nil
+		return rawText, nil, nil, nil
 	}
 
 	fields := make(map[string]string)
@@ -694,6 +735,13 @@ func (s *Service) AnalyzePortfolioStream(
 		}
 	}
 
+	if thinkingCapture != nil {
+		fields["thinking"] = thinkingCapture.Thinking
+		fields["self_critique"] = thinkingCapture.SelfCritique
+		fields["confidence_score_value"] = fmt.Sprintf("%d", thinkingCapture.ConfidenceScoreValue)
+		fields["missing_data_context"] = thinkingCapture.MissingDataContext
+	}
+
 	// If there was an initial thinking block from the tool-call turns, prepend it.
 	if planStart := strings.Index(rawText, "<thinking>"); planStart != -1 {
 		planEnd := strings.Index(rawText[planStart+10:], "</thinking>")
@@ -705,6 +753,33 @@ func (s *Service) AnalyzePortfolioStream(
 				fields["thinking"] = planContent
 			}
 		}
+	}
+
+	// Merge self_critique into thinking so it acts like a thinking block.
+	if critique := fields["self_critique"]; critique != "" {
+		if existing, ok := fields["thinking"]; ok && existing != "" {
+			fields["thinking"] = existing + "\n\n**🤔 Devil's Advocate:**\n" + critique
+		} else {
+			fields["thinking"] = "**🤔 Devil's Advocate:**\n" + critique
+		}
+	}
+
+	extras = make(map[string]any)
+	if valStr, ok := fields["confidence_score_value"]; ok {
+		var val int
+		idx := strings.IndexAny(valStr, "0123456789")
+		if idx != -1 {
+			if _, err := fmt.Sscanf(valStr[idx:], "%d", &val); err == nil {
+				extras["confidence_score_value"] = val
+			} else {
+				extras["confidence_score_value"] = valStr
+			}
+		} else {
+			extras["confidence_score_value"] = valStr
+		}
+	}
+	if ctxStr, ok := fields["missing_data_context"]; ok && ctxStr != "" {
+		extras["missing_data_context"] = ctxStr
 	}
 
 	// Build ordered sections (exclude "thinking" — it becomes the collapsible disclosure).
@@ -728,5 +803,5 @@ func (s *Service) AnalyzePortfolioStream(
 	// Reconstruct markdown for cache storage and fallback rendering.
 	reconstructed := reconstructMarkdown(cp, fields)
 
-	return reconstructed, sections, nil
+	return reconstructed, sections, extras, nil
 }

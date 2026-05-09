@@ -16,6 +16,8 @@ interface ChatMessage {
   content: string
   cached?: boolean
   sections?: LLMResponseSection[]
+  confidenceScore?: number
+  missingDataContext?: string
   originalRequest?: {
     message: string
     promptType: string
@@ -60,13 +62,7 @@ export default function LLMPage() {
 
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-      }
-    }
-  }, [])
+
 
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
@@ -216,21 +212,21 @@ export default function LLMPage() {
 
       if (!initialized) {
         setLoading(false)
-        setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached, sections: res.sections }])
+        setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached, sections: res.sections, confidenceScore: res.confidence_score_value, missingDataContext: res.missing_data_context }])
       } else {
         setMessages(prev => {
           const newMessages = [...prev]
-          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: res.response, cached: res.cached, sections: res.sections }
+          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: res.response, cached: res.cached, sections: res.sections, confidenceScore: res.confidence_score_value, missingDataContext: res.missing_data_context }
           return newMessages
         })
       }
     } catch (err) {
+      const error = err as Error
+      if (error?.name === 'AbortError') return
+
       setLoading(false)
       setActiveToolCalls([])
-      const error = err as Error
-      const errMsg = error?.name === 'AbortError' 
-        ? 'Analysis cancelled.' 
-        : error?.message?.includes('GEMINI_API_KEY')
+      const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
         : error?.message || 'Failed to generate response.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
@@ -288,18 +284,20 @@ export default function LLMPage() {
 
       if (!initialized) {
         setLoading(false)
-        setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached, sections: res.sections }])
+        setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached, sections: res.sections, confidenceScore: res.confidence_score_value, missingDataContext: res.missing_data_context }])
       } else {
         setMessages(prev => {
           const newMessages = [...prev]
-          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: res.response, cached: res.cached, sections: res.sections }
+          newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], content: res.response, cached: res.cached, sections: res.sections, confidenceScore: res.confidence_score_value, missingDataContext: res.missing_data_context }
           return newMessages
         })
       }
     } catch (err) {
+      const error = err as Error
+      if (error?.name === 'AbortError') return
+
       setLoading(false)
       setActiveToolCalls([])
-      const error = err as Error
       const errMsg = error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
         : error?.message || 'Failed to regenerate response.'
@@ -459,7 +457,7 @@ export default function LLMPage() {
                   </div>
                 ) : (
                   <div className="bg-white/2 rounded-2xl px-5 py-4 text-sm leading-[1.8] text-indigo-100/90">
-                    <AssistantMessage content={msg.content} sections={msg.sections} />
+                    <AssistantMessage content={msg.content} sections={msg.sections} confidenceScore={msg.confidenceScore} missingDataContext={msg.missingDataContext} />
                   </div>
                 )}
 

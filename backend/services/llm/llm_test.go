@@ -205,9 +205,16 @@ func TestCannedPromptForceToolCall(t *testing.T) {
 func TestCannedPromptToolFirstSchemaCompatibility(t *testing.T) {
 	for key, cp := range llm.CannedPrompts {
 		if cp.ForceToolCall && cp.Schema != nil {
-			// This combination is now valid — verify the schema has a "thinking" field.
-			if cp.Schema.Properties == nil || cp.Schema.Properties["thinking"] == nil {
-				t.Errorf("CannedPrompts[%q]: Schema is set but missing 'thinking' field", key)
+			if cp.UseSubmitThinking {
+				// The schema should NOT contain 'thinking' because it's captured from the tool args.
+				if cp.Schema.Properties != nil && cp.Schema.Properties["thinking"] != nil {
+					t.Errorf("CannedPrompts[%q]: Schema is set and UseSubmitThinking is true, but 'thinking' field is in schema", key)
+				}
+			} else {
+				// If not using submit_thinking, it must have 'thinking' in the schema.
+				if cp.Schema.Properties == nil || cp.Schema.Properties["thinking"] == nil {
+					t.Errorf("CannedPrompts[%q]: Schema is set but missing 'thinking' field", key)
+				}
 			}
 		}
 	}
