@@ -58,6 +58,16 @@ export default function LLMPage() {
   const activeLabel = active === null ? 'Real'
     : (scenarios.find(s => s.id === active)?.name ?? `Scenario ${active}`)
 
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
+
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -141,6 +151,10 @@ export default function LLMPage() {
     setMessages(prev => [...prev, { role: 'user', content: displayMsg, originalRequest: { message: displayMsg, promptType: 'freeform' } }])
     setLoading(true)
     setLoadingLabel('Comparing scenarios…')
+
+    if (abortControllerRef.current) abortControllerRef.current.abort()
+    abortControllerRef.current = new AbortController()
+
     try {
       const res = await compareScenariosLLM(aId, targetId, question, 'USD', model)
       setLoading(false)
@@ -179,6 +193,9 @@ export default function LLMPage() {
         }
       }
 
+      if (abortControllerRef.current) abortControllerRef.current.abort()
+      abortControllerRef.current = new AbortController()
+
       let initialized = false;
       const res = await postLLMChat(req, (chunkText) => {
         clearToolCall()
@@ -193,7 +210,7 @@ export default function LLMPage() {
             return newMessages
           })
         }
-      }, showToolCall)
+      }, showToolCall, abortControllerRef.current?.signal)
 
       clearToolCall(true)
 
@@ -211,7 +228,9 @@ export default function LLMPage() {
       setLoading(false)
       setActiveToolCalls([])
       const error = err as Error
-      const errMsg = error?.message?.includes('GEMINI_API_KEY')
+      const errMsg = error?.name === 'AbortError' 
+        ? 'Analysis cancelled.' 
+        : error?.message?.includes('GEMINI_API_KEY')
         ? 'LLM features are currently unavailable. Please configure GEMINI_API_KEY.'
         : error?.message || 'Failed to generate response.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
@@ -246,6 +265,9 @@ export default function LLMPage() {
         }
       }
 
+      if (abortControllerRef.current) abortControllerRef.current.abort()
+      abortControllerRef.current = new AbortController()
+
       let initialized = false;
       const res = await postLLMChat(req, (chunkText) => {
         clearToolCall()
@@ -260,7 +282,7 @@ export default function LLMPage() {
             return newMessages
           })
         }
-      }, showToolCall)
+      }, showToolCall, abortControllerRef.current?.signal)
 
       clearToolCall(true)
 
@@ -310,8 +332,13 @@ export default function LLMPage() {
             {messages.length > 0 && (
               <div className="relative group flex items-center">
                 <button
-                  onClick={() => { setMessages([]); setPortfolioShared(false) }}
-                  disabled={loading}
+                  onClick={() => {
+                    if (abortControllerRef.current) abortControllerRef.current.abort();
+                    setMessages([]);
+                    setPortfolioShared(false);
+                    setLoading(false);
+                    setActiveToolCalls([]);
+                  }}
                   className="text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
                   aria-label="New chat"
                 >

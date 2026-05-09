@@ -525,8 +525,10 @@ func (s *Service) AnalyzePortfolioStream(
 			if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
 				continue
 			}
+			var chunkDelta string
 			for _, pt := range resp.Candidates[0].Content.Parts {
 				if pt.Text != "" {
+					chunkDelta += pt.Text
 					roundText.WriteString(pt.Text)
 				}
 				if pt.FunctionCall != nil {
@@ -535,25 +537,29 @@ func (s *Service) AnalyzePortfolioStream(
 					finishedWithToolCall = true
 				}
 			}
-		}
 
-		// Stream any text the model produced before the tool call.
-		if chunk := roundText.String(); chunk != "" {
-			if onChunk != nil {
+			// Stream the delta text immediately as it arrives
+			if chunkDelta != "" && onChunk != nil {
 				// Only stream text if we're not in the final structured JSON generation round,
 				// or if we are emitting a tool call (where the model outputs <thinking>).
 				if !isStructured || finishedWithToolCall {
-					cleanChunk := chunk
+					cleanChunk := chunkDelta
 					// Strip out tool call dumps if the model hallucinates them into the text stream.
 					if idx := strings.Index(cleanChunk, "BT:\n"); idx != -1 {
 						cleanChunk = strings.TrimSpace(cleanChunk[:idx])
 					}
-					if cbErr := onChunk(cleanChunk); cbErr != nil {
-						slog.Debug("llm: stream chunk callback failed (client disconnected)", "err", cbErr)
-						return fullResponse.String(), nil, nil
+					// Only send if there's actually something left
+					if cleanChunk != "" {
+						if cbErr := onChunk(cleanChunk); cbErr != nil {
+							slog.Debug("llm: stream chunk callback failed (client disconnected)", "err", cbErr)
+							return fullResponse.String(), nil, nil
+						}
 					}
 				}
 			}
+		}
+
+		if chunk := roundText.String(); chunk != "" {
 			// Always append to fullResponse so we have the complete raw string at the end.
 			fullResponse.WriteString(chunk)
 		}

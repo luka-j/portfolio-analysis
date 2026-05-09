@@ -62,7 +62,7 @@ func (h *LLMHandler) doSimulateScenario(req ChatRequest, args map[string]any, us
 				result["allocations"] = alloc["holdings"]
 			}
 		} else if m == "holdings" {
-			hl, err := h.toolGetPositionsWithCostBasis(ctx, synthData, req)
+			hl, err := h.toolGetPositionsWithCostBasis(ctx, synthData, req, nil)
 			if err == nil {
 				result["holdings"] = hl["positions"]
 			}

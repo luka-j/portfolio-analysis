@@ -92,8 +92,14 @@ func PortfolioTools() *genai.Tool {
 			},
 			{
 				Name:        ToolGetPositionsWithCostBasis,
-				Description: "Returns all currently open portfolio positions with their absolute quantity, average cost basis, current price, and unrealized gain/loss. Use this when analyzing underwater positions, highest gaining stocks, or tax-loss harvesting opportunities.",
-				Parameters:  &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{}},
+				Description: "Returns all currently open portfolio positions with their absolute quantity, average cost basis, current price, and unrealized gain/loss. Use this when analyzing underwater positions, highest gaining stocks, or tax-loss harvesting opportunities. Can optionally group and limit results.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"group_by": enumParam("Optional. Group and aggregate positions by a specific dimension.", []string{"sector", "country", "asset_type"}),
+						"limit":    numParam("Optional. Limit the number of returned rows, sorted by highest absolute value."),
+					},
+				},
 			},
 			{
 				Name:        ToolGetTaxImpact,
@@ -108,14 +114,15 @@ func PortfolioTools() *genai.Tool {
 			},
 			{
 				Name:        ToolGetRecentTransactions,
-				Description: "Returns chronological trading history for a specific symbol. Shows precise buy/sell dates, prices, quantities, and commissions. Use this when you need to know exactly when a user entered or exited a position.",
+				Description: "Returns chronological trading history for a specific symbol. Shows precise buy/sell dates, prices, quantities, and commissions. Use this when you need to know exactly when a user entered or exited a position. Can be grouped or limited.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
-						"symbol": strParam("Ticker symbol (e.g. 'AAPL')."),
-						"limit":  numParam("Number of most recent trades to fetch. Max 100."),
+						"symbol":   strParam("Ticker symbol (e.g. 'AAPL')."),
+						"limit":    numParam("Optional. Number of most recent trades to fetch. Max 100. Defaults to 10."),
+						"group_by": enumParam("Optional. Group and aggregate trades by dimension.", []string{"side", "year"}),
 					},
-					Required: []string{"symbol", "limit"},
+					Required: []string{"symbol"},
 				},
 			},
 			{

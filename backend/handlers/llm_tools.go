@@ -355,7 +355,10 @@ func (h *LLMHandler) toolGetCorrelations(_ context.Context, data *models.FlexQue
 }
 
 // toolGetPositionsWithCostBasis returns open positions with qty, price, average cost basis, and unrealized gl.
-func (h *LLMHandler) toolGetPositionsWithCostBasis(_ context.Context, data *models.FlexQueryData, req ChatRequest) (map[string]any, error) {
+func (h *LLMHandler) toolGetPositionsWithCostBasis(_ context.Context, data *models.FlexQueryData, req ChatRequest, args map[string]any) (map[string]any, error) {
+	groupBy, _ := args["group_by"].(string)
+	limitF, _ := args["limit"].(float64)
+
 	acctModel := models.ParseAccountingModel(req.AccountingModel)
 	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel, false)
 	if err != nil {
@@ -368,43 +371,77 @@ func (h *LLMHandler) toolGetPositionsWithCostBasis(_ context.Context, data *mode
 			symbols = append(symbols, p.Symbol)
 		}
 	}
-	var nameRows []models.AssetFundamental
-	nameMap := make(map[string]string, len(symbols))
+	var fundamentals []models.AssetFundamental
+	fundMap := make(map[string]models.AssetFundamental, len(symbols))
 	if h.DB != nil && len(symbols) > 0 {
-		h.DB.Select("symbol, name").Where("symbol IN ?", symbols).Find(&nameRows)
-		for _, r := range nameRows {
-			if r.Name != "" {
-				nameMap[r.Symbol] = r.Name
-			}
+		h.DB.Where("symbol IN ?", symbols).Find(&fundamentals)
+		for _, f := range fundamentals {
+			fundMap[f.Symbol] = f
 		}
 	}
 
 	type posDetail struct {
-		Symbol       string  `json:"symbol"`
+		Symbol       string  `json:"symbol,omitempty"`
 		Name         string  `json:"name,omitempty"`
-		Quantity     float64 `json:"quantity"`
-		Price        float64 `json:"price"`
+		Group        string  `json:"group,omitempty"`
+		Quantity     float64 `json:"quantity,omitempty"`
 		CostBasis    float64 `json:"cost_basis"`
 		Value        float64 `json:"value"`
 		UnrealizedGL float64 `json:"unrealized_gl"`
 	}
 
-	positions := make([]posDetail, 0, len(result.Positions))
-	for _, p := range result.Positions {
-		if p.Value == 0 || p.Symbol == "PENDING_CASH" {
-			continue
+	var items []posDetail
+
+	if groupBy != "" {
+		grouped := make(map[string]*posDetail)
+		for _, p := range result.Positions {
+			if p.Value == 0 || p.Symbol == "PENDING_CASH" {
+				continue
+			}
+			f := fundMap[p.Symbol]
+			g := "Unknown"
+			if groupBy == "sector" && f.Sector != "" {
+				g = f.Sector
+			} else if groupBy == "country" && f.Country != "" {
+				g = f.Country
+			} else if groupBy == "asset_type" && f.AssetType != "" {
+				g = f.AssetType
+			}
+			if _, ok := grouped[g]; !ok {
+				grouped[g] = &posDetail{Group: g}
+			}
+			grouped[g].CostBasis += p.CostBasis * p.Quantity
+			grouped[g].Value += p.Value
+			grouped[g].UnrealizedGL += p.Value - (p.CostBasis * p.Quantity)
 		}
-		positions = append(positions, posDetail{
-			Symbol:       p.Symbol,
-			Name:         nameMap[p.Symbol],
-			Quantity:     p.Quantity,
-			Price:        p.Price,
-			CostBasis:    p.CostBasis,
-			Value:        p.Value,
-			UnrealizedGL: p.Value - (p.CostBasis * p.Quantity),
-		})
+		for _, g := range grouped {
+			items = append(items, *g)
+		}
+	} else {
+		for _, p := range result.Positions {
+			if p.Value == 0 || p.Symbol == "PENDING_CASH" {
+				continue
+			}
+			items = append(items, posDetail{
+				Symbol:       p.Symbol,
+				Name:         fundMap[p.Symbol].Name,
+				Quantity:     math.Round(p.Quantity*1000) / 1000,
+				CostBasis:    math.Round(p.CostBasis*100) / 100,
+				Value:        math.Round(p.Value*100) / 100,
+				UnrealizedGL: math.Round((p.Value-(p.CostBasis*p.Quantity))*100) / 100,
+			})
+		}
 	}
-	return map[string]any{"positions": positions, "currency": req.Currency}, nil
+
+	sort.Slice(items, func(i, j int) bool {
+		return math.Abs(items[i].Value) > math.Abs(items[j].Value)
+	})
+
+	if limitF > 0 && int(limitF) < len(items) {
+		items = items[:int(limitF)]
+	}
+
+	return map[string]any{"positions": items, "currency": req.Currency}, nil
 }
 
 // toolGetTaxImpact evaluates tax figures for a given year.
@@ -444,9 +481,10 @@ func (h *LLMHandler) toolGetRecentTransactions(_ context.Context, data *models.F
 	if !ok || limitF <= 0 {
 		limitF = 10
 	}
-	if limitF > 50 {
-		limitF = 50
+	if limitF > 100 {
+		limitF = 100
 	}
+	groupBy, _ := args["group_by"].(string)
 
 	tradesResp, err := h.PortfolioService.GetTradesForSymbol(data, sym, "", req.Currency, models.AccountingModelHistorical)
 	if err != nil {
@@ -457,6 +495,40 @@ func (h *LLMHandler) toolGetRecentTransactions(_ context.Context, data *models.F
 	if len(tradesResp.Trades) > limit {
 		tradesResp.Trades = tradesResp.Trades[:limit]
 	}
+
+	if groupBy != "" {
+		type groupedTrade struct {
+			Group    string  `json:"group"`
+			Quantity float64 `json:"total_quantity"`
+			Proceeds float64 `json:"total_proceeds"`
+			Count    int     `json:"trade_count"`
+		}
+		grouped := make(map[string]*groupedTrade)
+		for _, t := range tradesResp.Trades {
+			g := "Unknown"
+			if groupBy == "side" {
+				g = t.Side
+			} else if groupBy == "year" && len(t.Date) >= 4 {
+				g = t.Date[:4]
+			}
+			if _, ok := grouped[g]; !ok {
+				grouped[g] = &groupedTrade{Group: g}
+			}
+			grouped[g].Quantity += t.Quantity
+			grouped[g].Proceeds += t.Proceeds
+			grouped[g].Count++
+		}
+		var items []groupedTrade
+		for _, v := range grouped {
+			items = append(items, *v)
+		}
+		return map[string]any{
+			"symbol":           sym,
+			"display_currency": req.Currency,
+			"grouped_trades":   items,
+		}, nil
+	}
+
 	return map[string]any{
 		"symbol":           sym,
 		"display_currency": req.Currency,
@@ -613,7 +685,7 @@ func (h *LLMHandler) buildExecutor(data *models.FlexQueryData, req ChatRequest, 
 			return h.toolGetTaxImpact(ctx, data, call.Args)
 
 		case llm.ToolGetPositionsWithCostBasis:
-			return h.toolGetPositionsWithCostBasis(ctx, data, req)
+			return h.toolGetPositionsWithCostBasis(ctx, data, req, call.Args)
 
 		case llm.ToolGetRecentTransactions:
 			return h.toolGetRecentTransactions(ctx, data, req, call.Args)

@@ -604,6 +604,7 @@ export async function postLLMChat(
   req: LLMChatRequest,
   onChunk?: (text: string) => void,
   onToolCall?: (event: LLMToolCallEvent) => void,
+  signal?: AbortSignal,
 ): Promise<LLMChatResponse> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -618,6 +619,7 @@ export async function postLLMChat(
     method: 'POST',
     headers,
     body: JSON.stringify(req),
+    signal,
   });
 
   if (resp.status === 401) {
