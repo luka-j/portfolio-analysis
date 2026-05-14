@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+﻿import { useState, useRef, useEffect, useCallback } from 'react'
 import { usePersistentState } from '../utils/usePersistentState'
 import NavBar from '../components/NavBar'
 import ScenarioBanner from '../components/ScenarioBanner'
@@ -633,7 +633,7 @@ export default function LLMPage() {
           {messages.length === 0 && !loading && (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-8">
               <p className="text-slate-500 text-sm">
-                Select an analysis above, or ask anything about your portfolio below.
+                Select an analysis from the left pane, or ask anything about your portfolio below.
               </p>
               <div className="space-y-1.5 w-full max-w-xs">
                 {examplePrompts.map(hint => (
