@@ -665,7 +665,6 @@ export async function postLLMChat(
 
       const lines = part.split('\n');
       let eventType = 'message';
-      let dataStr = '';
 
       // Extract data lines, preserving newlines
       const dataLines: string[] = [];
