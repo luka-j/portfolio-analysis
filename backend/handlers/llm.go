@@ -176,6 +176,7 @@ var toolCallLabel = map[string]string{
 	llm.ToolSimulateScenario:         "Simulating scenario portfolio",
 	llm.ToolGetPortfolioBreakdown:    "Computing portfolio breakdown",
 	llm.ToolGetCorrelations:          "Computing portfolio correlations",
+	llm.ToolSubmitThinking:           "Structuring analysis & reasoning",
 }
 
 // Chat handles POST /api/v1/llm/chat
