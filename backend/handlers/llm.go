@@ -256,7 +256,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 				}
 			}
 			
-			c.SSEvent("message", payload)
+			c.SSEvent("done", payload)
 			c.Writer.Flush()
 			return
 		}

@@ -197,6 +197,7 @@ export default function LLMPage() {
         clearToolCall()
         if (!initialized) {
           setLoading(false)
+          setLoadingLabel('')
           initialized = true
           setMessages(prev => [...prev, { role: 'assistant', content: chunkText, cached: false }])
         } else {
@@ -269,6 +270,7 @@ export default function LLMPage() {
         clearToolCall()
         if (!initialized) {
           setLoading(false)
+          setLoadingLabel('')
           initialized = true
           setMessages(prev => [...prev, { role: 'assistant', content: chunkText, cached: false }])
         } else {

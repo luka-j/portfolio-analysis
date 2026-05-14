@@ -667,33 +667,43 @@ export async function postLLMChat(
       let eventType = 'message';
       let dataStr = '';
 
+      // Extract data lines, preserving newlines
+      const dataLines: string[] = [];
       for (const line of lines) {
         if (line.startsWith('event:')) {
           eventType = line.substring(6).trim();
         } else if (line.startsWith('data:')) {
-          dataStr += line.substring(5).trim();
+          // SSE spec says space after colon is optional but should be stripped if present
+          const content = line.startsWith('data: ') ? line.substring(6) : line.substring(5);
+          dataLines.push(content);
         }
       }
 
-      if (dataStr) {
-        try {
-          const data = JSON.parse(dataStr);
-          if (eventType === 'error') {
-            throw new Error(data.error);
-          } else if (eventType === 'tool_call') {
-            if (onToolCall) onToolCall(data as LLMToolCallEvent);
-          } else if (eventType === 'chunk') {
-            streamedContent += data;
-            if (onChunk) onChunk(streamedContent);
-          } else if (eventType === 'message' || eventType === 'done') {
-            fullResponse = data;
-            if (eventType === 'message' && data.response && onChunk) {
-              onChunk(data.response);
+      if (dataLines.length > 0) {
+        const rawDataStr = dataLines.join('\n');
+        
+        if (eventType === 'chunk') {
+          // Chunks are sent as raw strings, not JSON
+          streamedContent += rawDataStr;
+          if (onChunk) onChunk(streamedContent);
+        } else {
+          // All other events are JSON
+          try {
+            const data = JSON.parse(rawDataStr);
+            if (eventType === 'error') {
+              throw new Error(data.error);
+            } else if (eventType === 'tool_call') {
+              if (onToolCall) onToolCall(data as LLMToolCallEvent);
+            } else if (eventType === 'message' || eventType === 'done') {
+              fullResponse = data;
+              if (eventType === 'message' && data.response && onChunk) {
+                onChunk(data.response);
+              }
             }
-          }
-        } catch (e) {
-          if (e instanceof Error && !e.message.startsWith('Unexpected') && eventType === 'error') {
-            throw e;
+          } catch (e) {
+            if (e instanceof Error && eventType === 'error') {
+              throw e;
+            }
           }
         }
       }

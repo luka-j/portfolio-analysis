@@ -551,9 +551,9 @@ func (s *Service) AnalyzePortfolioStream(
 
 			// Stream the delta text immediately as it arrives
 			if chunkDelta != "" && onChunk != nil {
-				// Only stream text if we're not in the final structured JSON generation round,
-				// or if we are emitting a tool call (where the model outputs <thinking>).
-				if !isStructured || finishedWithToolCall {
+				// Only stream text if we're not in the final structured JSON generation round
+				// (Tool-call rounds have ResponseSchema == nil and output readable <thinking> blocks).
+				if cfg.ResponseSchema == nil {
 					cleanChunk := chunkDelta
 					// Strip out tool call dumps if the model hallucinates them into the text stream.
 					if idx := strings.Index(cleanChunk, "BT:\n"); idx != -1 {
