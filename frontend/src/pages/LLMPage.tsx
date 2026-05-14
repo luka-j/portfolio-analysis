@@ -769,10 +769,12 @@ export default function LLMPage() {
                   <button
                     key={m}
                     onClick={() => setModel(m)}
-                    title={m === 'flash' ? 'Faster responses' : 'More thorough analysis'}
-                    className={`relative z-10 px-2.5 py-0.5 rounded-full capitalize transition-colors ${model === m ? 'text-indigo-300' : 'text-slate-500 hover:text-slate-300'}`}
+                    className={`group relative z-10 px-2.5 py-0.5 rounded-full capitalize transition-colors ${model === m ? 'text-indigo-300' : 'text-slate-500 hover:text-slate-300'}`}
                   >
                     {m}
+                    <HoverTooltip direction="up" align="center" className="w-max whitespace-nowrap">
+                      {m === 'flash' ? 'Faster responses' : 'More thorough analysis'}
+                    </HoverTooltip>
                   </button>
                 ))}
               </div>
