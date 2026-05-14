@@ -182,3 +182,22 @@ type LLMCache struct {
 	ExtrasJSON   string    // JSON-encoded extras
 	CreatedAt    time.Time `gorm:"index"`
 }
+
+// ChatThread represents a saved LLM conversation thread.
+type ChatThread struct {
+	ID        uint      `gorm:"primaryKey"`
+	UserHash  string    `gorm:"index:idx_thread_user;not null"`
+	Title     string    // LLM-generated or fallback title
+	TurnCount int       // number of user+assistant turn pairs
+	CreatedAt time.Time `gorm:"index"`
+	UpdatedAt time.Time `gorm:"index:idx_thread_user"` // also used for retention
+}
+
+// ChatMessage represents a single message in a chat thread.
+type ChatMessage struct {
+	ID        uint   `gorm:"primaryKey"`
+	ThreadID  uint   `gorm:"index:idx_msg_thread,constraint:OnDelete:CASCADE;not null"` // cascade delete when thread is deleted
+	Role      string `gorm:"not null"` // "user" | "assistant"
+	Content   string `gorm:"type:text;not null"`
+	CreatedAt time.Time
+}

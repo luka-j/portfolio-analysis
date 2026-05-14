@@ -35,6 +35,10 @@ type Config struct {
 	// metrics calculations when no explicit value is provided. Expressed as a
 	// decimal (e.g. 0.04 = 4%).
 	DefaultRiskFreeRate float64 // DEFAULT_RISK_FREE_RATE, default 0.04
+
+	// ChatHistoryRetentionDays is the number of days to retain LLM chat threads.
+	// Threads older than this are deleted automatically. Default 365.
+	ChatHistoryRetentionDays int // CHAT_HISTORY_RETENTION_DAYS, default 365
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -54,8 +58,9 @@ func Load() *Config {
 		GeminiProModel:     getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
 		GeminiDefaultModel: getEnv("GEMINI_DEFAULT_MODEL", "flash"),
 
-		CashBucketExpiryDays: getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
-		DefaultRiskFreeRate:  getEnvFloat("DEFAULT_RISK_FREE_RATE", 0.04),
+		CashBucketExpiryDays:     getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
+		DefaultRiskFreeRate:      getEnvFloat("DEFAULT_RISK_FREE_RATE", 0.04),
+		ChatHistoryRetentionDays: getEnvInt("CHAT_HISTORY_RETENTION_DAYS", 365),
 	}
 
 	if v := os.Getenv("ALLOWED_TOKEN_HASHES"); v != "" {

@@ -110,7 +110,7 @@ func (s *Service) lookupFundamentals(userHash string, symbols []string) map[stri
 	q := s.DB.Select("symbol, name, isin").Where("symbol IN ?", symbols)
 	if userHash != "" {
 		// Extract the real userHash from a possibly scenario-prefixed UserHash.
-		q = q.Where("user_id = (SELECT id FROM users WHERE token_hash = ?)", realUserHash(userHash))
+		q = q.Where("user_id = (SELECT id FROM users WHERE token_hash = ?)", RealUserHash(userHash))
 	}
 	if err := q.Find(&rows).Error; err != nil {
 		slog.Warn("llm: fundamentals lookup failed", "err", err)
@@ -122,9 +122,9 @@ func (s *Service) lookupFundamentals(userHash string, symbols []string) map[stri
 	return result
 }
 
-// realUserHash strips the "scenario:<id>:<ns>:" prefix, if present, from a synthetic
+// RealUserHash strips the "scenario:<id>:<ns>:" prefix, if present, from a synthetic
 // UserHash so DB queries resolve to the owning user. See handlers/helpers.go for the prefix shape.
-func realUserHash(h string) string {
+func RealUserHash(h string) string {
 	const prefix = "scenario:"
 	if len(h) < len(prefix) || h[:len(prefix)] != prefix {
 		return h

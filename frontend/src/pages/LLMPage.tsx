@@ -8,8 +8,9 @@ import CompareScenariosChip from '../components/CompareScenariosChip'
 import { AVAILABLE_TOOLS } from '../constants/tools'
 import AssistantMessage from '../components/AssistantMessage'
 import { useLocation } from 'react-router-dom'
-import { postLLMChat, compareScenariosLLM, type LLMChatRequest, type LLMResponseSection, type LLMToolCallEvent } from '../api'
+import { postLLMChat, compareScenariosLLM, listChatThreads, getChatThread, searchChatThreads, deleteChatThread, renameChatThread, type LLMChatRequest, type LLMResponseSection, type LLMToolCallEvent, type ChatThreadSummary, type ChatSearchResult } from '../api'
 import { useScenario } from '../context/ScenarioContext'
+import { ChatHistorySidebar } from '../components/ChatHistorySidebar'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -62,7 +63,106 @@ export default function LLMPage() {
 
   const abortControllerRef = useRef<AbortController | null>(null)
 
+  // Chat History State
+  const [activeThreadId, setActiveThreadId] = useState<number | null>(null)
+  const [threads, setThreads] = useState<ChatThreadSummary[]>([])
+  const [threadsTotal, setThreadsTotal] = useState(0)
+  const [threadsLoading, setThreadsLoading] = useState(false)
+  const [searchMode, setSearchMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<ChatSearchResult[]>([])
 
+  const loadThreads = useCallback(async (offset = 0) => {
+    setThreadsLoading(true)
+    try {
+      const res = await listChatThreads(20, offset)
+      if (offset === 0) {
+        setThreads(res.threads || [])
+      } else {
+        setThreads(prev => [...prev, ...(res.threads || [])])
+      }
+      setThreadsTotal(res.total)
+    } catch (err) {
+      console.error('Failed to load threads', err)
+    } finally {
+      setThreadsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadThreads(0)
+  }, [loadThreads, active]) // reload history if active scenario changes (though backend strips it, nice to refresh)
+
+  useEffect(() => {
+    if (!searchMode || !searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setThreadsLoading(true)
+      try {
+        const res = await searchChatThreads(searchQuery, 20)
+        setSearchResults(res.results || [])
+      } catch (err) {
+        console.error('Search failed', err)
+      } finally {
+        setThreadsLoading(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery, searchMode])
+
+  const handleSelectThread = useCallback(async (id: number) => {
+    if (abortControllerRef.current) abortControllerRef.current.abort()
+    setActiveToolCalls([])
+    setLoading(true)
+    setLoadingLabel('Loading conversation…')
+    setActiveThreadId(id)
+    
+    try {
+      const res = await getChatThread(id)
+      setMessages(res.messages.map(m => ({
+        role: m.Role,
+        content: m.Content,
+        cached: false
+      })))
+    } catch (err) {
+      console.error('Failed to load thread', err)
+      setMessages([{ role: 'assistant', content: '**Error:** Failed to load conversation history.' }])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const handleDeleteThread = useCallback(async (id: number) => {
+    try {
+      await deleteChatThread(id)
+      setThreads(prev => prev.filter(t => t.ID !== id))
+      setThreadsTotal(prev => prev - 1)
+      if (searchMode) {
+        setSearchResults(prev => prev.filter(t => t.thread_id !== id))
+      }
+      if (activeThreadId === id) {
+        setActiveThreadId(null)
+        setMessages([])
+        setPortfolioShared(false)
+      }
+    } catch (err) {
+      console.error('Failed to delete thread', err)
+    }
+  }, [activeThreadId, searchMode])
+
+  const handleRenameThread = useCallback(async (id: number, newTitle: string) => {
+    try {
+      await renameChatThread(id, newTitle)
+      setThreads(prev => prev.map(t => t.ID === id ? { ...t, Title: newTitle } : t))
+      if (searchMode) {
+        setSearchResults(prev => prev.map(t => t.thread_id === id ? { ...t, title: newTitle } : t))
+      }
+    } catch (err) {
+      console.error('Failed to rename thread', err)
+    }
+  }, [searchMode])
 
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
@@ -171,6 +271,7 @@ export default function LLMPage() {
     if (isCanned) {
       if (abortControllerRef.current) abortControllerRef.current.abort()
       setActiveToolCalls([])
+      setActiveThreadId(null) // Canned prompts always start a new thread
     }
     const priorMessages = messages // capture before state update — becomes history
     if (isCanned || enabledTools.length > 0) setPortfolioShared(true)
@@ -194,7 +295,9 @@ export default function LLMPage() {
       }
       req.enabled_tools = enabledTools
       if (!isCanned) {
-        if (priorMessages.length > 0) {
+        if (activeThreadId) {
+          req.thread_id = activeThreadId
+        } else if (priorMessages.length > 0) {
           req.history = priorMessages.map(m => ({ role: m.role, content: m.content }))
         }
       }
@@ -231,6 +334,35 @@ export default function LLMPage() {
           return newMessages
         })
       }
+
+      // Update sidebar thread list immediately without a full reload.
+      if (res.thread_id) {
+        const tid = res.thread_id
+        if (!activeThreadId) {
+          // Brand new thread — prepend a placeholder; the async title will arrive later.
+          setActiveThreadId(tid)
+          setThreadsTotal(prev => prev + 1)
+          setThreads(prev => {
+            // Avoid duplicates if called twice (e.g. HMR)
+            if (prev.some(t => t.ID === tid)) return prev
+            return [{ ID: tid, Title: '', TurnCount: 1, UpdatedAt: new Date().toISOString() }, ...prev]
+          })
+          // After 2 s the async title job on the backend should be done — refresh just that entry.
+          setTimeout(() => {
+            loadThreads(0)
+          }, 2000)
+        } else {
+          // Continuing an existing thread — move it to the top with a fresh UpdatedAt.
+          setThreads(prev => {
+            const idx = prev.findIndex(t => t.ID === tid)
+            if (idx === -1) return prev
+            const updated = { ...prev[idx], UpdatedAt: new Date().toISOString(), TurnCount: prev[idx].TurnCount + 1 }
+            const rest = prev.filter((_, i) => i !== idx)
+            return [updated, ...rest]
+          })
+        }
+      }
+
     } catch (err) {
       const error = err as Error
       if (error?.name === 'AbortError') return
@@ -336,9 +468,12 @@ export default function LLMPage() {
       <div className="flex-1 max-w-5xl w-full mx-auto p-4 flex flex-col md:flex-row gap-6 md:overflow-hidden mb-0 min-h-0">
 
         {/* Left Sidebar */}
-        <div className="md:w-64 shrink-0 flex flex-col gap-5 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 md:pr-2">
+        <div className="md:w-64 shrink-0 flex flex-col gap-5 min-h-0 md:pr-2">
           
-          <div className="flex flex-col gap-2 shrink-0">
+          {/* Fixed top: title + chips — never scrolls */}
+          <div className="shrink-0 flex flex-col gap-5">
+          
+          <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-white tracking-tight">AI Portfolio Insights</h2>
               {/* Only show inline on mobile when messages > 0 */}
@@ -351,6 +486,7 @@ export default function LLMPage() {
                       setPortfolioShared(false);
                       setLoading(false);
                       setActiveToolCalls([]);
+                      setActiveThreadId(null);
                     }}
                     className="text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
                     aria-label="New chat"
@@ -441,14 +577,35 @@ export default function LLMPage() {
               <CompareScenariosChip disabled={loading} onCompare={(id) => handleCompareScenarios(id)} className="md:!rounded-xl md:!py-2.5 md:!w-full md:!justify-between whitespace-nowrap md:whitespace-normal" />
             </div>
           </div>
+
+          </div>{/* end fixed top */}
+
+          {/* Independently-scrolling history section */}
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+          <ChatHistorySidebar 
+            threads={threads}
+            threadsTotal={threadsTotal}
+            activeThreadId={activeThreadId}
+            loading={threadsLoading}
+            searchMode={searchMode}
+            searchQuery={searchQuery}
+            searchResults={searchResults}
+            onSelectThread={handleSelectThread}
+            onLoadMore={() => loadThreads(threads.length)}
+            onSearchToggle={setSearchMode}
+            onSearchQuery={setSearchQuery}
+            onDeleteThread={handleDeleteThread}
+            onRenameThread={handleRenameThread}
+          />
+          </div>
         </div>
 
         {/* Right Column (Chat Area) */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 relative">
           
           {/* Top Bar for Desktop (New Chat Button) */}
           {messages.length > 0 && (
-            <div className="hidden md:flex justify-end mb-3 shrink-0">
+            <div className="hidden md:flex absolute top-2 right-2 z-10 shrink-0">
               <button
                 onClick={() => {
                   if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -456,8 +613,9 @@ export default function LLMPage() {
                   setPortfolioShared(false);
                   setLoading(false);
                   setActiveToolCalls([]);
+                  setActiveThreadId(null);
                 }}
-                className="text-xs font-medium text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/5"
+                className="text-xs font-medium text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/10 bg-black/40 backdrop-blur-md"
               >
                 <svg width="12" height="12" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M7.5 1.5h-5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-5" />

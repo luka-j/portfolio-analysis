@@ -83,6 +83,22 @@ func buildRouter(
 		}
 	}()
 
+	// Evict chat threads older than the retention limit; run once at startup then daily.
+	go func() {
+		cleanup := func() {
+			n, err := svc.LLM.DeleteExpiredThreads(cfg.ChatHistoryRetentionDays)
+			if err != nil {
+				slog.Warn("llm chat history cleanup failed", "err", err)
+			} else if n > 0 {
+				slog.Info("evicted expired llm chat threads", "count", n)
+			}
+		}
+		cleanup()
+		for range time.Tick(24 * time.Hour) {
+			cleanup()
+		}
+	}()
+
 	// Shared PortfolioResolver wired to all handlers that support scenario_id.
 	resolver := handlers.PortfolioResolver{
 		ScenarioRepo: scenarioRepo,
@@ -152,6 +168,12 @@ func buildRouter(
 	api.GET("/llm/available", lh.IsAvailable)
 	api.GET("/llm/summary", lh.GetSummary)
 	api.POST("/llm/chat", lh.Chat)
+	api.GET("/llm/threads", lh.ListThreads)
+	api.POST("/llm/threads", lh.CreateThread)
+	api.GET("/llm/threads/:id", lh.GetThread)
+	api.PATCH("/llm/threads/:id", lh.RenameThread)
+	api.DELETE("/llm/threads/:id", lh.DeleteThread)
+	api.GET("/llm/threads/search", lh.SearchThreads)
 
 	// Scenario endpoints.
 	sch := handlers.NewScenarioHandler(svc.Repo, database, scenarioRepo, svc.Portfolio, svc.Tax, mp, cg, svc.FX, svc.LLM)

@@ -63,6 +63,9 @@ services:
       # avoiding artificial portfolio inflows/outflows for cross-broker trades. Default: 30
       # CASH_BUCKET_EXPIRY_DAYS: 30
 
+      # Number of days to retain LLM chat history. Threads older than this are automatically deleted. Default: 365
+      # CHAT_HISTORY_RETENTION_DAYS: 365
+
     restart: unless-stopped
 
     healthcheck:

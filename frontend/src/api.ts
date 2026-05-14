@@ -294,6 +294,8 @@ export interface LLMChatRequest {
   // risk_metrics_comparison / holdings_comparison
   scenario_id_a?: number | null;
   scenario_id_b?: number | null;
+
+  thread_id?: number | null;
 }
 
 export interface LLMResponseSection {
@@ -310,6 +312,7 @@ export interface LLMToolCallEvent {
 export interface LLMChatResponse {
   response: string;
   cached?: boolean;
+  thread_id?: number;
   sections?: LLMResponseSection[];
   confidence_score_value?: number;
   missing_data_context?: string;
@@ -600,6 +603,50 @@ export async function getLLMAvailable(): Promise<{ available: boolean; canned_mo
 export async function getLLMSummary(period = '1d', forceRefresh = false, scenarioId?: number | null): Promise<LLMSummaryResponse> {
   const extra = forceRefresh ? '&force_refresh=true' : '';
   return request<LLMSummaryResponse>(`/llm/summary?period=${period}${extra}${scenarioParam(scenarioId)}`);
+}
+
+// ---- LLM Chat History ----
+
+export interface ChatThreadSummary {
+  ID: number;
+  Title: string;
+  TurnCount: number;
+  UpdatedAt: string;
+}
+
+export interface ChatThreadDetail {
+  thread: ChatThreadSummary;
+  messages: Array<{ Role: 'user' | 'assistant'; Content: string; CreatedAt: string }>;
+}
+
+export interface ChatSearchResult {
+  thread_id: number;
+  title: string;
+  snippet?: string;
+}
+
+export async function listChatThreads(limit = 20, offset = 0): Promise<{ threads: ChatThreadSummary[]; total: number }> {
+  return request<{ threads: ChatThreadSummary[]; total: number }>(`/llm/threads?limit=${limit}&offset=${offset}`);
+}
+
+export async function getChatThread(id: number): Promise<ChatThreadDetail> {
+  return request<ChatThreadDetail>(`/llm/threads/${id}`);
+}
+
+export async function renameChatThread(id: number, title: string): Promise<void> {
+  return request<void>(`/llm/threads/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteChatThread(id: number): Promise<void> {
+  return request<void>(`/llm/threads/${id}`, { method: 'DELETE' });
+}
+
+export async function searchChatThreads(query: string, limit = 20): Promise<{ results: ChatSearchResult[] }> {
+  return request<{ results: ChatSearchResult[] }>(`/llm/threads/search?q=${encodeURIComponent(query)}&limit=${limit}`);
 }
 
 export async function postLLMChat(

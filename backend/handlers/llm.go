@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -160,6 +161,9 @@ type ChatRequest struct {
 	// risk_metrics_comparison / holdings_comparison
 	ScenarioIDA *int `json:"scenario_id_a"`
 	ScenarioIDB *int `json:"scenario_id_b"`
+
+	// thread_id for conversation history continuation
+	ThreadID *uint `json:"thread_id"`
 }
 
 // toolCallLabel maps internal tool names to user-friendly display strings.
@@ -283,7 +287,22 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	slog.Info("llm: Chat calling LLM", "user", userHash[:8], "prompt_type", req.PromptType, "model", modelKey, "currency", req.Currency, "tools", len(req.EnabledTools))
 	var history []llm.ConversationTurn
 	if cannedType == "" {
-		history = req.History
+		if req.ThreadID != nil {
+			// Load conversation history from DB if continuing a thread
+			_, messages, err := h.LLM.GetThread(*req.ThreadID, llm.RealUserHash(userHash))
+			if err != nil {
+				slog.Warn("llm: failed to load thread history", "thread_id", *req.ThreadID, "err", err)
+			} else {
+				for _, msg := range messages {
+					history = append(history, llm.ConversationTurn{
+						Role:    msg.Role,
+						Content: msg.Content,
+					})
+				}
+			}
+		} else {
+			history = req.History
+		}
 	}
 
 	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
@@ -350,7 +369,15 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		}
 	}
 
+	var finalThreadID uint
+	if cannedType == "" {
+		finalThreadID = h.persistThread(req, userHash, message, response)
+	}
+
 	donePayload := gin.H{"response": response}
+	if finalThreadID != 0 {
+		donePayload["thread_id"] = finalThreadID
+	}
 	if sections != nil {
 		donePayload["sections"] = sections
 	}
@@ -361,6 +388,81 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	}
 	c.SSEvent("done", donePayload)
 	c.Writer.Flush()
+}
+
+// persistThread saves the chat interaction to the database and optionally triggers title generation.
+func (h *LLMHandler) persistThread(req ChatRequest, userHash, userMessage, assistantResponse string) uint {
+	realHash := llm.RealUserHash(userHash)
+	threadID := uint(0)
+
+	if req.ThreadID == nil {
+		// Create new thread
+		thread, err := h.LLM.CreateThread(realHash, "")
+		if err != nil {
+			slog.Error("llm: failed to create thread", "err", err)
+			return 0
+		}
+		threadID = thread.ID
+
+		// Append initial messages
+		_ = h.LLM.AppendMessage(threadID, "user", userMessage)
+		_ = h.LLM.AppendMessage(threadID, "assistant", assistantResponse)
+
+		// Async generate title
+		go h.generateTitleAsync(threadID, realHash)
+	} else {
+		threadID = *req.ThreadID
+		// Append messages
+		_ = h.LLM.AppendMessage(threadID, "user", userMessage)
+		_ = h.LLM.AppendMessage(threadID, "assistant", assistantResponse)
+
+		// Regenerate title every 4 turns
+		if thread, _, err := h.LLM.GetThread(threadID, realHash); err == nil && thread.TurnCount > 0 && thread.TurnCount%4 == 0 {
+			go h.generateTitleAsync(threadID, realHash)
+		}
+	}
+	return threadID
+}
+
+// generateTitleAsync generates a title for a thread in a background goroutine.
+func (h *LLMHandler) generateTitleAsync(threadID uint, realHash string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, messages, err := h.LLM.GetThread(threadID, realHash)
+	if err != nil {
+		slog.Error("llm: generateTitle failed to load thread", "err", err)
+		return
+	}
+
+	title, err := h.LLM.GenerateTitle(ctx, messages)
+	if err != nil || title == "" {
+		slog.Warn("llm: failed to generate title, using fallback", "err", err)
+		// Fallback to first few words of user prompt
+		if len(messages) > 0 {
+			fallback := messages[0].Content
+			if len(fallback) > 50 {
+				fallback = fallback[:47] + "..."
+			}
+			// Clean up context prefixes from the fallback
+			if idx := strings.Index(fallback, "Conversation context:"); idx != -1 {
+				nlIdx := strings.Index(fallback, "\n\n")
+				if nlIdx != -1 && len(fallback) > nlIdx+2 {
+					fallback = fallback[nlIdx+2:]
+				}
+			}
+			if len(fallback) > 50 {
+				fallback = fallback[:47] + "..."
+			}
+			title = strings.TrimSpace(fallback)
+		} else {
+			title = "New Conversation"
+		}
+	}
+
+	if err := h.LLM.UpdateTitle(threadID, title); err != nil {
+		slog.Error("llm: failed to update thread title", "err", err)
+	}
 }
 
 // renderCannedPrompt builds the fully-rendered message for a canned prompt type.
