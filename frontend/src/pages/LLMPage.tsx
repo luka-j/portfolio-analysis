@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { usePersistentState } from '../utils/usePersistentState'
 import NavBar from '../components/NavBar'
 import ScenarioBanner from '../components/ScenarioBanner'
@@ -574,7 +574,7 @@ export default function LLMPage() {
             })}
 
             <div className="shrink-0 md:w-full flex">
-              <CompareScenariosChip disabled={loading} onCompare={(id) => handleCompareScenarios(id)} className="md:!rounded-xl md:!py-2.5 md:!w-full md:!justify-between whitespace-nowrap md:whitespace-normal" />
+              <CompareScenariosChip tooltipAlign="left" disabled={loading} onCompare={(id) => handleCompareScenarios(id)} className="md:!rounded-xl md:!py-2.5 md:!w-full md:!justify-between whitespace-nowrap md:whitespace-normal" />
             </div>
           </div>
 

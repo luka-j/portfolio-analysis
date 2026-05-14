@@ -5,13 +5,14 @@ import HoverTooltip from './HoverTooltip'
 interface Props {
   disabled?: boolean
   className?: string
+  tooltipAlign?: 'center' | 'left' | 'right' | 'none'
   onCompare: (targetId: number) => void
 }
 
 // CompareScenariosChip is a quick-action chip on the LLM page that lets the user pick a
 // comparison target (Real portfolio or another scenario) and immediately kick off a
 // scenarios/compare-llm run. It replaces the old navbar ComparePill.
-export default function CompareScenariosChip({ disabled, className, onCompare }: Props) {
+export default function CompareScenariosChip({ disabled, className, tooltipAlign = 'center', onCompare }: Props) {
   const { active, compare, scenarios, setCompare } = useScenario()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -70,7 +71,7 @@ export default function CompareScenariosChip({ disabled, className, onCompare }:
       </button>
 
       {!open && (
-        <HoverTooltip direction="up" align="center" className="w-64">
+        <HoverTooltip direction="up" align={tooltipAlign} className="w-64">
           {options.length === 0
             ? 'Create a scenario to compare against the real portfolio.'
             : 'Pick a portfolio to compare against. Gemini Pro will generate a qualitative head-to-head on risk-adjusted return, drawdown, composition, and suitability.'}
