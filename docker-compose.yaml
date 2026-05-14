@@ -31,8 +31,8 @@ services:
       # Enables portfolio summary and chat. Leave unset to disable LLM features.
       # GEMINI_API_KEY: ${GEMINI_API_KEY}
 
-      # Model used for one-shot portfolio summaries. Default: gemini-3.1-flash-lite-preview
-      # GEMINI_FLASH_MODEL: gemini-3.1-flash-lite-preview
+      # Model used for one-shot portfolio summaries. Default: gemini-3-flash-preview
+      # GEMINI_FLASH_MODEL: gemini-3-flash-preview
 
       # Model used for multi-turn chat. Default: gemini-3.1-pro-preview
       # GEMINI_PRO_MODEL: gemini-3.1-pro-preview

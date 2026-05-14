@@ -22,7 +22,7 @@ type Config struct {
 	BreakdownProviders    string // BREAKDOWN_PROVIDERS,    default "Yahoo"
 
 	GeminiAPIKey       string // GEMINI_API_KEY
-	GeminiFlashModel   string // GEMINI_FLASH_MODEL, default "gemini-3.1-flash-lite-preview"
+	GeminiFlashModel   string // GEMINI_FLASH_MODEL, default "gemini-3-flash-preview"
 	GeminiProModel     string // GEMINI_PRO_MODEL,   default "gemini-3.1-pro-preview"
 	GeminiDefaultModel string // GEMINI_DEFAULT_MODEL, "flash" | "pro" — used for canned prompts not explicitly requesting a model; default "flash"
 
@@ -49,12 +49,12 @@ func Load() *Config {
 		FundamentalsProviders: getEnv("FUNDAMENTALS_PROVIDERS", "Yahoo"),
 		BreakdownProviders:    getEnv("BREAKDOWN_PROVIDERS", "Yahoo"),
 
-		GeminiAPIKey:      getEnv("GEMINI_API_KEY", ""),
-		GeminiFlashModel:  getEnv("GEMINI_FLASH_MODEL", "gemini-3.1-flash-lite-preview"),
-		GeminiProModel:    getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
+		GeminiAPIKey:       getEnv("GEMINI_API_KEY", ""),
+		GeminiFlashModel:   getEnv("GEMINI_FLASH_MODEL", "gemini-3-flash-preview"),
+		GeminiProModel:     getEnv("GEMINI_PRO_MODEL", "gemini-3.1-pro-preview"),
 		GeminiDefaultModel: getEnv("GEMINI_DEFAULT_MODEL", "flash"),
 
-		CashBucketExpiryDays:  getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
+		CashBucketExpiryDays: getEnvInt("CASH_BUCKET_EXPIRY_DAYS", 30),
 		DefaultRiskFreeRate:  getEnvFloat("DEFAULT_RISK_FREE_RATE", 0.04),
 	}
 
