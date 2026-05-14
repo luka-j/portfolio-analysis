@@ -4,13 +4,14 @@ import HoverTooltip from './HoverTooltip'
 
 interface Props {
   disabled?: boolean
+  className?: string
   onCompare: (targetId: number) => void
 }
 
 // CompareScenariosChip is a quick-action chip on the LLM page that lets the user pick a
 // comparison target (Real portfolio or another scenario) and immediately kick off a
 // scenarios/compare-llm run. It replaces the old navbar ComparePill.
-export default function CompareScenariosChip({ disabled, onCompare }: Props) {
+export default function CompareScenariosChip({ disabled, className, onCompare }: Props) {
   const { active, compare, scenarios, setCompare } = useScenario()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -60,7 +61,7 @@ export default function CompareScenariosChip({ disabled, onCompare }: Props) {
           hasTarget
             ? 'text-amber-300 border-amber-500/25 bg-amber-500/8 hover:bg-amber-500/15 hover:border-amber-500/40'
             : 'text-amber-400/80 border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 hover:border-amber-500/30 hover:text-amber-300'
-        }`}
+        } ${className || ''}`}
       >
         {chipLabel}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

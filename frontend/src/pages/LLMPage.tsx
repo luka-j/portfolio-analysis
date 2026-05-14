@@ -144,11 +144,13 @@ export default function LLMPage() {
       ? 'Real'
       : (scenarios.find(s => s.id === targetId)?.name ?? `Scenario ${targetId}`)
     const displayMsg = `Compare ${activeLabel} vs. ${targetLabel}${question ? `: ${question}` : ''}`
-    setMessages(prev => [...prev, { role: 'user', content: displayMsg, originalRequest: { message: displayMsg, promptType: 'freeform' } }])
+    if (abortControllerRef.current) abortControllerRef.current.abort()
+    setActiveToolCalls([])
+    
+    setMessages([{ role: 'user', content: displayMsg, originalRequest: { message: displayMsg, promptType: 'freeform' } }])
     setLoading(true)
     setLoadingLabel('Comparing scenarios…')
 
-    if (abortControllerRef.current) abortControllerRef.current.abort()
     abortControllerRef.current = new AbortController()
 
     try {
@@ -166,9 +168,17 @@ export default function LLMPage() {
     if (!message && promptType === 'freeform') return
 
     const isCanned = promptType !== 'freeform'
+    if (isCanned) {
+      if (abortControllerRef.current) abortControllerRef.current.abort()
+      setActiveToolCalls([])
+    }
     const priorMessages = messages // capture before state update — becomes history
     if (isCanned || enabledTools.length > 0) setPortfolioShared(true)
-    setMessages(prev => [...prev, { role: 'user', content: displayMessage || message, originalRequest: { message, promptType, displayMessage, extraParams } }])
+    
+    setMessages(prev => isCanned 
+      ? [{ role: 'user', content: displayMessage || message, originalRequest: { message, promptType, displayMessage, extraParams } }]
+      : [...prev, { role: 'user', content: displayMessage || message, originalRequest: { message, promptType, displayMessage, extraParams } }]
+    )
     setInput('')
     setLoading(true)
     setLoadingLabel(loadingLabelMap[promptType] ?? 'Thinking…')
@@ -323,40 +333,44 @@ export default function LLMPage() {
         />
       )}
 
-      <div className="flex-1 max-w-4xl w-full mx-auto p-4 flex flex-col gap-4 md:overflow-hidden mb-6 min-h-0">
+      <div className="flex-1 max-w-5xl w-full mx-auto p-4 flex flex-col md:flex-row gap-6 md:overflow-hidden mb-0 min-h-0">
 
-        {/* Header */}
-        <div className="flex flex-col gap-2 shrink-0">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-white tracking-tight">AI Portfolio Insights</h2>
-            {messages.length > 0 && (
-              <div className="relative group flex items-center">
-                <button
-                  onClick={() => {
-                    if (abortControllerRef.current) abortControllerRef.current.abort();
-                    setMessages([]);
-                    setPortfolioShared(false);
-                    setLoading(false);
-                    setActiveToolCalls([]);
-                  }}
-                  className="text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
-                  aria-label="New chat"
-                >
-                  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M7.5 1.5h-5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-5" />
-                    <path d="M11 1l-5 5v2h2l5-5-2-2Z" />
-                  </svg>
-                </button>
-                <HoverTooltip direction="down" align="right" className="w-max whitespace-nowrap">
-                  New chat
-                </HoverTooltip>
-              </div>
-            )}
+        {/* Left Sidebar */}
+        <div className="md:w-64 shrink-0 flex flex-col gap-5 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 md:pr-2">
+          
+          <div className="flex flex-col gap-2 shrink-0">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white tracking-tight">AI Portfolio Insights</h2>
+              {/* Only show inline on mobile when messages > 0 */}
+              {messages.length > 0 && (
+                <div className="md:hidden relative group flex items-center">
+                  <button
+                    onClick={() => {
+                      if (abortControllerRef.current) abortControllerRef.current.abort();
+                      setMessages([]);
+                      setPortfolioShared(false);
+                      setLoading(false);
+                      setActiveToolCalls([]);
+                    }}
+                    className="text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
+                    aria-label="New chat"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M7.5 1.5h-5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-5" />
+                      <path d="M11 1l-5 5v2h2l5-5-2-2Z" />
+                    </svg>
+                  </button>
+                  <HoverTooltip direction="down" align="right" className="w-max whitespace-nowrap">
+                    New chat
+                  </HoverTooltip>
+                </div>
+              )}
+            </div>
+            <p className="text-sm text-slate-400 leading-relaxed">Ask a question or select an analysis mode to get insights based on your portfolio positions.</p>
           </div>
-          <p className="text-sm text-slate-400">Ask a question or select an analysis mode to get insights based on your portfolio positions.</p>
 
           {/* Quick-action chips (#1) */}
-          <div className="flex flex-wrap gap-2 mt-1">
+          <div className="flex flex-row md:flex-col overflow-x-auto md:overflow-visible gap-2 pb-2 md:pb-0 scrollbar-none md:scrollbar-thin -mx-4 px-4 md:mx-0 md:px-0">
             {([
               {
                 label: 'What Am I Betting On?', promptType: 'general_analysis',
@@ -405,13 +419,14 @@ export default function LLMPage() {
               const chipDisabled = loading || toolMissing;
               
               return (
-                <div key={promptType} className="relative group flex items-center">
+                <div key={promptType} className="relative group flex items-center md:w-full shrink-0">
                   <button
                     onClick={() => handleSend('', promptType, display, undefined, true)}
                     disabled={chipDisabled}
-                    className={`transition-all text-xs font-medium px-3 py-1.5 rounded-full border ${chipDisabled ? `${disabled} cursor-not-allowed` : `${active} active:scale-95`}`}
+                    className={`transition-all text-xs font-medium px-3 py-2 md:py-2.5 rounded-full md:rounded-xl border md:w-full text-left flex items-center justify-between whitespace-nowrap md:whitespace-normal ${chipDisabled ? `${disabled} cursor-not-allowed` : `${active} active:scale-95`}`}
                   >
-                    {label}
+                    <span>{label}</span>
+                    <svg className={`hidden md:block w-3.5 h-3.5 opacity-50 ${chipDisabled ? 'invisible' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
                   </button>
                   {toolMissing && (
                     <HoverTooltip direction="up" align="center" className="w-max whitespace-nowrap z-50">
@@ -422,12 +437,39 @@ export default function LLMPage() {
               );
             })}
 
-            <CompareScenariosChip disabled={loading} onCompare={(id) => handleCompareScenarios(id)} />
+            <div className="shrink-0 md:w-full flex">
+              <CompareScenariosChip disabled={loading} onCompare={(id) => handleCompareScenarios(id)} className="md:!rounded-xl md:!py-2.5 md:!w-full md:!justify-between whitespace-nowrap md:whitespace-normal" />
+            </div>
           </div>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+        {/* Right Column (Chat Area) */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
+          
+          {/* Top Bar for Desktop (New Chat Button) */}
+          {messages.length > 0 && (
+            <div className="hidden md:flex justify-end mb-3 shrink-0">
+              <button
+                onClick={() => {
+                  if (abortControllerRef.current) abortControllerRef.current.abort();
+                  setMessages([]);
+                  setPortfolioShared(false);
+                  setLoading(false);
+                  setActiveToolCalls([]);
+                }}
+                className="text-xs font-medium text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 hover:bg-white/5"
+              >
+                <svg width="12" height="12" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7.5 1.5h-5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-5" />
+                  <path d="M11 1l-5 5v2h2l5-5-2-2Z" />
+                </svg>
+                New Chat
+              </button>
+            </div>
+          )}
+
+          {/* Chat List */}
+          <div className="flex-1 p-4 md:p-5 overflow-y-auto flex flex-col gap-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 mb-2">
 
           {/* Empty state (#7) */}
           {messages.length === 0 && !loading && (
@@ -555,7 +597,7 @@ export default function LLMPage() {
         </form>
 
         {/* Settings Panel */}
-        <div className={`shrink-0 flex flex-col gap-2 -mt-2 ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`shrink-0 flex flex-col gap-2 mt-3 ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="flex items-center gap-6">
 
             {/* Model selector as sliding pill toggle (#5) */}
@@ -600,10 +642,11 @@ export default function LLMPage() {
 
           {/* Disclosure */}
           <p className="text-[10px] text-slate-500 leading-relaxed">
-            Your portfolio weights (symbol, name, allocation %) are sent to the Gemini API by Google for analysis. No account IDs or personal details are included.
+            Portfolio data is sent to Gemini via tool calls based on your enabled tools. No account IDs or personal details are included.
           </p>
         </div>
 
+        </div>
       </div>
     </div>
   )
