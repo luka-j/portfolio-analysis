@@ -71,6 +71,7 @@ export default function LLMPage() {
   const [searchMode, setSearchMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<ChatSearchResult[]>([])
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
 
   const loadThreads = useCallback(async (offset = 0) => {
     setThreadsLoading(true)
@@ -465,6 +466,53 @@ export default function LLMPage() {
         />
       )}
 
+      {/* Mobile History Drawer */}
+      {isHistoryOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsHistoryOpen(false)}
+          />
+          {/* Drawer Panel */}
+          <div className="relative flex flex-col w-[80%] max-w-sm h-full bg-bg border-r border-white/10 shadow-2xl">
+            <div className="flex items-center justify-between p-4 pb-0">
+              <h3 className="text-lg font-bold text-white">History</h3>
+              <button 
+                onClick={() => setIsHistoryOpen(false)}
+                className="text-slate-400 hover:text-white p-1 transition-colors"
+                aria-label="Close history"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+              <ChatHistorySidebar 
+                threads={threads}
+                threadsTotal={threadsTotal}
+                activeThreadId={activeThreadId}
+                loading={threadsLoading}
+                searchMode={searchMode}
+                searchQuery={searchQuery}
+                searchResults={searchResults}
+                onSelectThread={(id) => {
+                  handleSelectThread(id);
+                  setIsHistoryOpen(false);
+                }}
+                onLoadMore={() => loadThreads(threads.length)}
+                onSearchToggle={setSearchMode}
+                onSearchQuery={setSearchQuery}
+                onDeleteThread={handleDeleteThread}
+                onRenameThread={handleRenameThread}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 max-w-5xl w-full mx-auto p-4 flex flex-col md:flex-row gap-6 md:overflow-hidden mb-0 min-h-0">
 
         {/* Left Sidebar */}
@@ -475,7 +523,20 @@ export default function LLMPage() {
           
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-white tracking-tight">AI Portfolio Insights</h2>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setIsHistoryOpen(true)}
+                  className="md:hidden text-slate-400 hover:text-white transition-colors"
+                  aria-label="Open history"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                    <path d="M12 7v5l4 2" />
+                  </svg>
+                </button>
+                <h2 className="text-xl font-bold text-white tracking-tight">AI Portfolio Insights</h2>
+              </div>
               {/* Only show inline on mobile when messages > 0 */}
               {messages.length > 0 && (
                 <div className="md:hidden relative group flex items-center">
@@ -580,8 +641,8 @@ export default function LLMPage() {
 
           </div>{/* end fixed top */}
 
-          {/* Independently-scrolling history section */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+          {/* Independently-scrolling history section - Desktop */}
+          <div className="hidden md:block flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
           <ChatHistorySidebar 
             threads={threads}
             threadsTotal={threadsTotal}

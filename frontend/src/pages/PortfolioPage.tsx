@@ -287,8 +287,8 @@ export default function PortfolioPage() {
         <div className="flex flex-wrap justify-center gap-4 mb-6">
           <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
           <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
-          {/* Period shown here on desktop only; on mobile it moves below the table */}
-          <div className="hidden md:block relative">
+          {/* Period selector */}
+          <div className="relative">
             <SegmentedControl
               label="Period"
               options={periodOptions}
@@ -670,33 +670,6 @@ export default function PortfolioPage() {
           </div>
           </div>
         )}
-
-        {/* Mobile period selector — below the table */}
-        <div className="md:hidden mt-8 flex flex-col items-center gap-4 relative">
-          <SegmentedControl
-            label="Period"
-            options={periodOptions}
-            value={period}
-            onChange={p => {
-              if (p === 'custom') {
-                setIsPickerOpen(true)
-              } else {
-                setIsPickerOpen(false)
-              }
-              setPeriod(p)
-            }}
-          />
-          {period === 'custom' && isPickerOpen && (
-            <div className="absolute bottom-full mb-2 z-50">
-              <DateRangePicker
-                initialFrom={customFrom}
-                initialTo={customTo}
-                onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); setIsPickerOpen(false) }}
-                onCancel={() => setIsPickerOpen(false)}
-              />
-            </div>
-          )}
-        </div>
 
         {/* Add Transaction FAB */}
         <button
