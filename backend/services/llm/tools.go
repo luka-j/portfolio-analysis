@@ -109,12 +109,12 @@ func PortfolioTools() *genai.Tool {
 			},
 			{
 				Name:        ToolGetCurrentAllocations,
-				Description: "Returns the user's current portfolio allocations as percentage weights. Use this whenever you need to understand the user's holdings, their names, and how much of the portfolio each represents.",
+				Description: "Returns the user's current portfolio holdings as percentage weights only — no absolute monetary values are included. Use this when you only need to know what the user holds and in what proportion (e.g. 'what is my biggest position?'). It is a lighter call than get_open_positions_with_cost_basis. If you also need cost basis, P&L, or monetary values, use get_open_positions_with_cost_basis instead; for sector/country/type breakdowns use get_portfolio_fundamentals_breakdown instead.",
 				Parameters:  &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{}},
 			},
 			{
 				Name:        ToolGetRiskMetrics,
-				Description: "Computes portfolio risk and return statistics for a given date range. Returns TWR, MWR, Sharpe ratio, Sortino ratio, VAMI, annualised volatility, and Max Drawdown. Use this before interpreting any risk-related question.",
+				Description: "Computes scalar portfolio risk and return statistics for a given date range. Returns TWR, MWR, Sharpe ratio, Sortino ratio, VAMI, annualised volatility, and Max Drawdown as single summary numbers. Use this for risk-adjusted return questions. If the user asks about a time series, monthly returns, drawdown event timelines, or best/worst months, use get_historical_performance_series instead — this tool returns scalars only.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
@@ -141,7 +141,7 @@ func PortfolioTools() *genai.Tool {
 			},
 			{
 				Name:        ToolGetAssetFundamentals,
-				Description: "Looks up stored fundamental data for a specific ticker: asset type (Stock/ETF/Bond ETF), country, sector, and for ETFs the pre-aggregated country/sector/bond-rating breakdown weights. Use this when the user asks about a specific holding's characteristics.",
+				Description: "Looks up stored fundamental data for a single specific ticker: asset type (Stock/ETF/Bond ETF), domicile country, sector, ISIN, and for ETFs the pre-aggregated country/sector/bond-rating breakdown weights. Use this only when the user asks about one particular holding's characteristics in detail. For portfolio-wide exposure across all holdings, use get_portfolio_fundamentals_breakdown — it is faster and already aggregates every position.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
@@ -152,17 +152,17 @@ func PortfolioTools() *genai.Tool {
 			},
 			{
 				Name:        ToolGetPortfolioBreakdown,
-				Description: "Returns the aggregate portfolio breakdown by asset type, country, and sector, with each holding's contribution pre-computed. This is much faster than calling get_asset_fundamentals for each holding individually. Use this for sector exposure, geographic risk, or concentration analysis.",
+				Description: "Returns the aggregate portfolio breakdown by asset type, country, and sector as market-value percentage weights, with ETF look-through already applied. This is the preferred tool for any sector exposure, geographic concentration, or asset-type allocation question across the whole portfolio. Prefer this over calling get_asset_fundamentals per symbol or using get_open_positions_with_cost_basis with group_by (which groups by cost basis, not market weight).",
 				Parameters: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{}},
 			},
 			{
 				Name:        ToolGetPositionsWithCostBasis,
-				Description: "Returns all currently open portfolio positions with their absolute quantity, average cost basis, current price, and unrealized gain/loss. Use this when analyzing underwater positions, highest gaining stocks, or tax-loss harvesting opportunities. Can optionally group and limit results.",
+				Description: "Returns all currently open portfolio positions with their absolute quantity, average cost basis, current market value, and unrealized gain/loss in the display currency. Use this when the question is about individual position P&L, underwater positions, highest gainers, or tax-loss harvesting candidates. The optional group_by aggregates cost-basis totals and unrealized G/L by sector/country/asset_type — note this groups by book-cost value, not by market-weight percentage; for market-weight exposure use get_portfolio_fundamentals_breakdown instead.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
-						"group_by": enumParam("Optional. Group and aggregate positions by a specific dimension.", []string{"sector", "country", "asset_type"}),
-						"limit":    numParam("Optional. Limit the number of returned rows, sorted by highest absolute value."),
+						"group_by": enumParam("Optional. Aggregate positions by this dimension (totals are cost-basis-based, not market-weight percentages).", []string{"sector", "country", "asset_type"}),
+						"limit":    numParam("Optional. Limit the number of returned rows, sorted by highest absolute market value."),
 					},
 				},
 			},
@@ -197,7 +197,7 @@ func PortfolioTools() *genai.Tool {
 			},
 			{
 				Name:        ToolGetHistoricalPerformance,
-				Description: "Returns a time series of the portfolio's total value with pre-computed analytics: top 3 drawdown periods, best month, and worst month. Sampled monthly to keep data compact.",
+				Description: "Returns a monthly time series of the portfolio's total value together with pre-computed analytics: the top 3 worst drawdown events (with trough dates), and the single best and worst calendar months. Use this whenever the user asks about historical value progression, drawdown timelines, or monthly return extremes. For single-number risk-adjusted metrics (Sharpe, TWR, Max Drawdown %) use get_risk_metrics instead.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
