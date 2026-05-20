@@ -396,6 +396,13 @@ func (s *Service) AnalyzePortfolioStream(
 		toolHint = fmt.Sprintf("\n\nYou have access to the following dynamic tools: %s.\n"+
 			"Always call the relevant tool(s) before answering quantitative questions about the portfolio. Do not guess metrics.",
 			strings.Join(enabledTools, ", "))
+			
+		for _, t := range enabledTools {
+			if t == ToolRunPortfolioAnalysis {
+				toolHint += "\n\n" + PythonSandboxSchemaHint
+				break
+			}
+		}
 	}
 
 	// Nudge the model to plan its tool calls first so it generates them concurrently.

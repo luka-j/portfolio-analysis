@@ -20,6 +20,7 @@ const (
 	ToolSimulateScenario            = "simulate_scenario"
 	ToolGetPortfolioBreakdown       = "get_portfolio_fundamentals_breakdown"
 	ToolGetCorrelations             = "get_portfolio_correlations"
+	ToolRunPortfolioAnalysis        = "run_portfolio_analysis"
 
 	// ToolSubmitThinking is a synthetic tool that forces the model to record its reasoning
 	// and self-critique before generating the final structured answer.
@@ -88,6 +89,24 @@ func PortfolioTools() *genai.Tool {
 
 	return &genai.Tool{
 		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{
+				Name:        ToolRunPortfolioAnalysis,
+				Description: "Execute a Python script for custom analysis on the user's full trading history. A pandas DataFrame 'df' is pre-loaded with ALL trades (columns: symbol, date_time, quantity, price, proceeds, commission, buy_sell, currency, asset_category, listing_exchange, isin). A second DataFrame 'df_cash' contains cash transactions (columns: type, symbol, currency, amount, date_time, description). numpy is available as 'np', pandas as 'pd'. Use print() to output results. Execution timeout: 30 seconds. Use this tool when the user asks for custom calculations, pattern analysis, or data exploration that cannot be answered by the other portfolio tools.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"code": {
+							Type:        genai.TypeString,
+							Description: "Python code to execute. 'df' (trades DataFrame), 'df_cash' (cash transactions DataFrame), 'pd' (pandas), and 'np' (numpy) are pre-loaded. Use print() for output.",
+						},
+						"description": {
+							Type:        genai.TypeString,
+							Description: "Brief explanation of what this analysis computes and why.",
+						},
+					},
+					Required: []string{"code", "description"},
+				},
+			},
 			{
 				Name:        ToolGetCurrentAllocations,
 				Description: "Returns the user's current portfolio allocations as percentage weights. Use this whenever you need to understand the user's holdings, their names, and how much of the portfolio each represents.",

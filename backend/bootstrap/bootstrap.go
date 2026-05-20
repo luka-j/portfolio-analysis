@@ -9,6 +9,7 @@ import (
 	"portfolio-analysis/services/llm"
 	"portfolio-analysis/services/market"
 	"portfolio-analysis/services/portfolio"
+	"portfolio-analysis/services/sandbox"
 	"portfolio-analysis/services/tax"
 
 	"gorm.io/gorm"
@@ -25,6 +26,7 @@ type AppServices struct {
 	Tax          *tax.Service
 	Fundamentals *fundamentals.Service
 	Breakdown    *breakdownsvc.Service
+	Sandbox      *sandbox.Service
 	LLM          *llm.Service
 }
 
@@ -57,6 +59,7 @@ func Build(cfg *config.Config, database *gorm.DB) *AppServices {
 		Tax:          taxSvc,
 		Fundamentals: fundamentalsSvc,
 		Breakdown:    breakdownsvc.NewService(database),
+		Sandbox:      sandbox.NewService(),
 		LLM:          llm.NewService(cfg.GeminiAPIKey, cfg.GeminiFlashModel, cfg.GeminiProModel, cfg.GeminiDefaultModel, database, portfolioSvc),
 	}
 }

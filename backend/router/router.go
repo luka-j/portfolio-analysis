@@ -163,7 +163,7 @@ func buildRouter(
 	api.GET("/portfolio/breakdown", bh.GetBreakdown)
 
 	// LLM endpoints.
-	lh := handlers.NewLLMHandler(svc.Repo, database, svc.LLM, svc.Portfolio, svc.Tax, mp, cg, svc.Breakdown, cfg.DefaultRiskFreeRate)
+	lh := handlers.NewLLMHandler(svc.Repo, database, svc.LLM, svc.Portfolio, svc.Tax, mp, cg, svc.Breakdown, svc.Sandbox, cfg.DefaultRiskFreeRate)
 	lh.PortfolioResolver = resolver
 	api.GET("/llm/available", lh.IsAvailable)
 	api.GET("/llm/summary", lh.GetSummary)

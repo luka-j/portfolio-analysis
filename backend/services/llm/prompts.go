@@ -70,6 +70,41 @@ const ScenarioConstraint = `
 SIMULATED SCENARIOS: The simulate_scenario tool builds a hypothetical portfolio for analysis. Its results are counterfactual; never present them as the user's real holdings. Always state 'in this hypothetical' when discussing its output.
 </scenario_constraint>`
 
+// PythonSandboxSchemaHint defines the DataFrame schemas for the sandbox code execution tool.
+const PythonSandboxSchemaHint = `<python_sandbox_schema>
+The run_portfolio_analysis tool gives you a sandboxed Python environment with the user's full trading data pre-loaded.
+
+DataFrame 'df' (all trades):
+  symbol           str       Ticker symbol (e.g. "AAPL", "VWCE.DE")
+  date_time        datetime  Trade execution timestamp (timezone-aware UTC)
+  quantity         float     Signed quantity (+buy, −sell)
+  price            float     Execution price per share
+  proceeds         float     Total trade proceeds (negative for buys)
+  commission       float     Commission paid (always negative)
+  buy_sell         str       "BUY" or "SELL"
+  currency         str       Trade currency (e.g. "USD", "EUR")
+  asset_category   str       Asset category (e.g. "STK", "ETF")
+  listing_exchange str       Exchange (e.g. "ARCA", "XETRA")
+  isin             str       ISIN identifier
+
+DataFrame 'df_cash' (cash transactions — deposits, withdrawals, dividends):
+  type             str       Transaction type (e.g. "Deposits/Withdrawals", "Dividends")
+  symbol           str       Related symbol (if applicable)
+  currency         str       Cash currency
+  amount           float     Cash amount
+  date_time        datetime  Transaction timestamp (timezone-aware UTC)
+  description      str       Free-text description
+
+Libraries available: pandas (pd), numpy (np), datetime, math, statistics, collections, itertools, functools.
+Output via print(). Maximum execution time: 30 seconds.
+
+Tips:
+- df['date_time'] is already parsed as datetime64. Use .dt accessor for grouping (e.g. df.groupby(df['date_time'].dt.year)).
+- To compute net position per symbol: df.groupby('symbol')['quantity'].sum()
+- For cost basis: group by symbol, cumsum quantity, track weighted average price on buys.
+- Always handle multi-currency data: filter by currency or convert explicitly.
+</python_sandbox_schema>`
+
 // stringSchema is a convenience helper for a simple string field schema.
 func stringSchema() *genai.Schema { return &genai.Schema{Type: genai.TypeString} }
 

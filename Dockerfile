@@ -52,13 +52,19 @@ FROM alpine:3.21
 
 # ca-certificates: needed for HTTPS calls (Yahoo Finance, Gemini, CNB).
 # tzdata: needed for correct timezone handling.
-RUN apk add --no-cache ca-certificates tzdata
+# python3 + py3-pandas + py3-numpy + py3-scipy: for LLM Python sandbox execution.
+RUN apk add --no-cache ca-certificates tzdata \
+    python3 py3-pandas py3-numpy py3-scipy && \
+    python3 -c "import pandas, numpy; print('Python sandbox ready')"
 
 WORKDIR /app
 
 ARG TARGETARCH
 ARG TARGETOS=linux
 COPY --from=builder /app/dist/portfolio-analysis-${TARGETOS}-${TARGETARCH} ./portfolio-analysis
+
+# Copy the Python sandbox runner script
+COPY backend/sandbox_runner.py ./sandbox_runner.py
 
 ENV PORT=8080
 ENV METRICS_PORT=9090

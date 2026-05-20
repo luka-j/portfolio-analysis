@@ -656,6 +656,29 @@ func (h *LLMHandler) toolSimulateScenario(_ context.Context, req ChatRequest, ar
 	return h.doSimulateScenario(req, args, userHash)
 }
 
+// toolRunPortfolioAnalysis runs the Python sandbox with the portfolio trades dataframe.
+func (h *LLMHandler) toolRunPortfolioAnalysis(ctx context.Context, data *models.FlexQueryData, args map[string]any) (map[string]any, error) {
+	if h.SandboxSvc == nil || !h.SandboxSvc.IsEnabled() {
+		return nil, fmt.Errorf("Python sandbox is not available")
+	}
+	code, _ := args["code"].(string)
+	if code == "" {
+		return nil, fmt.Errorf("code is required")
+	}
+	desc, _ := args["description"].(string)
+	slog.Info("llm: running Python analysis", "description", desc, "code_len", len(code))
+	
+	result, err := h.SandboxSvc.Execute(ctx, code, data.Trades, data.CashTransactions)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	resp := map[string]any{"output": result.Output}
+	if result.Error != "" {
+		resp["python_error"] = result.Error
+	}
+	return resp, nil
+}
+
 // isNotFound checks if the error is a GORM "record not found" error.
 func isNotFound(err error) bool {
 	// Use errors.Is with a sentinel — import gorm ErrRecordNotFound in file that calls this.
@@ -704,6 +727,9 @@ func (h *LLMHandler) buildExecutor(data *models.FlexQueryData, req ChatRequest, 
 
 		case llm.ToolGetCorrelations:
 			return h.toolGetCorrelations(ctx, data, req, call.Args)
+
+		case llm.ToolRunPortfolioAnalysis:
+			return h.toolRunPortfolioAnalysis(ctx, data, call.Args)
 
 		default:
 			return nil, fmt.Errorf("unknown tool: %s", call.Name)

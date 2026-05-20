@@ -31,6 +31,10 @@ services:
       # Enables portfolio summary and chat. Leave unset to disable LLM features.
       # GEMINI_API_KEY: ${GEMINI_API_KEY}
 
+      # Enables the Python code execution sandbox for advanced portfolio analysis.
+      # Requires the LLM features to be enabled. Default: false
+      # PYTHON_SANDBOX_ENABLED: "true"
+
       # Model used for one-shot portfolio summaries. Default: gemini-3-flash-preview
       # GEMINI_FLASH_MODEL: gemini-3-flash-preview
 

@@ -189,7 +189,8 @@ export default function LLMPage() {
     'get_historical_performance_series',
     'get_open_positions_with_cost_basis',
     'get_tax_impact',
-    'simulate_scenario'
+    'simulate_scenario',
+    'run_portfolio_analysis'
   ].includes(id))
   const [enabledTools, setEnabledTools] = usePersistentState<string[]>('llm_enabled_tools', defaultTools)
   const [toolsModalOpen, setToolsModalOpen] = useState(false)

@@ -21,6 +21,7 @@ import (
 	"portfolio-analysis/services/llm"
 	"portfolio-analysis/services/market"
 	"portfolio-analysis/services/portfolio"
+	"portfolio-analysis/services/sandbox"
 	"portfolio-analysis/services/tax"
 )
 
@@ -35,6 +36,7 @@ type LLMHandler struct {
 	MarketProvider     market.Provider
 	CurrencyGetter     market.CurrencyGetter
 	BreakdownSvc       *breakdownsvc.Service
+	SandboxSvc         *sandbox.Service
 	DefaultRiskFreeRate float64
 }
 
@@ -48,6 +50,7 @@ func NewLLMHandler(
 	mp market.Provider,
 	cg market.CurrencyGetter,
 	bs *breakdownsvc.Service,
+	sb *sandbox.Service,
 	defaultRFR float64,
 ) *LLMHandler {
 	return &LLMHandler{
@@ -59,6 +62,7 @@ func NewLLMHandler(
 		MarketProvider:     mp,
 		CurrencyGetter:     cg,
 		BreakdownSvc:       bs,
+		SandboxSvc:         sb,
 		DefaultRiskFreeRate: defaultRFR,
 	}
 }
@@ -180,6 +184,7 @@ var toolCallLabel = map[string]string{
 	llm.ToolSimulateScenario:         "Simulating scenario portfolio",
 	llm.ToolGetPortfolioBreakdown:    "Computing portfolio breakdown",
 	llm.ToolGetCorrelations:          "Computing portfolio correlations",
+	llm.ToolRunPortfolioAnalysis:     "Running Python analysis",
 	llm.ToolSubmitThinking:           "Structuring analysis & reasoning",
 }
 

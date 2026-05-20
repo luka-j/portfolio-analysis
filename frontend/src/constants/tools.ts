@@ -15,4 +15,5 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   { id: 'get_risk_metrics', label: 'Risk Metrics', description: 'Measure Max Drawdown, Sharpe, Sortino ratios.' },
   { id: 'get_fx_impact', label: 'FX Impact', description: 'Assess how currency changes have moved portfolio value. (Exposes absolute monetary values)' },
   { id: 'simulate_scenario', label: 'Simulate Scenario', description: 'Build and analyze hypothetical what-if portfolio configurations.' },
+  { id: 'run_portfolio_analysis', label: 'Python Sandbox', description: 'Run advanced custom Python scripts via pandas/numpy on the full trade dataset.' },
 ]
