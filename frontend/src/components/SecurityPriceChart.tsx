@@ -113,7 +113,8 @@ interface TradeMeta {
   action: string
 }
 
-function periodToFrom(period: Exclude<Period, 'custom'>): string {
+function periodToFrom(period: Exclude<Period, 'custom'>, portfolioInceptionDate?: string): string {
+  if (period === 'all' && portfolioInceptionDate) return portfolioInceptionDate
   const d = new Date()
   if (period === '3m') d.setMonth(d.getMonth() - 3)
   else if (period === '1y') d.setFullYear(d.getFullYear() - 1)
@@ -251,9 +252,10 @@ interface Props {
   privacy: boolean
   displayCurrency?: string   // e.g. 'CZK', 'USD', 'EUR', or 'Original'
   acctModel?: string         // 'historical' | 'spot'
+  portfolioInceptionDate?: string
 }
 
-export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, acctModel }: Props) {
+export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, acctModel, portfolioInceptionDate }: Props) {
   // period and customFrom are shared across all chart instances via localStorage.
   const [period, setPeriod] = usePersistentState<Period>('security-chart-period', '1y')
   const [customFrom, setCustomFrom] = usePersistentState('security-chart-custom-from', '')
@@ -276,7 +278,7 @@ export function SecurityPriceChart({ symbol, trades, privacy, displayCurrency, a
     return () => document.removeEventListener('mousedown', onMouseDown)
   }, [])
 
-  const from = period === 'custom' ? customFrom : periodToFrom(period)
+  const from = period === 'custom' ? customFrom : periodToFrom(period, portfolioInceptionDate)
 
   // Translate the UI 'Original' sentinel into accounting_model=original for the backend.
   const isOriginal = displayCurrency === 'Original'

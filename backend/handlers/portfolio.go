@@ -286,6 +286,12 @@ func (h *PortfolioHandler) GetValue(c *gin.Context) {
 	}
 
 	result.HasTransactions = len(data.Trades) > 0 || len(data.CashTransactions) > 0
+
+	earliest, _ := DateRangeFromData(data)
+	if !earliest.IsZero() {
+		result.FirstTransactionDate = earliest.Format("2006-01-02")
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 

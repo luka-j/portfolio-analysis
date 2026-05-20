@@ -58,6 +58,7 @@ export default function PortfolioPage() {
   const [customFrom, setCustomFrom] = usePersistentState('portfolio_customFrom', defaultCustomFrom)
   const [customTo, setCustomTo] = usePersistentState('portfolio_customTo', formatDate(new Date()))
   const [isPickerOpen, setIsPickerOpen] = useState(false)
+  const [isPeriodMenuOpen, setIsPeriodMenuOpen] = useState(false)
 
   const periodOptions = [
     { label: '1D', value: '1d' },
@@ -68,6 +69,7 @@ export default function PortfolioPage() {
 
   const [positions, setPositions] = useState<PositionValue[]>([])
   const [totalValue, setTotalValue] = useState(0)
+  const [firstTransactionDate, setFirstTransactionDate] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
   const [valueRefreshing, setValueRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -99,6 +101,7 @@ export default function PortfolioPage() {
         const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
         setPositions(sorted)
         setTotalValue(val.value || 0)
+        setFirstTransactionDate(val.first_transaction_date)
         setLoading(false)
         setValueRefreshing(true)
       }
@@ -111,6 +114,7 @@ export default function PortfolioPage() {
       const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
       setPositions(sorted)
       setTotalValue(val.value || 0)
+      setFirstTransactionDate(val.first_transaction_date)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load')
     } finally {
@@ -287,32 +291,6 @@ export default function PortfolioPage() {
         <div className="flex flex-wrap justify-center gap-4 mb-6">
           <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
           <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
-          {/* Period selector */}
-          <div className="relative">
-            <SegmentedControl
-              label="Period"
-              options={periodOptions}
-              value={period}
-              onChange={p => {
-                if (p === 'custom') {
-                  setIsPickerOpen(true)
-                } else {
-                  setIsPickerOpen(false)
-                }
-                setPeriod(p)
-              }}
-            />
-            {period === 'custom' && isPickerOpen && (
-              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50">
-                <DateRangePicker
-                  initialFrom={customFrom}
-                  initialTo={customTo}
-                  onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); setIsPickerOpen(false) }}
-                  onCancel={() => setIsPickerOpen(false)}
-                />
-              </div>
-            )}
-          </div>
         </div>
 
         {error && <ErrorAlert message={error} className="mb-10" />}
@@ -336,17 +314,72 @@ export default function PortfolioPage() {
                 return (
                   <div
                     key={col}
-                    className={`${spanClass[col]} flex items-center ${isRight ? 'justify-end' : ''} cursor-pointer select-none hover:text-slate-300 transition-colors`}
-                    onClick={() => handleSort(col)}
+                    className={`${spanClass[col]} flex items-center ${isRight ? 'justify-end' : ''} select-none`}
                   >
                     {col === 'change' ? (
-                      <span className="flex items-center gap-1">
-                        {labels[col]}
-                        {phLoading && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500/60 animate-pulse inline-block" />}
-                        <SortIndicator col={col} />
-                      </span>
+                      <div className="relative flex items-center gap-0.5">
+                        <div 
+                          className="flex items-center gap-1 cursor-pointer hover:text-slate-300 transition-colors"
+                          onClick={() => handleSort(col)}
+                        >
+                          Change ({period === 'custom' ? 'Custom' : period.toUpperCase()})
+                          <SortIndicator col={col} />
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setIsPeriodMenuOpen(!isPeriodMenuOpen); }}
+                          className="ml-0.5 p-0.5 rounded hover:bg-white/10 text-slate-400 focus:outline-none"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        {phLoading && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500/60 animate-pulse inline-block ml-1" />}
+                        
+                        {isPeriodMenuOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setIsPeriodMenuOpen(false)} />
+                            <div className="absolute top-full right-0 mt-2 z-50 bg-surface border border-border-dim/80 rounded-xl shadow-2xl py-1 w-36 font-normal">
+                              {periodOptions.map(opt => (
+                                <button
+                                  key={opt.value}
+                                  className={`w-full text-left px-4 py-2 text-sm hover:bg-white/5 ${period === opt.value ? 'text-indigo-400' : 'text-slate-300'}`}
+                                  onClick={() => {
+                                    if (opt.value === 'custom') {
+                                      setIsPickerOpen(true)
+                                    } else {
+                                      setIsPickerOpen(false)
+                                    }
+                                    setPeriod(opt.value)
+                                    setIsPeriodMenuOpen(false)
+                                  }}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                        {period === 'custom' && isPickerOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setIsPickerOpen(false)} />
+                            <div className="absolute top-full right-0 mt-2 z-50">
+                              <DateRangePicker
+                                initialFrom={customFrom}
+                                initialTo={customTo}
+                                onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); setIsPickerOpen(false) }}
+                                onCancel={() => setIsPickerOpen(false)}
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
                     ) : (
-                      <>{labels[col]}<SortIndicator col={col} /></>
+                      <div 
+                        className="flex items-center cursor-pointer hover:text-slate-300 transition-colors" 
+                        onClick={() => handleSort(col)}
+                      >
+                        {labels[col]}<SortIndicator col={col} />
+                      </div>
                     )}
                   </div>
                 )
@@ -596,7 +629,7 @@ export default function PortfolioPage() {
                     </div>
 
                     {isExpanded && (
-                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} isin={pos.isin} name={pos.name} displayCurrency={currency} acctModel={acctModel} privacy={privacy} onTradeDeleted={loadData} />
+                      <TradeDetail symbol={pos.symbol} exchange={pos.listing_exchange} isin={pos.isin} name={pos.name} displayCurrency={currency} acctModel={acctModel} privacy={privacy} portfolioInceptionDate={firstTransactionDate} onTradeDeleted={loadData} />
                     )}
                   </div>
                 )

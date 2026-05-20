@@ -13,6 +13,7 @@ interface Props {
   displayCurrency: string
   acctModel: 'historical' | 'spot'
   privacy: boolean
+  portfolioInceptionDate?: string
   onTradeDeleted: () => void
 }
 
@@ -39,7 +40,7 @@ function entryMethodBadge(method: string | undefined) {
 }
 
 /** Expanded trade history panel, rendered inline below a portfolio row. */
-export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acctModel, privacy, onTradeDeleted }: Props) {
+export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acctModel, privacy, portfolioInceptionDate, onTradeDeleted }: Props) {
   const [trades, setTrades] = useState<TradeEntry[]>([])
   const [resolvedDisplayCurrency, setResolvedDisplayCurrency] = useState('')
   const [loading, setLoading] = useState(true)
@@ -102,7 +103,7 @@ export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acc
         )}
       </div>
       <div className="mb-4">
-        <SecurityPriceChart symbol={symbol} trades={trades} privacy={privacy} displayCurrency={displayCurrency} acctModel={acctModel} />
+        <SecurityPriceChart symbol={symbol} trades={trades} privacy={privacy} displayCurrency={displayCurrency} acctModel={acctModel} portfolioInceptionDate={portfolioInceptionDate} />
       </div>
       <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em] mb-2 px-3">Transaction History</p>
       <div className="bg-surface/40 border border-white/5 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-3xl ring-1 ring-white/5">

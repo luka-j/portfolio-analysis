@@ -88,6 +88,7 @@ export interface PortfolioValueResponse {
   currency: string;
   positions: PositionValue[];
   has_transactions: boolean;
+  first_transaction_date?: string;
   pending_cash?: number;
 }
 
