@@ -183,6 +183,8 @@ export default function LLMPage() {
   const toolCallShownAt = useRef<number>(0)
 
   // Settings
+  const [globalCurrency] = usePersistentState<string>('app_currency', 'CZK')
+  const [acctModel] = usePersistentState<string>('portfolio_acctModel', 'historical')
   const [model, setModel] = useState<ModelChoice>('flash')
   const defaultTools = AVAILABLE_TOOLS.map(t => t.id).filter(id => ![
     'get_fx_impact',
@@ -256,7 +258,7 @@ export default function LLMPage() {
     abortControllerRef.current = new AbortController()
 
     try {
-      const res = await compareScenariosLLM(aId, targetId, question, 'USD', model)
+      const res = await compareScenariosLLM(aId, targetId, question, globalCurrency, model)
       setLoading(false)
       setMessages(prev => [...prev, { role: 'assistant', content: res.response, cached: res.cached }])
     } catch (err) {
@@ -264,7 +266,7 @@ export default function LLMPage() {
       const errMsg = (err as Error)?.message || 'Failed to compare scenarios.'
       setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${errMsg}` }])
     }
-  }, [active, activeLabel, scenarios, model])
+  }, [active, activeLabel, scenarios, model, globalCurrency])
 
   const handleSend = async (message: string, promptType = 'freeform', displayMessage?: string, extraParams?: Partial<LLMChatRequest>, usePageModel = false) => {
     if (!message && promptType === 'freeform') return
@@ -290,7 +292,8 @@ export default function LLMPage() {
       const req: Parameters<typeof postLLMChat>[0] = {
         prompt_type: promptType,
         message: promptType === 'freeform' ? message : '',
-        currency: 'USD',
+        currency: globalCurrency,
+        accounting_model: acctModel,
         scenario_id: active,
         ...(usePageModel || !isCanned ? { model } : {}),
         ...extraParams,
@@ -394,7 +397,8 @@ export default function LLMPage() {
       const req: Parameters<typeof postLLMChat>[0] = {
         prompt_type: promptType,
         message: promptType === 'freeform' ? message : '',
-        currency: 'USD',
+        currency: globalCurrency,
+        accounting_model: acctModel,
         model,
         force_refresh: true, // Bypass cache
         ...extraParams,
