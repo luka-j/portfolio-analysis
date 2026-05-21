@@ -33,7 +33,6 @@ func (h *StatsHandler) GetDrawdown(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -46,7 +45,7 @@ func (h *StatsHandler) GetDrawdown(c *gin.Context) {
 		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
-	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
 		return
@@ -71,7 +70,7 @@ func (h *StatsHandler) GetDrawdown(c *gin.Context) {
 			if sym == "" {
 				continue
 			}
-			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel, cachedOnly)
+			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel)
 			if err != nil {
 				results = append(results, models.DrawdownResult{Symbol: sym, Error: "could not fetch price data: " + err.Error()})
 				continue
@@ -138,7 +137,6 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -151,7 +149,7 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
-	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
 		return
@@ -189,7 +187,7 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 				goto computeBeta
 			}
 
-			sRet, _, sEnd, retErr := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
+			sRet, _, sEnd, retErr := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel)
 			if retErr != nil {
 				rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: benchSym, Error: "computing scenario returns: " + retErr.Error()})
 				goto computeBeta
@@ -208,7 +206,7 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 				}
 			}
 		} else {
-			priceMap, priceErr := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, benchSym, from, to, currency, acctModel, cachedOnly)
+			priceMap, priceErr := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, benchSym, from, to, currency, acctModel)
 			if priceErr != nil {
 				rollingResults = append(rollingResults, models.RollingSeriesResult{
 					Symbol: benchSym,
@@ -252,7 +250,7 @@ func (h *StatsHandler) GetRolling(c *gin.Context) {
 				if sym == "" {
 					continue
 				}
-				priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel, cachedOnly)
+				priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel)
 				if err != nil {
 					rollingResults = append(rollingResults, models.RollingSeriesResult{Symbol: sym, Error: "could not fetch price data: " + err.Error()})
 					continue

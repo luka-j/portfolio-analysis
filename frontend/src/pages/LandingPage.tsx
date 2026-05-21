@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import ReactMarkdown from 'react-markdown'
 import NavBar from '../components/NavBar'
 import HoverTooltip from '../components/HoverTooltip'
 import UploadResultModal from '../components/UploadResultModal'
 import { useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getPortfolioValueMulti, getPortfolioHistory, getPortfolioStats, getPortfolioReturns,
   uploadFlexQuery, uploadEtradeBenefits, uploadEtradeSales,
   getLLMSummary,
-  type DailyValue, type ImportedTransaction, type ImportedCorporateAction,
+  type ImportedTransaction, type ImportedCorporateAction,
 } from '../api'
 import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFromDate, RECHARTS_TOOLTIP_STYLE, RECHARTS_LABEL_STYLE, RECHARTS_ITEM_STYLE } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
@@ -24,31 +25,14 @@ const PERIODS = [
   { label: 'All', months: 0 },
 ]
 
-
-
 export default function LandingPage() {
   const { privacy, togglePrivacy } = usePrivacy()
   const { active } = useScenario()
   const [currency, setCurrency] = usePersistentState<string>('app_currency', 'CZK')
   const [period, setPeriod] = usePersistentState('landing_period', 0)
   const [chartMode, setChartMode] = usePersistentState<'value' | 'twr' | 'mwr'>('landing_chartMode', 'value')
-  const [portfolioValues, setPortfolioValues] = useState<Record<string, number>>({})
-  const [hasTransactions, setHasTransactions] = useState<boolean | null>(null)
-  const [history, setHistory] = useState<DailyValue[]>([])
-  const [twrHistory, setTwrHistory] = useState<DailyValue[]>([])
-  const [mwrHistory, setMwrHistory] = useState<DailyValue[]>([])
-  const [stats, setStats] = useState<Record<string, number> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [chartLoading, setChartLoading] = useState(false)
-  // valueRefreshing: cached value shown, fresh fetch still in flight
-  const [valueRefreshing, setValueRefreshing] = useState(false)
-  // chartRefreshing: cached chart data shown, fresh fetch still in flight
-  const [chartRefreshing, setChartRefreshing] = useState(false)
-  const [error, setError] = useState('')
-  const [uploading, setUploading] = useState(false)
+  
   const [uploadExpanded, setUploadExpanded] = useState(false)
-  // uploadCount increments after every successful upload so the LLM summary re-fetches.
-  const [uploadCount, setUploadCount] = useState(0)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadModalTransactions, setUploadModalTransactions] = useState<ImportedTransaction[]>([])
   const [uploadModalCorporateActions, setUploadModalCorporateActions] = useState<ImportedCorporateAction[]>([])
@@ -57,21 +41,198 @@ export default function LandingPage() {
 
   const defaultPeriod = [0, 6].includes(new Date().getDay()) ? '1w' : '1d'
   const [llmPeriod, setLlmPeriod] = usePersistentState('landing_llmPeriod', defaultPeriod)
-  const [llmSummary, setLlmSummary] = useState('')
-  const [llmSummaryLoading, setLlmSummaryLoading] = useState(false)
-  const [llmAvailable, setLlmAvailable] = useState<boolean | null>(null)
-  const [llmForceRefresh, setLlmForceRefresh] = useState(false)
-
-  const loadGenRef = useRef(0)
-  // statsRefreshing: cached stats shown, fresh fetch still in flight
-  const [statsRefreshing, setStatsRefreshing] = useState(false)
 
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const cycleCurrency = () => setCurrency(c => {
     const idx = (CURRENCIES as readonly string[]).indexOf(c)
     return CURRENCIES[(idx + 1) % CURRENCIES.length]
   })
+
+  // Queries
+  const { data: valData, isLoading: valLoading, isFetching: valueRefreshing, error: valErrorObj } = useQuery({
+    queryKey: ['portfolioValueMulti', active],
+    queryFn: () => getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', undefined, active),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const portfolioValues = useMemo(() => {
+    const next: Record<string, number> = {}
+    if (!valData) return next
+    for (const curr of CURRENCIES) {
+      let sum = 0
+      for (const pos of valData.positions ?? []) {
+        const v = pos.values?.[curr]
+        if (typeof v === 'number') sum += v
+      }
+      if (sum > 0) {
+        next[curr] = sum
+      }
+    }
+    if (Object.keys(next).length === 0) {
+      next[currency] = valData.value
+    }
+    return next
+  }, [valData, currency])
+
+  const hasTransactions = valData ? valData.has_transactions : null
+  const currValue = portfolioValues[currency] ?? 0
+  const shouldShowLlm = hasTransactions === true && currValue > 0
+
+  const fromDate = useMemo(() => getFromDate(period), [period])
+  const toDate = useMemo(() => formatDate(new Date()), [period])
+
+  const { data: statsData, isFetching: statsRefreshing } = useQuery({
+    queryKey: ['portfolioStats', period, currency, active],
+    queryFn: () => getPortfolioStats(fromDate, toDate, currency, 'historical', undefined, active),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const stats = statsData?.statistics ?? null
+
+  const { data: valueHistoryData, isLoading: valHistLoading, isFetching: valueHistFetching } = useQuery({
+    queryKey: ['portfolioValueHistory', period, currency, active],
+    queryFn: () => getPortfolioHistory(fromDate, toDate, currency, 'historical', undefined, active),
+    staleTime: 5 * 60 * 1000,
+    enabled: chartMode === 'value',
+  })
+
+  const { data: twrHistoryData, isLoading: twrHistLoading, isFetching: twrHistFetching } = useQuery({
+    queryKey: ['portfolioTwrHistory', period, currency, active],
+    queryFn: () => getPortfolioReturns(fromDate, toDate, currency, 'historical', 'twr', undefined, active),
+    staleTime: 5 * 60 * 1000,
+    enabled: chartMode === 'twr',
+  })
+
+  const { data: mwrHistoryData, isLoading: mwrHistLoading, isFetching: mwrHistFetching } = useQuery({
+    queryKey: ['portfolioMwrHistory', period, currency, active],
+    queryFn: () => getPortfolioReturns(fromDate, toDate, currency, 'historical', 'mwr', undefined, active),
+    staleTime: 5 * 60 * 1000,
+    enabled: chartMode === 'mwr',
+  })
+
+  const { data: llmSummaryData, isLoading: llmSummaryLoading, error: llmSummaryError } = useQuery({
+    queryKey: ['llmSummary', llmPeriod, active],
+    queryFn: () => getLLMSummary(llmPeriod, false, active),
+    staleTime: 5 * 60 * 1000,
+    enabled: shouldShowLlm,
+  })
+
+  const llmSummary = useMemo(() => {
+    if (llmSummaryError) {
+      if ((llmSummaryError as Error)?.message?.includes('GEMINI_API_KEY')) {
+        return "Market summary unavailable. Please configure GEMINI_API_KEY."
+      }
+      return "Failed to generate market summary."
+    }
+    return llmSummaryData?.summary ?? ''
+  }, [llmSummaryData, llmSummaryError])
+
+  const llmAvailable = useMemo(() => {
+    if (llmSummaryError) {
+      if ((llmSummaryError as Error)?.message?.includes('GEMINI_API_KEY')) {
+        return false
+      }
+      return true
+    }
+    if (llmSummaryData) return true
+    return null
+  }, [llmSummaryData, llmSummaryError])
+
+  const [llmRefreshing, setLlmRefreshing] = useState(false)
+  const handleLlmRefresh = async () => {
+    setLlmRefreshing(true)
+    try {
+      const res = await getLLMSummary(llmPeriod, true, active)
+      queryClient.setQueryData(['llmSummary', llmPeriod, active], res)
+    } catch {
+      // swallow
+    } finally {
+      setLlmRefreshing(false)
+    }
+  }
+
+  const invalidateAll = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['portfolioValueMulti'] })
+    queryClient.invalidateQueries({ queryKey: ['portfolioStats'] })
+    queryClient.invalidateQueries({ queryKey: ['portfolioValueHistory'] })
+    queryClient.invalidateQueries({ queryKey: ['portfolioTwrHistory'] })
+    queryClient.invalidateQueries({ queryKey: ['portfolioMwrHistory'] })
+    queryClient.invalidateQueries({ queryKey: ['llmSummary'] })
+  }, [queryClient])
+
+  // Mutations
+  const uploadFlexMutation = useMutation({
+    mutationFn: uploadFlexQuery,
+    onSuccess: (res) => {
+      setUploadModalTransactions(res.transactions ?? [])
+      setUploadModalCorporateActions(res.corporate_actions ?? [])
+      invalidateAll()
+    },
+    onError: (err) => {
+      setUploadModalError(err instanceof Error ? err.message : 'Upload failed')
+    }
+  })
+
+  const uploadEtradeBenefitsMutation = useMutation({
+    mutationFn: uploadEtradeBenefits,
+    onSuccess: (res) => {
+      setUploadModalTransactions(res.transactions ?? [])
+      setUploadModalCorporateActions([])
+      invalidateAll()
+    },
+    onError: (err) => {
+      setUploadModalError(err instanceof Error ? err.message : 'Upload failed')
+    }
+  })
+
+  const uploadEtradeSalesMutation = useMutation({
+    mutationFn: uploadEtradeSales,
+    onSuccess: (res) => {
+      setUploadModalTransactions(res.transactions ?? [])
+      setUploadModalCorporateActions([])
+      invalidateAll()
+    },
+    onError: (err) => {
+      setUploadModalError(err instanceof Error ? err.message : 'Upload failed')
+    }
+  })
+
+  const uploading = uploadFlexMutation.isPending || uploadEtradeBenefitsMutation.isPending || uploadEtradeSalesMutation.isPending
+
+  const handleModalClose = useCallback(async () => {
+    setShowUploadModal(false)
+    setUploadModalTransactions([])
+    setUploadModalCorporateActions([])
+    setUploadModalError(null)
+    if (pendingFirstUpload) {
+      setPendingFirstUpload(false)
+      navigate('/portfolio', { state: { firstUpload: true } })
+    } else {
+      invalidateAll()
+    }
+  }, [pendingFirstUpload, navigate, invalidateAll])
+
+  const createUploadHandler = (mutation: any) =>
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      setPendingFirstUpload(hasTransactions === false)
+      setUploadModalTransactions([])
+      setUploadModalCorporateActions([])
+      setUploadModalError(null)
+      setShowUploadModal(true)
+      mutation.mutate(file, {
+        onSettled: () => {
+          e.target.value = ''
+        }
+      })
+    }
+
+  const handleUpload = createUploadHandler(uploadFlexMutation)
+  const handleEtradeBenefitsUpload = createUploadHandler(uploadEtradeBenefitsMutation)
+  const handleEtradeSalesUpload = createUploadHandler(uploadEtradeSalesMutation)
 
   const digIntoThis = () => {
     const periodLabel = llmPeriod === '1d' ? 'past day' : llmPeriod === '1w' ? 'past week' : 'past month'
@@ -90,241 +251,29 @@ export default function LandingPage() {
     })
   }
 
-  // applyMulti reads the primary value for the currently-selected currency
-  // and also snapshots every per-currency scalar the backend computed in a
-  // single pass (market data fetched once, FX conversions local + parallel).
-  const applyMulti = useCallback((res: { value: number; has_transactions: boolean; positions?: { values?: Record<string, number> }[] }) => {
-    const next: Record<string, number> = {}
-    for (const curr of CURRENCIES) {
-      let sum = 0
-      for (const pos of res.positions ?? []) {
-        const v = pos.values?.[curr]
-        if (typeof v === 'number') sum += v
-      }
-      if (sum > 0) next[curr] = sum
-    }
-    if (Object.keys(next).length === 0) {
-      // Fall back to the primary-currency scalar when positions are absent
-      // (e.g. empty portfolio).
-      next[currency] = res.value
-    }
-    setPortfolioValues(prev => ({ ...prev, ...next }))
-    setHasTransactions(res.has_transactions)
-  }, [currency])
-
-  // Value loader: one multi-currency request for all CURRENCIES. Runs only when
-  // currency changes (for the hero scalar) or after an upload. The period picker
-  // does not affect this series, so switching 1M ↔ 1Y no longer re-fetches prices.
-  useEffect(() => {
-    loadGenRef.current += 1
-    const gen = loadGenRef.current
-    const controller = new AbortController()
-    setLoading(true)
-    setError('')
-    let freshArrived = false
-
-    // 1. Cached call — paint the hero instantly if anything is cached.
-    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', true, controller.signal, active)
-      .then(res => {
-        if (gen === loadGenRef.current && !freshArrived && res.value > 0) {
-          applyMulti(res)
-          setLoading(false)
-          setValueRefreshing(true)
-        }
-      })
-      .catch(() => {})
-
-    // 2. Fresh call — authoritative, clears the stale indicator.
-    getPortfolioValueMulti(CURRENCIES as unknown as string[], 'historical', false, controller.signal, active)
-      .then(res => {
-        if (gen !== loadGenRef.current) return
-        freshArrived = true
-        applyMulti(res)
-        setValueRefreshing(false)
-        setLoading(false)
-      })
-      .catch(err => {
-        if (gen !== loadGenRef.current) return
-        if ((err as Error)?.name === 'AbortError') return
-        setError(err instanceof Error ? err.message : 'Failed to load data')
-        setLoading(false)
-        setValueRefreshing(false)
-      })
-
-    return () => { controller.abort() }
-  }, [currency, uploadCount, applyMulti, active])
-
-  // Stats loader: depends on period (and currency / upload count). Split from
-  // the value loader so period switches don't re-trigger the multi-currency
-  // price pass. Uses the same cached-then-fresh pattern for instant feedback.
-  useEffect(() => {
-    const controller = new AbortController()
-    let cancelled = false
-    let freshArrived = false
-    const from = getFromDate(period)
-    const to = formatDate(new Date())
-    setStatsRefreshing(false)
-
-    getPortfolioStats(from, to, currency, 'historical', true, controller.signal, active)
-      .then(st => {
-        if (cancelled || freshArrived) return
-        if (st.statistics && Object.keys(st.statistics).length > 0) {
-          setStats(st.statistics)
-          setStatsRefreshing(true)
-        }
-      })
-      .catch(() => {})
-
-    getPortfolioStats(from, to, currency, 'historical', false, controller.signal, active)
-      .then(st => {
-        if (cancelled) return
-        freshArrived = true
-        setStats(st.statistics)
-        setStatsRefreshing(false)
-      })
-      .catch(() => { if (!cancelled) setStatsRefreshing(false) })
-
-    return () => { cancelled = true; controller.abort() }
-  }, [currency, period, uploadCount, active])
-
-  // Re-fetch triggered by explicit post-upload callback.
-  const loadData = useCallback(() => {
-    setUploadCount(c => c + 1)
-  }, [])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    let cancelled = false
-    let freshArrived = false
-
-    const from = getFromDate(period)
-    const to = formatDate(new Date())
-    setChartLoading(true)
-    setChartRefreshing(false)
-
-    // Only fetch the series for the currently-displayed mode.
-    // Previously-loaded data for other modes is retained in state.
-    const fetchFn = chartMode === 'value'
-      ? (cO: boolean, s?: AbortSignal) => getPortfolioHistory(from, to, currency, 'historical', cO, s, active)
-      : (cO: boolean, s?: AbortSignal) => getPortfolioReturns(from, to, currency, 'historical', chartMode, cO, s, active)
-    const setter = chartMode === 'value' ? setHistory : chartMode === 'twr' ? setTwrHistory : setMwrHistory
-
-    // 1. Cached call — show immediately if non-empty, mark as stale
-    fetchFn(true, controller.signal).then(res => {
-      if (!cancelled && !freshArrived && res.data.length > 0) {
-        setter(res.data)
-        setChartLoading(false)
-        setChartRefreshing(true)
-      }
-    }).catch(() => {})
-
-    // 2. Fresh call — always overwrites cached, clears stale indicator
-    fetchFn(false, controller.signal).then(res => {
-      if (!cancelled) {
-        freshArrived = true
-        setter(res.data)
-      }
-    }).catch(() => {}).finally(() => {
-      if (!cancelled) {
-        setChartLoading(false)
-        setChartRefreshing(false)
-      }
-    })
-
-    return () => { cancelled = true; controller.abort() }
-  }, [currency, period, chartMode, active])
-
-  const currValue = portfolioValues[currency] ?? 0
-  // Only show LLM when we know there are trades AND the portfolio has a non-zero value.
-  const shouldShowLlm = hasTransactions === true && currValue > 0
-
-  useEffect(() => {
-    if (!shouldShowLlm) return
-    let cancelled = false;
-    const fetchSummary = async (forceRefresh: boolean) => {
-      setLlmSummaryLoading(true)
-      try {
-        const res = await getLLMSummary(llmPeriod, forceRefresh, active)
-        if (!cancelled) {
-          setLlmSummary(res.summary)
-          setLlmAvailable(true)
-        }
-      } catch (err) {
-        const error = err as Error
-        if (!cancelled) {
-          if (error?.message?.includes('GEMINI_API_KEY')) {
-            setLlmAvailable(false) // Hide entirely
-            setLlmSummary("Market summary unavailable. Please configure GEMINI_API_KEY.")
-          } else {
-            setLlmAvailable(true) // Keep it shown but show error
-            setLlmSummary("Failed to generate market summary.")
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          setLlmSummaryLoading(false)
-          setLlmForceRefresh(false)
-        }
-      }
-    }
-    fetchSummary(llmForceRefresh)
-    return () => { cancelled = true }
-  }, [llmPeriod, uploadCount, llmForceRefresh, shouldShowLlm, active])
-
-  const handleModalClose = useCallback(async () => {
-    setShowUploadModal(false)
-    setUploadModalTransactions([])
-    setUploadModalCorporateActions([])
-    setUploadModalError(null)
-    setUploadCount(c => c + 1)
-    if (pendingFirstUpload) {
-      setPendingFirstUpload(false)
-      navigate('/portfolio', { state: { firstUpload: true } })
-    } else {
-      await loadData()
-    }
-  }, [pendingFirstUpload, navigate, loadData])
-
-  type UploadFn = (file: File) => Promise<{ transactions: ImportedTransaction[]; corporate_actions?: ImportedCorporateAction[] }>
-  const createUploadHandler = (uploadFn: UploadFn) =>
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      if (!file) return
-      setPendingFirstUpload(hasTransactions === false)
-      setUploadModalTransactions([])
-      setUploadModalCorporateActions([])
-      setUploadModalError(null)
-      setShowUploadModal(true)
-      setUploading(true)
-      try {
-        const res = await uploadFn(file)
-        setUploadModalTransactions(res.transactions ?? [])
-        setUploadModalCorporateActions(res.corporate_actions ?? [])
-      } catch (err) {
-        setUploadModalError(err instanceof Error ? err.message : 'Upload failed')
-      } finally {
-        setUploading(false)
-        e.target.value = ''
-      }
-    }
-
-  const handleUpload = createUploadHandler(uploadFlexQuery)
-  const handleEtradeBenefitsUpload = createUploadHandler(uploadEtradeBenefits)
-  const handleEtradeSalesUpload = createUploadHandler(uploadEtradeSales)
-
-
-  const chartData = (() => {
+  const chartData = useMemo(() => {
     if (chartMode === 'value') {
-      return history.map(d => ({ date: d.date, value: d.value }))
+      return valueHistoryData?.data.map(d => ({ date: d.date, value: d.value })) ?? []
     }
     if (chartMode === 'twr') {
-      return twrHistory.map(d => ({ date: d.date, value: d.value }))
+      return twrHistoryData?.data.map(d => ({ date: d.date, value: d.value })) ?? []
     }
     if (chartMode === 'mwr') {
-      return mwrHistory.map(d => ({ date: d.date, value: d.value }))
+      return mwrHistoryData?.data.map(d => ({ date: d.date, value: d.value })) ?? []
     }
     return []
-  })()
+  }, [chartMode, valueHistoryData, twrHistoryData, mwrHistoryData])
+
+  const chartLoading = chartMode === 'value' ? valHistLoading
+    : chartMode === 'twr' ? twrHistLoading
+    : mwrHistLoading
+
+  const chartRefreshing = chartMode === 'value' ? !!valueHistoryData && valueHistFetching
+    : chartMode === 'twr' ? !!twrHistoryData && twrHistFetching
+    : !!mwrHistoryData && mwrHistFetching
+
+  const loading = valLoading && hasTransactions === null
+  const error = valErrorObj instanceof Error ? valErrorObj.message : ''
 
   const mwr = typeof stats?.mwr === 'number' ? stats.mwr * 100 : null
   const twr = typeof stats?.twr === 'number' ? stats.twr * 100 : null
@@ -416,15 +365,15 @@ export default function LandingPage() {
                <div className="relative group">
                  <button
                    id="llm-refresh-btn"
-                   onClick={() => { if (!llmSummaryLoading) setLlmForceRefresh(true) }}
-                   disabled={llmSummaryLoading}
+                   onClick={() => { if (!llmSummaryLoading && !llmRefreshing) handleLlmRefresh() }}
+                   disabled={llmSummaryLoading || llmRefreshing}
                    className="w-5 h-5 flex items-center justify-center rounded-md text-indigo-300/40 hover:text-indigo-300 hover:bg-white/[0.07] transition-all duration-200 active:scale-90 disabled:opacity-30 disabled:cursor-not-allowed"
                    aria-label="Force refresh market summary"
                  >
                    <svg
                      xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
                      fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                     className={llmSummaryLoading ? 'animate-spin' : ''}
+                     className={llmSummaryLoading || llmRefreshing ? 'animate-spin' : ''}
                    >
                      <polyline points="23 4 23 10 17 10"/>
                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>

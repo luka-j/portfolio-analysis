@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import SegmentedControl from '../components/SegmentedControl'
@@ -269,7 +270,6 @@ export default function ScenarioEditPage() {
   const editId = params.get('id') ? parseInt(params.get('id')!) : null
 
   const [loading, setLoading] = useState(editId !== null)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState(false)
 
@@ -384,7 +384,7 @@ export default function ScenarioEditPage() {
   const loadHoldings = useCallback(async () => {
     setHoldingsLoading(true)
     try {
-      const result = await getPortfolioValue('USD', 'historical', false, null)
+      const result = await getPortfolioValue('USD', 'historical', null)
       setHoldings(result.positions.filter(p => p.quantity > 0))
     } catch (e) {
       setError((e as Error).message)
@@ -472,40 +472,50 @@ export default function ScenarioEditPage() {
     return { base: 'empty' as BaseMode, basket, backtest }
   }
 
-  async function handleSave() {
-    setSaving(true)
-    setError(null)
-    try {
+  const saveMutation = useMutation({
+    mutationFn: async () => {
       const spec = buildSpec()
-      let saved
       if (editId !== null) {
-        saved = await updateScenario(editId, { name, pinned, spec })
+        return await updateScenario(editId, { name, pinned, spec })
       } else {
-        saved = await createScenario(spec, name, pinned)
+        return await createScenario(spec, name, pinned)
       }
+    },
+    onSuccess: async (saved) => {
       await refresh()
       setActive(saved.id)
       navigate(-1)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
+    },
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : String(e))
+    },
+  })
 
-  async function doDelete() {
-    if (!editId) return
-    setSaving(true)
-    try {
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!editId) return
       await deleteScenario(editId)
+    },
+    onSuccess: async () => {
       await refresh()
       setPendingDelete(false)
       navigate(-1)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setSaving(false)
-    }
+    },
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : String(e))
+    },
+  })
+
+  const saving = saveMutation.isPending || deleteMutation.isPending
+
+  const handleSave = () => {
+    setError(null)
+    saveMutation.mutate()
+  }
+
+  const doDelete = () => {
+    setError(null)
+    deleteMutation.mutate()
   }
 
   // ---- Client-side validation ----

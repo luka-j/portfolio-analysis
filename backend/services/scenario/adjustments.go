@@ -16,12 +16,12 @@ func priceAt(mp market.Provider, querySymbol string, dt time.Time) (float64, err
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	if dt.IsZero() || !dt.Before(today) {
-		return mp.GetLatestPrice(querySymbol, false)
+		return mp.GetLatestPrice(querySymbol)
 	}
 	// Fetch a small window ending at dt to tolerate weekends/holidays.
 	start := dt.AddDate(0, 0, -10)
 	end := time.Date(dt.Year(), dt.Month(), dt.Day(), 23, 59, 59, 0, time.UTC)
-	pts, err := mp.GetHistory(querySymbol, start, end, false)
+	pts, err := mp.GetHistory(querySymbol, start, end)
 	if err != nil {
 		return 0, fmt.Errorf("fetching history for %s at %s: %w", querySymbol, dt.Format("2006-01-02"), err)
 	}

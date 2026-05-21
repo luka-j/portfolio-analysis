@@ -156,7 +156,7 @@ func (s *Service) lookupNames(userHash string, symbols []string) map[string]stri
 
 // getPortfolioJSON creates a compact JSON string of the latest portfolio weights with security names.
 func (s *Service) getPortfolioJSON(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) string {
-	result, err := s.PortfolioService.GetCurrentValue(data, currency, acctModel, false)
+	result, err := s.PortfolioService.GetCurrentValue(data, currency, acctModel)
 	if err != nil {
 		slog.Warn("llm: getPortfolioJSON failed to get current value", "err", err)
 		return ""

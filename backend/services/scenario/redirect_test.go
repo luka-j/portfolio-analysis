@@ -11,14 +11,14 @@ type mockRedirectMarketProvider struct {
 	prices map[string]float64
 }
 
-func (m *mockRedirectMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockRedirectMarketProvider) GetLatestPrice(symbol string) (float64, error) {
 	if p, ok := m.prices[symbol]; ok {
 		return p, nil
 	}
 	return 1.0, nil
 }
 
-func (m *mockRedirectMarketProvider) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+func (m *mockRedirectMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	if p, ok := m.prices[symbol]; ok {
 		return []models.PricePoint{{Date: to, Close: p, AdjClose: p}}, nil
 	}

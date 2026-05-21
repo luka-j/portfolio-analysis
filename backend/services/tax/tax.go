@@ -66,7 +66,7 @@ func (s *Service) GetReport(data *models.FlexQueryData, year int, universalRates
 			}
 			return r, nil
 		}
-		return s.FXService.GetRate(currency, "CZK", date, false)
+		return s.FXService.GetRate(currency, "CZK", date)
 	}
 	resp := &TaxReportResponse{
 		Year: year,

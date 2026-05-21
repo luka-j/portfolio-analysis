@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import PageLayout from '../components/PageLayout'
 import SegmentedControl from '../components/SegmentedControl'
@@ -169,40 +170,14 @@ export default function BreakdownPage() {
   const { privacy } = usePrivacy()
   const { active } = useScenario()
   const [currency, setCurrency] = usePersistentState<string>('app_currency', 'CZK')
-  const [sections, setSections] = useState<BreakdownSection[]>([])
-  const [loading, setLoading] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setRefreshing(false)
-    setError(null)
-    let freshArrived = false
+  const { data, isLoading: loading, isFetching: refreshing, error: queryError } = useQuery({
+    queryKey: ['breakdown', currency, active],
+    queryFn: () => getPortfolioBreakdown(currency, active),
+  })
 
-    // 1. Cached call — show immediately if non-empty, mark as stale
-    getPortfolioBreakdown(currency, true, active).then(data => {
-      if (!freshArrived && (data.sections ?? []).length > 0) {
-        setSections(data.sections ?? [])
-        setLoading(false)
-        setRefreshing(true)
-      }
-    }).catch(() => {})
-
-    // 2. Fresh call — always overwrites cached, clears stale indicator
-    try {
-      const data = await getPortfolioBreakdown(currency, false, active)
-      freshArrived = true
-      setSections(data.sections ?? [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load breakdown')
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }, [currency, active])
-
-  useEffect(() => { load() }, [load])
+  const sections = data?.sections ?? []
+  const error = queryError instanceof Error ? queryError.message : (queryError ? 'Failed to load breakdown' : null)
 
   const fmt = (v: number) => formatCurrencyValue(v, currency)
 

@@ -38,7 +38,7 @@ func TestBuildBenchmarkPriceMap(t *testing.T) {
 	}
 	cg := &mockCurrencyGetter{ccy: "USD"}
 
-	res, err := buildBenchmarkPriceMap(mockProvider, cg, "SPY", from, to, "USD", models.AccountingModelHistorical, false)
+	res, err := buildBenchmarkPriceMap(mockProvider, cg, "SPY", from, to, "USD", models.AccountingModelHistorical)
 	require.NoError(t, err)
 
 	assert.Equal(t, 100.0, res["2024-01-10"])

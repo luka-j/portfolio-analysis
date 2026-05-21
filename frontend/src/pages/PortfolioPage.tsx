@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
@@ -43,6 +44,12 @@ export default function PortfolioPage() {
   const location = useLocation()
   const { privacy } = usePrivacy()
   const { active } = useScenario()
+  
+  const queryClient = useQueryClient()
+  const loadData = () => {
+    queryClient.invalidateQueries({ queryKey: ['portfolioValue'] })
+    queryClient.invalidateQueries({ queryKey: ['portfolioPriceHistory'] })
+  }
   const [showWelcome, setShowWelcome] = useState(() => !!(location.state as { firstUpload?: boolean } | null)?.firstUpload)
   const [globalCurrency, setGlobalCurrency] = usePersistentState<string>('app_currency', 'CZK')
   // 'Original' is a portfolio-only option — it doesn't propagate to other pages.
@@ -67,18 +74,10 @@ export default function PortfolioPage() {
     { label: period === 'custom' ? `${customFrom.substring(2).replace(/-/g, '/')} - ${customTo.substring(2).replace(/-/g, '/')}` : 'Custom', value: 'custom' },
   ]
 
-  const [positions, setPositions] = useState<PositionValue[]>([])
-  const [totalValue, setTotalValue] = useState(0)
-  const [firstTransactionDate, setFirstTransactionDate] = useState<string | undefined>()
-  const [loading, setLoading] = useState(true)
-  const [valueRefreshing, setValueRefreshing] = useState(false)
-  const [error, setError] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [mappingTarget, setMappingTarget] = useState<PositionValue | null>(null)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'desc' | 'asc' | null>(null)
-  const [priceHistory, setPriceHistory] = useState<Record<string, SymbolPriceHistory>>({})
-  const [phLoading, setPhLoading] = useState(false)
   const [showAddTransaction, setShowAddTransaction] = useState(false)
 
   // 'Original' is a UI-only sentinel — the backend signals "no conversion" via
@@ -88,58 +87,32 @@ export default function PortfolioPage() {
   const reqCurrency = isOriginal ? globalCurrency : currency
   const reqAcctModel = isOriginal ? 'original' : acctModel
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    setValueRefreshing(false)
-    setError('')
+  const { from: periodFrom, to: periodTo } = getPeriodDates(period, customFrom, customTo)
 
-    let freshArrived = false
+  const { data: valData, isLoading: loading, isFetching: valueRefreshing, error: valErrorObj } = useQuery({
+    queryKey: ['portfolioValue', reqCurrency, reqAcctModel, active],
+    queryFn: () => getPortfolioValue(reqCurrency, reqAcctModel, active),
+  })
 
-    // 1. Cached call — show positions immediately if there's data
-    getPortfolioValue(reqCurrency, reqAcctModel, true, active).then(val => {
-      if (!freshArrived && (val.positions ?? []).length > 0) {
-        const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
-        setPositions(sorted)
-        setTotalValue(val.value || 0)
-        setFirstTransactionDate(val.first_transaction_date)
-        setLoading(false)
-        setValueRefreshing(true)
-      }
-    }).catch(() => {})
+  const { data: phData, isLoading: phLoading } = useQuery({
+    queryKey: ['portfolioPriceHistory', periodFrom, periodTo, reqCurrency, reqAcctModel, active],
+    queryFn: () => getPortfolioPriceHistory(periodFrom, periodTo, reqCurrency, reqAcctModel, active),
+  })
 
-    // 2. Fresh call — always takes priority
-    try {
-      const val = await getPortfolioValue(reqCurrency, reqAcctModel, false, active)
-      freshArrived = true
-      const sorted = [...(val.positions ?? [])].sort((a, b) => (b.value || 0) - (a.value || 0))
-      setPositions(sorted)
-      setTotalValue(val.value || 0)
-      setFirstTransactionDate(val.first_transaction_date)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load')
-    } finally {
-      setLoading(false)
-      setValueRefreshing(false)
+  const positions = useMemo(() => valData?.positions ? [...valData.positions].sort((a, b) => (b.value || 0) - (a.value || 0)) : [], [valData])
+  const totalValue = valData?.value || 0
+  const firstTransactionDate = valData?.first_transaction_date
+  const error = valErrorObj instanceof Error ? valErrorObj.message : (valErrorObj ? 'Failed to load' : '')
+
+  const priceHistory = useMemo(() => {
+    if (!phData) return {}
+    const map: Record<string, SymbolPriceHistory> = {}
+    for (const item of phData.items) {
+      const key = item.exchange ? `${item.symbol}@${item.exchange}` : item.symbol
+      map[key] = item
     }
-  }, [reqCurrency, reqAcctModel, active])
-
-  useEffect(() => { loadData() }, [loadData])
-
-  useEffect(() => {
-    const { from, to } = getPeriodDates(period, customFrom, customTo)
-    setPhLoading(true)
-    getPortfolioPriceHistory(from, to, reqCurrency, reqAcctModel, active)
-      .then(res => {
-        const map: Record<string, SymbolPriceHistory> = {}
-        for (const item of res.items) {
-          const key = item.exchange ? `${item.symbol}@${item.exchange}` : item.symbol
-          map[key] = item
-        }
-        setPriceHistory(map)
-      })
-      .catch(() => setPriceHistory({}))
-      .finally(() => setPhLoading(false))
-  }, [period, customFrom, customTo, reqCurrency, reqAcctModel, active])
+    return map
+  }, [phData])
 
   const totals = positions.reduce(
     (acc, pos) => {
@@ -238,9 +211,6 @@ export default function PortfolioPage() {
     if (sortCol !== col) return <span className="ml-1 opacity-40 text-[9px] align-middle">↕</span>
     return <span className="ml-1 text-[9px] text-indigo-400 align-middle">{sortDir === 'desc' ? '↓' : '↑'}</span>
   }
-
-  const { from: periodFrom, to: periodTo } = getPeriodDates(period, customFrom, customTo)
-
   const tableGridCols = 'minmax(0, 2.7fr) minmax(0, 0.8fr) repeat(4, minmax(0, 0.85fr)) repeat(2, minmax(0, 1.15fr)) repeat(6, minmax(0, 0.85fr)) minmax(0, 0.5fr)'
 
   return (

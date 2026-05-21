@@ -36,7 +36,7 @@ func applyBasket(data *models.FlexQueryData, basket *Basket, mp market.Provider,
 			// Convert to itemCurrency if needed.
 			allocationNative := allocationNotional
 			if itemCurrency != basket.NotionalCurrency && fxSvc != nil {
-				rate, err := fxSvc.GetRate(basket.NotionalCurrency, itemCurrency, acquiredAt, false)
+				rate, err := fxSvc.GetRate(basket.NotionalCurrency, itemCurrency, acquiredAt)
 				if err != nil {
 					return fmt.Errorf("converting %s→%s for %s: %w", basket.NotionalCurrency, itemCurrency, item.Symbol, err)
 				}
@@ -51,7 +51,7 @@ func applyBasket(data *models.FlexQueryData, basket *Basket, mp market.Provider,
 				price = *item.CostBasis
 			} else {
 				var err error
-				price, err = mp.GetLatestPrice(item.Symbol, false)
+				price, err = mp.GetLatestPrice(item.Symbol)
 				if err != nil {
 					return fmt.Errorf("getting price for basket item %s: %w", item.Symbol, err)
 				}
@@ -68,7 +68,7 @@ func applyBasket(data *models.FlexQueryData, basket *Basket, mp market.Provider,
 				price = *item.CostBasis
 			} else {
 				var err error
-				price, err = mp.GetLatestPrice(item.Symbol, false)
+				price, err = mp.GetLatestPrice(item.Symbol)
 				if err != nil {
 					return fmt.Errorf("getting price for basket item %s: %w", item.Symbol, err)
 				}

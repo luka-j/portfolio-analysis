@@ -32,7 +32,6 @@ func (h *StatsHandler) GetAnalysisDashboard(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -60,13 +59,13 @@ func (h *StatsHandler) GetAnalysisDashboard(c *gin.Context) {
 
 	go func() {
 		defer wg.Done()
-		hist, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
+		hist, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel)
 		if err != nil {
 			errStats = err
 			return
 		}
 
-		cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel, cachedOnly, to)
+		cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel, to)
 		if err != nil {
 			errStats = err
 			return
@@ -151,12 +150,12 @@ func (h *StatsHandler) GetAnalysisDashboard(c *gin.Context) {
 
 	go func() {
 		defer wg.Done()
-		twrRes, errTwr = h.PortfolioService.GetCumulativeTWR(data, from, to, currency, acctModel, cachedOnly)
+		twrRes, errTwr = h.PortfolioService.GetCumulativeTWR(data, from, to, currency, acctModel)
 	}()
 
 	go func() {
 		defer wg.Done()
-		mwrRes, errMwr = h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel, cachedOnly)
+		mwrRes, errMwr = h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel)
 	}()
 
 	wg.Wait()
@@ -203,7 +202,6 @@ func (h *StatsHandler) GetAnalysisHoldings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -218,7 +216,7 @@ func (h *StatsHandler) GetAnalysisHoldings(c *gin.Context) {
 
 
 
-	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel, cachedOnly)
+	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing per-position values: " + err.Error()})
 		return
@@ -245,7 +243,7 @@ func (h *StatsHandler) GetAnalysisHoldings(c *gin.Context) {
 		}
 
 		// Calculate totalTWR
-		portfolioReturns, _, _, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+		portfolioReturns, _, _, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
 		totalTWR := 0.0
 		if err == nil {
 			cum := 1.0

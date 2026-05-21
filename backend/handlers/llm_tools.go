@@ -19,7 +19,7 @@ import (
 // toolGetCurrentAllocations returns portfolio holdings with percentage weights (no absolute values).
 func (h *LLMHandler) toolGetCurrentAllocations(_ context.Context, data *models.FlexQueryData, req ChatRequest) (map[string]any, error) {
 	acctModel := models.ParseAccountingModel(req.AccountingModel)
-	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel, false)
+	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel)
 	if err != nil {
 		return nil, fmt.Errorf("computing portfolio value: %w", err)
 	}
@@ -96,7 +96,7 @@ func (h *LLMHandler) toolGetRiskMetrics(_ context.Context, data *models.FlexQuer
 		return nil, acctErr
 	}
 
-	metrics, err := computePortfolioMetrics(h.PortfolioService, data, from, to, req.Currency, acctModel, rfr, false)
+	metrics, err := computePortfolioMetrics(h.PortfolioService, data, from, to, req.Currency, acctModel, rfr)
 	if err != nil {
 		return nil, fmt.Errorf("computing portfolio metrics: %w", err)
 	}
@@ -162,7 +162,7 @@ func (h *LLMHandler) toolGetBenchmarkMetrics(_ context.Context, data *models.Fle
 		return nil, acctErr
 	}
 
-	metrics, err := computePortfolioMetrics(h.PortfolioService, data, from, to, req.Currency, acctModel, rfr, false)
+	metrics, err := computePortfolioMetrics(h.PortfolioService, data, from, to, req.Currency, acctModel, rfr)
 	if err != nil {
 		return nil, fmt.Errorf("computing portfolio metrics: %w", err)
 	}
@@ -244,7 +244,7 @@ func (h *LLMHandler) toolGetPortfolioBreakdown(_ context.Context, data *models.F
 	}
 
 	acctModel := models.ParseAccountingModel(req.AccountingModel)
-	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel, false)
+	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel)
 	if err != nil {
 		return nil, fmt.Errorf("fetching portfolio: %w", err)
 	}
@@ -297,7 +297,7 @@ func (h *LLMHandler) toolGetCorrelations(_ context.Context, data *models.FlexQue
 	}
 
 	acctModel := models.ParseAccountingModel(req.AccountingModel)
-	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, req.Currency, acctModel, false)
+	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, req.Currency, acctModel)
 	if err != nil {
 		return nil, fmt.Errorf("computing per-position values: %w", err)
 	}
@@ -360,7 +360,7 @@ func (h *LLMHandler) toolGetPositionsWithCostBasis(_ context.Context, data *mode
 	limitF, _ := args["limit"].(float64)
 
 	acctModel := models.ParseAccountingModel(req.AccountingModel)
-	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel, false)
+	result, err := h.PortfolioService.GetCurrentValue(data, req.Currency, acctModel)
 	if err != nil {
 		return nil, fmt.Errorf("computing portfolio value: %w", err)
 	}
@@ -538,11 +538,11 @@ func (h *LLMHandler) toolGetRecentTransactions(_ context.Context, data *models.F
 
 // toolGetFXImpact evaluates value difference between Spot and Historical FX.
 func (h *LLMHandler) toolGetFXImpact(_ context.Context, data *models.FlexQueryData, req ChatRequest) (map[string]any, error) {
-	spotVal, err := h.PortfolioService.GetCurrentValue(data, req.Currency, models.AccountingModelSpot, false)
+	spotVal, err := h.PortfolioService.GetCurrentValue(data, req.Currency, models.AccountingModelSpot)
 	if err != nil {
 		return nil, fmt.Errorf("spot err: %w", err)
 	}
-	histVal, err := h.PortfolioService.GetCurrentValue(data, req.Currency, models.AccountingModelHistorical, false)
+	histVal, err := h.PortfolioService.GetCurrentValue(data, req.Currency, models.AccountingModelHistorical)
 	if err != nil {
 		return nil, fmt.Errorf("historical err: %w", err)
 	}
@@ -574,12 +574,12 @@ func (h *LLMHandler) toolGetHistoricalPerformance(_ context.Context, data *model
 
 	acctModel := models.ParseAccountingModel(req.AccountingModel)
 
-	resp, err := h.PortfolioService.GetDailyValues(data, from, to, req.Currency, acctModel, false)
+	resp, err := h.PortfolioService.GetDailyValues(data, from, to, req.Currency, acctModel)
 	if err != nil {
 		return nil, fmt.Errorf("get daily values: %w", err)
 	}
 
-	portfolioReturns, _, endDates, retErr := h.PortfolioService.GetDailyReturns(data, from, to, req.Currency, acctModel, false)
+	portfolioReturns, _, endDates, retErr := h.PortfolioService.GetDailyReturns(data, from, to, req.Currency, acctModel)
 
 	analytics := map[string]any{}
 	if retErr == nil && len(portfolioReturns) > 0 {

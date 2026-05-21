@@ -37,12 +37,12 @@ export function useChartModeData(params: ChartModeDataParams) {
     try {
       if (mode === 'drawdown') {
         const symParam = benchSyms.length > 0 ? benchSyms.join(',') : undefined
-        const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, symParam, active)
+        const res = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, symParam, active)
         const baseResults = res.results ?? []
         
         const sbRes = await Promise.all(sBenches.map(async sb => {
           try {
-             const r = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, false, undefined, sb.id)
+             const r = await getDrawdownSeries(effectiveFrom, to, currency, acctModel, undefined, sb.id)
              const pRes = (r.results ?? []).find(x => x.symbol === 'Portfolio')
              if (pRes) return { ...pRes, symbol: `[S] ${sb.name}` }
           } catch { /* ignore */ }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import SegmentedControl from '../components/SegmentedControl'
@@ -10,6 +10,7 @@ import { escapeCSVField } from '../utils/format'
 import { usePrivacy } from '../utils/PrivacyContext'
 import { useScenario } from '../context/ScenarioContext'
 import { Skeleton } from '../components/Skeleton'
+import { useQuery } from '@tanstack/react-query'
 
 type FxMethod = 'historical' | 'universal'
 
@@ -24,11 +25,8 @@ export default function TaxPage() {
 
   const [year, setYear] = useState<number>(new Date().getFullYear() - 1)
   const [fxMethod, setFxMethod] = useState<FxMethod>('historical')
-  const [currencies, setCurrencies] = useState<string[]>([])
   const [rateInputs, setRateInputs] = useState<Record<string, string>>({})
-  const [report, setReport] = useState<TaxReportResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [shouldFetchUniversal, setShouldFetchUniversal] = useState(false)
 
   // Extract unique currencies from a report's transactions
   const extractCurrencies = (data: TaxReportResponse): string[] => {
@@ -36,80 +34,74 @@ export default function TaxPage() {
     return [...new Set(all.map(t => t.currency))].sort()
   }
 
-  // Fetch historical report to discover currencies when switching to universal mode
-  useEffect(() => {
-    if (fxMethod !== 'universal') return
-    let cancelled = false
-    async function fetchCurrencies() {
-      setLoading(true)
-      setError('')
-      setReport(null)
-      try {
-        const data = await getTaxReport(year, undefined, active)
-        if (!cancelled) {
-          const found = extractCurrencies(data)
-          setCurrencies(found)
-          // Keep any already-entered rate inputs; reset only for new currencies
-          setRateInputs(prev => {
-            const next: Record<string, string> = {}
-            for (const c of found) next[c] = prev[c] ?? ''
-            return next
-          })
-        }
-      } catch (err: unknown) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    fetchCurrencies()
-    return () => { cancelled = true }
-  }, [year, fxMethod, active])
+  // Fetch base report to get historical rates / discover currencies
+  const { data: baseReport, isLoading: isBaseLoading, error: baseError } = useQuery({
+    queryKey: ['taxReportBase', year, active],
+    queryFn: () => getTaxReport(year, undefined, active),
+  })
 
-  // Fetch historical report automatically
+  // Derive unique currencies from the base report
+  const currencies = useMemo(() => {
+    if (!baseReport) return []
+    return extractCurrencies(baseReport)
+  }, [baseReport])
+
+  // Sync rate inputs when currencies change, keeping existing rates if they still exist
   useEffect(() => {
-    if (fxMethod !== 'historical') return
-    let cancelled = false
-    async function fetchReport() {
-      setLoading(true)
-      setError('')
-      try {
-        const data = await getTaxReport(year, undefined, active)
-        if (!cancelled) setReport(data)
-      } catch (err: unknown) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) setLoading(false)
+    if (currencies.length === 0) return
+    setRateInputs(prev => {
+      const next: Record<string, string> = {}
+      for (const c of currencies) {
+        next[c] = prev[c] ?? ''
       }
-    }
-    fetchReport()
-    return () => { cancelled = true }
-  }, [year, fxMethod, active])
+      return next
+    })
+  }, [currencies])
+
+  // Reset shouldFetchUniversal when year, active, or currencies change
+  useEffect(() => {
+    setShouldFetchUniversal(false)
+  }, [year, active, currencies])
 
   const allRatesFilled = currencies.length > 0 && currencies.every(c => {
     const v = parseFloat(rateInputs[c] ?? '')
     return isFinite(v) && v > 0
   })
 
-  const fetchUniversalReport = useCallback(async () => {
+  // Convert rateInputs to a stable Record<string, number> for query key/fn
+  const universalRates = useMemo(() => {
+    if (!allRatesFilled) return null
     const rates: Record<string, number> = {}
-    for (const c of currencies) rates[c] = parseFloat(rateInputs[c])
-    setLoading(true)
-    setError('')
-    try {
-      const data = await getTaxReport(year, rates, active)
-      setReport(data)
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
+    for (const c of currencies) {
+      rates[c] = parseFloat(rateInputs[c])
     }
-  }, [year, currencies, rateInputs, active])
+    return rates
+  }, [currencies, rateInputs, allRatesFilled])
+
+  // Fetch universal report if method is universal, all rates are filled, and click was made
+  const { data: universalReport, isLoading: isUniversalLoading, error: universalError } = useQuery({
+    queryKey: ['taxReportUniversal', year, active, universalRates],
+    queryFn: () => getTaxReport(year, universalRates!, active),
+    enabled: fxMethod === 'universal' && allRatesFilled && universalRates !== null && shouldFetchUniversal,
+  })
+
+  // The actual displayed report
+  const report = fxMethod === 'historical' ? (baseReport ?? null) : (universalReport ?? null)
+
+  const loading = fxMethod === 'historical'
+    ? isBaseLoading
+    : (isBaseLoading || (allRatesFilled && shouldFetchUniversal && isUniversalLoading))
+
+  const error = useMemo(() => {
+    if (baseError) return baseError instanceof Error ? baseError.message : String(baseError)
+    if (fxMethod === 'universal' && shouldFetchUniversal && universalError) {
+      return universalError instanceof Error ? universalError.message : String(universalError)
+    }
+    return ''
+  }, [baseError, universalError, fxMethod, shouldFetchUniversal])
 
   const handleFxMethodChange = (v: FxMethod) => {
-    setReport(null)
-    setError('')
-    setCurrencies([])
+    setShouldFetchUniversal(false)
     setFxMethod(v)
   }
 
@@ -218,7 +210,7 @@ export default function TaxPage() {
             </div>
             <button
               disabled={!allRatesFilled}
-              onClick={fetchUniversalReport}
+              onClick={() => setShouldFetchUniversal(true)}
               className="px-8 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed glass text-indigo-300 hover:text-indigo-200"
             >
               Generate Report

@@ -16,7 +16,7 @@ type mockMarket struct {
 	rates map[string]float64
 }
 
-func (m *mockMarket) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+func (m *mockMarket) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	rate, ok := m.rates[symbol]
 	if !ok {
 		return nil, nil // Not found
@@ -31,7 +31,7 @@ func (m *mockMarket) TradingDates(from, to time.Time) ([]time.Time, error) {
 	return nil, nil
 }
 
-func (m *mockMarket) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockMarket) GetLatestPrice(symbol string) (float64, error) {
 	rate, ok := m.rates[symbol]
 	if !ok {
 		return 0, nil

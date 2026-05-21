@@ -142,11 +142,11 @@ func (h *LLMHandler) renderComparisonPrompt(req ChatRequest, dataA *models.FlexQ
 	toFmt := to.Format("Jan 2, 2006")
 
 	if req.PromptType == "risk_metrics_comparison" {
-		mA, merr := computePortfolioMetrics(h.PortfolioService, dataA, from, to, req.Currency, acctModel, rfr, false)
+		mA, merr := computePortfolioMetrics(h.PortfolioService, dataA, from, to, req.Currency, acctModel, rfr)
 		if merr != nil {
 			return "", fmt.Errorf("computing metrics for A: %w", merr)
 		}
-		mB, merr := computePortfolioMetrics(h.PortfolioService, dataB, from, to, req.Currency, acctModel, rfr, false)
+		mB, merr := computePortfolioMetrics(h.PortfolioService, dataB, from, to, req.Currency, acctModel, rfr)
 		if merr != nil {
 			return "", fmt.Errorf("computing metrics for B: %w", merr)
 		}
@@ -247,7 +247,7 @@ func (h *LLMHandler) scenarioDisplayName(id int, userHash string) (string, error
 
 // buildHoldingsSummary returns a compact text list of top holdings by weight percentage.
 func (h *LLMHandler) buildHoldingsSummary(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) string {
-	result, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel, false)
+	result, err := h.PortfolioService.GetCurrentValue(data, currency, acctModel)
 	if err != nil || result.Value == 0 {
 		return "(no holdings data)"
 	}

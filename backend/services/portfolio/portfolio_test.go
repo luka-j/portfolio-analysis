@@ -19,7 +19,7 @@ type mockMarketProvider struct {
 	current float64
 }
 
-func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	if p, ok := m.prices[symbol]; ok {
 		return p, nil
 	}
@@ -48,7 +48,7 @@ func (m *mockMarketProvider) TradingDates(from, to time.Time) ([]time.Time, erro
 	return dates, nil
 }
 
-func (m *mockMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockMarketProvider) GetLatestPrice(symbol string) (float64, error) {
 	return m.current, nil
 }
 
@@ -103,7 +103,7 @@ func TestGetDailyReturns_WeekendCashFlow(t *testing.T) {
 	// We use Original accounting model to reliably bypass FX lookups.
 	svc := NewService(mockProvider, nil, 0)
 
-	returns, startDates, endDates, err := svc.GetDailyReturns(data, friday, monday, "USD", models.AccountingModelOriginal, false)
+	returns, startDates, endDates, err := svc.GetDailyReturns(data, friday, monday, "USD", models.AccountingModelOriginal)
 	if err != nil {
 		t.Fatalf("GetDailyReturns failed: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestGetDailyValues_PendingCashIncludedAfterSale(t *testing.T) {
 
 	// expiryDays=30 — bucket is still active on day5.
 	svc := NewService(mockProvider, nil, 30)
-	hist, err := svc.GetDailyValues(data, day0, day5, "USD", models.AccountingModelOriginal, false)
+	hist, err := svc.GetDailyValues(data, day0, day5, "USD", models.AccountingModelOriginal)
 	require.NoError(t, err)
 
 	// All days should show $1000: day0 via stock, day1+ via pending cash.
@@ -211,7 +211,7 @@ func TestGetCumulativeTWR_SaleWithActiveBucketIsFlat(t *testing.T) {
 	}
 
 	svc := NewService(mockProvider, nil, 30)
-	hist, err := svc.GetCumulativeTWR(data, day0, day5, "USD", models.AccountingModelOriginal, false)
+	hist, err := svc.GetCumulativeTWR(data, day0, day5, "USD", models.AccountingModelOriginal)
 	require.NoError(t, err)
 
 	// No price movement and no real external flows — TWR must be 0% throughout.
@@ -249,7 +249,7 @@ func TestGetCumulativeTWR_BucketExpiryIsNeutral(t *testing.T) {
 	}
 
 	svc := NewService(mockProvider, nil, 30)
-	hist, err := svc.GetCumulativeTWR(data, day0, day35, "USD", models.AccountingModelOriginal, false)
+	hist, err := svc.GetCumulativeTWR(data, day0, day35, "USD", models.AccountingModelOriginal)
 	require.NoError(t, err)
 
 	// TWR must stay 0% throughout — including after bucket expires on day31.
@@ -316,7 +316,7 @@ func TestGetDailyReturns_DatesOffsetSkip(t *testing.T) {
 
 	svc := NewService(mockProvider, nil, 0)
 
-	returns, startDates, endDates, err := svc.GetDailyReturns(data, day1, day4, "USD", models.AccountingModelOriginal, false)
+	returns, startDates, endDates, err := svc.GetDailyReturns(data, day1, day4, "USD", models.AccountingModelOriginal)
 	if err != nil {
 		t.Fatalf("GetDailyReturns failed: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestGetDailyValuesPerPosition_CashFlows(t *testing.T) {
 
 	svc := NewService(mockProvider, nil, 0)
 
-	res, err := svc.GetDailyValuesPerPosition(data, day1, day2, "USD", models.AccountingModelOriginal, false)
+	res, err := svc.GetDailyValuesPerPosition(data, day1, day2, "USD", models.AccountingModelOriginal)
 	require.NoError(t, err)
 
 	require.Contains(t, res.CashFlowsBySymbol, "TEST")
@@ -393,7 +393,7 @@ func TestGetDailyValues_BasicTimeSeries(t *testing.T) {
 	}
 
 	svc := NewService(mockProvider, nil, 0)
-	hist, err := svc.GetDailyValues(data, day1, day2, "USD", models.AccountingModelOriginal, false)
+	hist, err := svc.GetDailyValues(data, day1, day2, "USD", models.AccountingModelOriginal)
 	require.NoError(t, err)
 
 	require.Len(t, hist.Data, 2)

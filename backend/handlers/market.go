@@ -57,7 +57,7 @@ func (h *MarketHandler) GetHistory(c *gin.Context) {
 		return
 	}
 
-	points, err := h.MarketProvider.GetHistory(symbol, from, to, false)
+	points, err := h.MarketProvider.GetHistory(symbol, from, to)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -166,7 +166,7 @@ func (h *MarketHandler) GetSecurityChart(c *gin.Context) {
 
 	// Fetch with warm-up window so the MA can fill before the requested period starts.
 	warmupFrom := from.AddDate(0, 0, -maDays*2)
-	points, err := h.MarketProvider.GetHistory(effectiveSym, warmupFrom, to, false)
+	points, err := h.MarketProvider.GetHistory(effectiveSym, warmupFrom, to)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -189,7 +189,7 @@ func (h *MarketHandler) GetSecurityChart(c *gin.Context) {
 			if acctModel == models.AccountingModelSpot {
 				if todayRate, spotErr := h.MarketProvider.GetHistory(
 					nativeCcy+currency+"=X",
-					today.AddDate(0, 0, -5), today, false,
+					today.AddDate(0, 0, -5), today,
 				); spotErr == nil && len(todayRate) > 0 {
 					r := todayRate[len(todayRate)-1].Close
 					// Fill a constant map so the loop below works uniformly.

@@ -448,9 +448,9 @@ export async function uploadEtradeSales(file: File): Promise<EtradeUploadRespons
 }
 
 export async function getPortfolioValue(
-  currency = 'USD', accountingModel = 'historical', cachedOnly = false, scenarioId?: number | null
+  currency = 'USD', accountingModel = 'historical', scenarioId?: number | null
 ): Promise<PortfolioValueResponse> {
-  const query = `currencies=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
+  const query = `currencies=${encodeURIComponent(currency)}&accounting_model=${accountingModel}${scenarioParam(scenarioId)}`;
   return request<PortfolioValueResponse>(`/portfolio/value?${query}`);
 }
 
@@ -459,16 +459,16 @@ export async function getPortfolioValue(
 // The primary currency's scalars (price/value/cost_basis) are still populated,
 // while per-currency maps are filled for every requested currency.
 export async function getPortfolioValueMulti(
-  currencies: string[], accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+  currencies: string[], accountingModel = 'historical', signal?: AbortSignal, scenarioId?: number | null
 ): Promise<PortfolioValueResponse> {
-  const query = `currencies=${currencies.map(encodeURIComponent).join(',')}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
+  const query = `currencies=${currencies.map(encodeURIComponent).join(',')}&accounting_model=${accountingModel}${scenarioParam(scenarioId)}`;
   return request<PortfolioValueResponse>(`/portfolio/value?${query}`, { signal });
 }
 
 export async function getPortfolioHistory(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+  from: string, to: string, currency: string, accountingModel = 'historical', signal?: AbortSignal, scenarioId?: number | null
 ): Promise<PortfolioHistoryResponse> {
-  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
+  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${scenarioParam(scenarioId)}`;
   return request<PortfolioHistoryResponse>(
     `/portfolio/history?${query}`,
     { signal }
@@ -490,28 +490,28 @@ export async function getMarketSymbols(): Promise<string[]> {
 }
 
 export async function getPortfolioStats(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+  from: string, to: string, currency: string, accountingModel = 'historical', signal?: AbortSignal, scenarioId?: number | null
 ): Promise<StatsResponse> {
   return request<StatsResponse>(
-    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`,
+    `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${scenarioParam(scenarioId)}`,
     { signal }
   );
 }
 
 export async function getAnalysisDashboard(
-  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05, signal?: AbortSignal, scenarioId?: number | null
 ): Promise<AnalysisDashboardResponse> {
   return request<AnalysisDashboardResponse>(
-    `/portfolio/analysis-dashboard?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`,
+    `/portfolio/analysis-dashboard?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${scenarioParam(scenarioId)}`,
     { signal }
   );
 }
 
 export async function getAnalysisHoldings(
-  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05, signal?: AbortSignal, scenarioId?: number | null
 ): Promise<AnalysisHoldingsResponse> {
   return request<AnalysisHoldingsResponse>(
-    `/portfolio/analysis-holdings?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`,
+    `/portfolio/analysis-holdings?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${scenarioParam(scenarioId)}`,
     { signal }
   );
 }
@@ -527,12 +527,11 @@ export async function comparePortfolio(
 
 export async function getStandaloneMetrics(
   symbols: string, currency: string, from: string, to: string,
-  accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false, scenarioId?: number | null
+  accountingModel = 'historical', riskFreeRate = 0.05, scenarioId?: number | null
 ): Promise<StandaloneResponse> {
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : ''
-  const cachedParam = cachedOnly ? '&cachedOnly=true' : ''
-  return request<StandaloneResponse>(
-    `/portfolio/standalone?currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${symParam}${cachedParam}${scenarioParam(scenarioId)}`
+    return request<StandaloneResponse>(
+    `/portfolio/standalone?currency=${currency}&from=${from}&to=${to}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${symParam}${scenarioParam(scenarioId)}`
   );
 }
 
@@ -550,9 +549,9 @@ export async function getPortfolioTrades(
 // This is the correct data source for the TWR / MWR chart — each value is the chain-linked
 // return up to that date, with cash flows properly neutralised.
 export async function getPortfolioReturns(
-  from: string, to: string, currency: string, accountingModel = 'historical', returnType = 'twr', cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+  from: string, to: string, currency: string, accountingModel = 'historical', returnType = 'twr', signal?: AbortSignal, scenarioId?: number | null
 ): Promise<PortfolioHistoryResponse> {
-  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&type=${returnType}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`;
+  const query = `from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&type=${returnType}${scenarioParam(scenarioId)}`;
   return request<PortfolioHistoryResponse>(
     `/portfolio/history/returns?${query}`,
     { signal }
@@ -628,9 +627,9 @@ export interface BreakdownResponse {
 }
 
 export async function getPortfolioBreakdown(
-  currency = 'USD', cachedOnly = false, scenarioId?: number | null
+  currency = 'USD', scenarioId?: number | null
 ): Promise<BreakdownResponse> {
-  return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`);
+  return request<BreakdownResponse>(`/portfolio/breakdown?currency=${encodeURIComponent(currency)}${scenarioParam(scenarioId)}`);
 }
 
 // ---- Portfolio Price History ----
@@ -889,12 +888,12 @@ export interface DrawdownResponse {
 }
 
 export async function getDrawdownSeries(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false,
+  from: string, to: string, currency: string, accountingModel = 'historical',
   symbols?: string, scenarioId?: number | null,
 ): Promise<DrawdownResponse> {
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
   return request<DrawdownResponse>(
-    `/portfolio/drawdown?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${symParam}${scenarioParam(scenarioId)}`
+    `/portfolio/drawdown?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${symParam}${scenarioParam(scenarioId)}`
   );
 }
 
@@ -999,13 +998,12 @@ export interface CumulativeResponse {
 }
 
 export async function getCumulativeSeries(
-  from: string, to: string, currency: string, accountingModel = 'historical', cachedOnly = false,
+  from: string, to: string, currency: string, accountingModel = 'historical',
   symbols?: string, scenarioId?: number | null,
 ): Promise<CumulativeResponse> {
   const symParam = symbols ? `&symbols=${encodeURIComponent(symbols)}` : '';
-  const cachedParam = cachedOnly ? '&cachedOnly=true' : '';
-  return request<CumulativeResponse>(
-    `/portfolio/cumulative?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedParam}${symParam}${scenarioParam(scenarioId)}`
+    return request<CumulativeResponse>(
+    `/portfolio/cumulative?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${symParam}${scenarioParam(scenarioId)}`
   );
 }
 

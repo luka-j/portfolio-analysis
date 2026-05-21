@@ -1,12 +1,10 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   getAnalysisDashboard,
   getAnalysisHoldings,
   getStandaloneMetrics,
   type StatsResponse,
-  type DailyValue,
-  type StandaloneResult,
-  type AttributionResult,
 } from '../../api'
 import type { AnalysisParams } from './types'
 import { formatSymbolName } from './types'
@@ -14,124 +12,86 @@ import { formatSymbolName } from './types'
 export function useAnalysisDashboard(params: AnalysisParams) {
   const { currency, acctModel, from, to, effectiveFrom, active, riskFreeRate, scenarios } = params
 
-  const [stats, setStats] = useState<StatsResponse | null>(null)
-  const [portfolioHistory, setPortfolioHistory] = useState<DailyValue[]>([])
-  const [mwrHistory, setMwrHistory] = useState<DailyValue[]>([])
+  const [standaloneSymbols, setStandaloneSymbols] = useState('')
 
-  const [standaloneResults, setStandaloneResults] = useState<StandaloneResult[]>([])
-  const [attributionData, setAttributionData] = useState<AttributionResult[]>([])
-  const [attributionTWR, setAttributionTWR] = useState(0)
-  const [correlationData, setCorrelationData] = useState<{ symbols: string[]; matrix: number[][] }>({ symbols: [], matrix: [] })
+  const loadStandalone = useCallback((symbols = '') => {
+    setStandaloneSymbols(symbols)
+  }, [])
 
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState('')
+  // 1. Dashboard query
+  const { data: dashboardData, isLoading: dashboardLoading, error: dashboardError } = useQuery({
+    queryKey: ['analysisDashboard', from, to, currency, acctModel, riskFreeRate, active],
+    queryFn: () => getAnalysisDashboard(from, to, currency, acctModel, riskFreeRate, undefined, active),
+  })
 
-  const [standaloneLoading, setStandaloneLoading] = useState(false)
-  const [standaloneRefreshing, setStandaloneRefreshing] = useState(false)
-  const [standaloneError, setStandaloneError] = useState('')
+  // 2. Standalone Metrics query
+  const { data: standaloneData, isLoading: standaloneLoading, error: standaloneErrorMsg } = useQuery({
+    queryKey: ['standaloneMetrics', standaloneSymbols, currency, effectiveFrom, to, acctModel, riskFreeRate, active],
+    queryFn: () => getStandaloneMetrics(standaloneSymbols, currency, effectiveFrom, to, acctModel, riskFreeRate, active),
+  })
 
-  const [holdingsLoading, setHoldingsLoading] = useState(false)
-  const [holdingsError, setHoldingsError] = useState('')
+  // 3. Holdings & Attribution query
+  const { data: holdingsData, isLoading: holdingsLoading, error: holdingsErrorMsg } = useQuery({
+    queryKey: ['analysisHoldings', effectiveFrom, to, currency, acctModel, riskFreeRate, active],
+    queryFn: () => getAnalysisHoldings(effectiveFrom, to, currency, acctModel, riskFreeRate, undefined, active),
+  })
 
-  const loadGenRef = useRef(0)
-
-  const loadDashboard = useCallback(async () => {
-    loadGenRef.current += 1
-    const gen = loadGenRef.current
-    setLoading(true)
-    setRefreshing(false)
-    setError('')
-
-    let freshArrived = false
-
-    getAnalysisDashboard(from, to, currency, acctModel, riskFreeRate, true, undefined, active).then(res => {
-      if (gen === loadGenRef.current && !freshArrived && Object.keys(res.stats).length > 0) {
-        setStats({ currency: res.currency, accounting_model: res.accounting_model, statistics: res.stats })
-        setPortfolioHistory(res.twr_history ?? [])
-        setMwrHistory(res.mwr_history ?? [])
-        setLoading(false)
-        setRefreshing(true)
-      }
-    }).catch(() => {})
-
-    getAnalysisDashboard(from, to, currency, acctModel, riskFreeRate, false, undefined, active).then(res => {
-      if (gen === loadGenRef.current) {
-        freshArrived = true
-        setStats({ currency: res.currency, accounting_model: res.accounting_model, statistics: res.stats })
-        setPortfolioHistory(res.twr_history ?? [])
-        setMwrHistory(res.mwr_history ?? [])
-      }
-    }).catch(err => {
-      if (gen === loadGenRef.current) setError(err instanceof Error ? err.message : 'Failed to load dashboard')
-    }).finally(() => {
-      if (gen === loadGenRef.current) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    })
-  }, [currency, acctModel, from, to, active, riskFreeRate])
-
-  useEffect(() => { loadDashboard() }, [loadDashboard])
-
-  const loadStandalone = useCallback(async (symbols = '') => {
-    const gen = loadGenRef.current
-    setStandaloneLoading(true)
-    setStandaloneRefreshing(false)
-    setStandaloneError('')
-
-    let freshArrived = false
-
-    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, true, active).then(res => {
-      if (gen === loadGenRef.current && !freshArrived && res.results.length > 0) {
-        setStandaloneResults(res.results.map(r => ({ ...r, symbol: formatSymbolName(r.symbol, scenarios) })))
-        setStandaloneLoading(false)
-        setStandaloneRefreshing(true)
-      }
-    }).catch(() => {})
-
-    getStandaloneMetrics(symbols, currency, effectiveFrom, to, acctModel, riskFreeRate, false, active).then(res => {
-      if (gen === loadGenRef.current) {
-        freshArrived = true
-        setStandaloneResults(res.results.map(r => ({ ...r, symbol: formatSymbolName(r.symbol, scenarios) })))
-      }
-    }).catch(err => {
-      if (gen === loadGenRef.current) setStandaloneError(err instanceof Error ? err.message : 'Standalone metrics failed')
-    }).finally(() => {
-      if (gen === loadGenRef.current) {
-        setStandaloneLoading(false)
-        setStandaloneRefreshing(false)
-      }
-    })
-  }, [currency, effectiveFrom, to, acctModel, riskFreeRate, active, scenarios])
-
-  const loadHoldings = useCallback(async () => {
-    setHoldingsLoading(true)
-    setHoldingsError('')
-    try {
-      const res = await getAnalysisHoldings(effectiveFrom, to, currency, acctModel, riskFreeRate, false, undefined, active)
-      setAttributionData(res.attribution.positions)
-      setAttributionTWR(res.attribution.total_twr)
-      setCorrelationData({ symbols: res.correlations.symbols, matrix: res.correlations.matrix })
-    } catch (err) {
-      setHoldingsError(err instanceof Error ? err.message : 'Failed to load holdings data')
-    } finally {
-      setHoldingsLoading(false)
+  // Derived states
+  const stats = useMemo<StatsResponse | null>(() => {
+    if (!dashboardData) return null
+    return {
+      currency: dashboardData.currency,
+      accounting_model: dashboardData.accounting_model,
+      statistics: dashboardData.stats,
     }
-  }, [effectiveFrom, to, currency, acctModel, riskFreeRate, active])
+  }, [dashboardData])
 
-  useEffect(() => { loadHoldings() }, [loadHoldings])
+  const portfolioHistory = dashboardData?.twr_history ?? []
+  const mwrHistory = dashboardData?.mwr_history ?? []
+
+  const standaloneResults = useMemo(() => {
+    if (!standaloneData) return []
+    return standaloneData.results.map(r => ({
+      ...r,
+      symbol: formatSymbolName(r.symbol, scenarios),
+    }))
+  }, [standaloneData, scenarios])
+
+  const attributionData = holdingsData?.attribution.positions ?? []
+  const attributionTWR = holdingsData?.attribution.total_twr ?? 0
+  const correlationData = useMemo(() => {
+    if (!holdingsData) return { symbols: [], matrix: [] }
+    return {
+      symbols: holdingsData.correlations.symbols,
+      matrix: holdingsData.correlations.matrix,
+    }
+  }, [holdingsData])
+
+  const error = useMemo(() => {
+    if (!dashboardError) return ''
+    return dashboardError instanceof Error ? dashboardError.message : String(dashboardError)
+  }, [dashboardError])
+
+  const standaloneError = useMemo(() => {
+    if (!standaloneErrorMsg) return ''
+    return standaloneErrorMsg instanceof Error ? standaloneErrorMsg.message : String(standaloneErrorMsg)
+  }, [standaloneErrorMsg])
+
+  const holdingsError = useMemo(() => {
+    if (!holdingsErrorMsg) return ''
+    return holdingsErrorMsg instanceof Error ? holdingsErrorMsg.message : String(holdingsErrorMsg)
+  }, [holdingsErrorMsg])
 
   return {
     stats,
     portfolioHistory,
     mwrHistory,
-    loading,
-    refreshing,
+    loading: dashboardLoading,
+    refreshing: false,
     error,
     standaloneResults,
     standaloneLoading,
-    standaloneRefreshing,
+    standaloneRefreshing: false,
     standaloneError,
     loadStandalone,
     attributionData,

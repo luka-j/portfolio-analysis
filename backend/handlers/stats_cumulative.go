@@ -34,7 +34,6 @@ func (h *StatsHandler) GetCumulative(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -47,7 +46,7 @@ func (h *StatsHandler) GetCumulative(c *gin.Context) {
 		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
-	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
 		return
@@ -69,7 +68,7 @@ func (h *StatsHandler) GetCumulative(c *gin.Context) {
 	// Also compute the MWR cumulative series so the frontend can overlay it on the MWR chart
 	// for hypothetical/scenario portfolios (the MWR chart needs this from GetCumulative since
 	// addScenarioBenchmark calls getCumulativeSeries to obtain both TWR and MWR series).
-	if mwrResp, err := h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel, cachedOnly); err == nil && mwrResp != nil {
+	if mwrResp, err := h.PortfolioService.GetCumulativeMWR(data, from, to, currency, acctModel); err == nil && mwrResp != nil {
 		mwrSeries := make([]models.CumulativePoint, len(mwrResp.Data))
 		for i, pt := range mwrResp.Data {
 			mwrSeries[i] = models.CumulativePoint{Date: pt.Date, Value: pt.Value}
@@ -83,7 +82,7 @@ func (h *StatsHandler) GetCumulative(c *gin.Context) {
 			if sym == "" {
 				continue
 			}
-			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel, cachedOnly)
+			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel)
 			if err != nil {
 				results = append(results, models.CumulativeSeriesResult{Symbol: sym, Error: "could not fetch price data: " + err.Error()})
 				continue

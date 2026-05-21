@@ -172,7 +172,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC)
 
-		pts, err := svc.GetHistory("AAPL", from, to, false)
+		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
 		assert.Len(t, transport.calls, 1, "Should make exactly 1 network request to Yahoo")
@@ -185,7 +185,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC)
 
-		pts, err := svc.GetHistory("AAPL", from, to, false)
+		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
 		assert.Len(t, transport.calls, 0, "Should make 0 network requests because data is cached")
@@ -199,7 +199,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		from := time.Date(2024, 12, 25, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC)
 
-		pts, err := svc.GetHistory("AAPL", from, to, false)
+		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
 
@@ -218,7 +218,7 @@ func TestSmartCachingBehavior(t *testing.T) {
 		from := time.Date(2024, 12, 25, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2025, 1, 20, 0, 0, 0, 0, time.UTC)
 
-		pts, err := svc.GetHistory("AAPL", from, to, false)
+		pts, err := svc.GetHistory("AAPL", from, to)
 		require.NoError(t, err)
 		assert.NotEmpty(t, pts)
 
@@ -255,7 +255,7 @@ func TestNegativeCaching(t *testing.T) {
 	to := time.Date(1980, 1, 10, 0, 0, 0, 0, time.UTC)
 
 	// First call should reach out and get empty results, then store negative cache bounds
-	pts, err := svc.GetHistory("PRE_IPO_TICKER", from, to, false)
+	pts, err := svc.GetHistory("PRE_IPO_TICKER", from, to)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "yahoo finance error: No data found")
 	assert.Empty(t, pts)
@@ -264,7 +264,7 @@ func TestNegativeCaching(t *testing.T) {
 	transport.calls = nil
 
 	// Second call for the EXACT same pre-IPO dates shouldn't reach out to the network at all!
-	pts2, _ := svc.GetHistory("PRE_IPO_TICKER", from, to, false)
+	pts2, _ := svc.GetHistory("PRE_IPO_TICKER", from, to)
 	// It relies on dummy volume markers in the DB to skip hitting Yahoo again
 	assert.Empty(t, pts2)
 	assert.Len(t, transport.calls, 0, "Negative cache prevents identical failing fetches")

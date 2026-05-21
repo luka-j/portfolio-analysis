@@ -203,10 +203,6 @@ func parseAccountingModel(c *gin.Context) (models.AccountingModel, bool) {
 	return m, true
 }
 
-// parseCachedOnly extracts the cachedOnly query parameter.
-func parseCachedOnly(c *gin.Context) bool {
-	return c.Query("cachedOnly") == "true"
-}
 
 // buildBenchmarkPriceMap fetches the benchmark's historical prices, converts to the display
 // currency (under historical accounting), and forward-fills over weekends/holidays so that
@@ -218,9 +214,8 @@ func buildBenchmarkPriceMap(
 	mp market.Provider, cg market.CurrencyGetter,
 	symbol string, from, to time.Time,
 	currency string, acctModel models.AccountingModel,
-	cachedOnly bool,
 ) (map[string]float64, error) {
-	prices, err := mp.GetHistory(symbol, from.AddDate(0, 0, -7), to, cachedOnly)
+	prices, err := mp.GetHistory(symbol, from.AddDate(0, 0, -7), to)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +276,7 @@ func buildFXRateMap(mp market.Provider, nativeCcy, displayCcy string, from, to t
 		return nil
 	}
 	fxSymbol := fmt.Sprintf("%s%s=X", nativeCcy, displayCcy)
-	points, err := mp.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, false)
+	points, err := mp.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to)
 	if err != nil {
 		slog.Warn("market: FX rate prefetch failed", "pair", fxSymbol, "err", err)
 		return nil
@@ -377,8 +372,6 @@ type portfolioMetricsResult struct {
 	EndDates   []string
 }
 
-// computePortfolioMetrics calculates TWR, MWR, and standalone risk metrics for the given date range.
-// The from date is automatically constrained to the portfolio's inception date.
 func computePortfolioMetrics(
 	ps *portfolio.Service,
 	data *models.FlexQueryData,
@@ -386,7 +379,6 @@ func computePortfolioMetrics(
 	currency string,
 	acctModel models.AccountingModel,
 	riskFreeRate float64,
-	cachedOnly bool,
 ) (*portfolioMetricsResult, error) {
 	// Constrain from to portfolio inception.
 	earliest, _ := DateRangeFromData(data)
@@ -397,11 +389,11 @@ func computePortfolioMetrics(
 	res := &portfolioMetricsResult{}
 
 	// Daily values for TWR/MWR.
-	hist, err := ps.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
+	hist, err := ps.GetDailyValues(data, from, to, currency, acctModel)
 	if err != nil {
 		return nil, fmt.Errorf("computing daily values: %w", err)
 	}
-	cashFlows, err := ps.GetCashFlows(data, currency, acctModel, cachedOnly, to)
+	cashFlows, err := ps.GetCashFlows(data, currency, acctModel, to)
 	if err != nil {
 		return nil, fmt.Errorf("computing cash flows: %w", err)
 	}
@@ -446,7 +438,7 @@ func computePortfolioMetrics(
 	}
 
 	// Daily returns for standalone metrics.
-	portfolioReturns, startDates, endDates, err := ps.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	portfolioReturns, startDates, endDates, err := ps.GetDailyReturns(data, from, to, currency, acctModel)
 	if err != nil {
 		return nil, fmt.Errorf("computing portfolio returns: %w", err)
 	}
@@ -470,7 +462,7 @@ func computeBenchmarkComparison(
 	acctModel models.AccountingModel,
 	riskFreeRate float64,
 ) (stats.BenchmarkMetrics, error) {
-	prices, err := mp.GetHistory(benchmarkSymbol, from.AddDate(0, 0, -7), to, false)
+	prices, err := mp.GetHistory(benchmarkSymbol, from.AddDate(0, 0, -7), to)
 	if err != nil {
 		return stats.BenchmarkMetrics{}, fmt.Errorf("fetching benchmark prices: %w", err)
 	}

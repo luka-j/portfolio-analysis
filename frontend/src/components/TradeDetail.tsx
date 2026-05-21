@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import HoverTooltip from './HoverTooltip'
 import { SecurityPriceChart } from './SecurityPriceChart'
 import ConfirmDialog from './ConfirmDialog'
-import { getPortfolioTrades, deleteTransaction, type TradeEntry } from '../api'
+import { getPortfolioTrades, deleteTransaction } from '../api'
 import { formatNumber, formatQuantity } from '../utils/format'
 
 interface Props {
@@ -41,49 +42,42 @@ function entryMethodBadge(method: string | undefined) {
 
 /** Expanded trade history panel, rendered inline below a portfolio row. */
 export function TradeDetail({ symbol, exchange, isin, name, displayCurrency, acctModel, privacy, portfolioInceptionDate, onTradeDeleted }: Props) {
-  const [trades, setTrades] = useState<TradeEntry[]>([])
-  const [resolvedDisplayCurrency, setResolvedDisplayCurrency] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const isOriginal = displayCurrency === 'Original'
   const reqCurrency = isOriginal ? 'USD' : displayCurrency
   const reqAcctModel = isOriginal ? 'original' : acctModel
 
-  const fetchTrades = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const res = await getPortfolioTrades(symbol, reqCurrency, exchange || '', 200, 0, reqAcctModel)
-      setTrades(res.trades || [])
-      setResolvedDisplayCurrency(res.display_currency || displayCurrency)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load trades')
-    } finally {
-      setLoading(false)
-    }
-  }, [symbol, displayCurrency, reqCurrency, reqAcctModel, exchange])
+  const { data: tradesData, isLoading: loading, error: queryError, refetch: fetchTrades } = useQuery({
+    queryKey: ['portfolioTrades', symbol, reqCurrency, exchange || '', reqAcctModel],
+    queryFn: () => getPortfolioTrades(symbol, reqCurrency, exchange || '', 200, 0, reqAcctModel),
+  })
 
-  useEffect(() => {
-    let cancelled = false
-    fetchTrades().catch(() => { if (!cancelled) setError('Failed to load trades') })
-    return () => { cancelled = true }
-  }, [fetchTrades])
+  const trades = tradesData?.trades ?? []
+  const resolvedDisplayCurrency = tradesData?.display_currency ?? displayCurrency
 
-  async function handleDelete(id: string) {
-    setDeleting(true)
-    try {
-      await deleteTransaction(id)
+  const error = queryError
+    ? (queryError instanceof Error ? queryError.message : String(queryError))
+    : deleteError
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteTransaction(id),
+    onSuccess: async () => {
       setPendingDeleteId(null)
       await fetchTrades()
       onTradeDeleted()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete')
-    } finally {
-      setDeleting(false)
+    },
+    onError: (err: unknown) => {
+      setDeleteError(err instanceof Error ? err.message : String(err))
     }
+  })
+
+  const deleting = deleteMutation.isPending
+
+  const handleDelete = (id: string) => {
+    setDeleteError('')
+    deleteMutation.mutate(id)
   }
 
   const hasTaxCostBasis = trades.some(t => t.tax_cost_basis !== undefined && t.tax_cost_basis !== null)

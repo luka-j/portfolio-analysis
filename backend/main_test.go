@@ -90,7 +90,7 @@ func (m *mockMarketProvider) addPrice(symbol string, price float64) {
 	m.prices[symbol] = points
 }
 
-func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	points, ok := m.prices[symbol]
 	if !ok {
 		return nil, fmt.Errorf("no mock data for symbol %s", symbol)
@@ -122,7 +122,7 @@ func (m *mockMarketProvider) TradingDates(from, to time.Time) ([]time.Time, erro
 	return dates, nil
 }
 
-func (m *mockMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockMarketProvider) GetLatestPrice(symbol string) (float64, error) {
 	points, ok := m.prices[symbol]
 	if !ok || len(points) == 0 {
 		return 0, fmt.Errorf("no mock data for symbol %s", symbol)

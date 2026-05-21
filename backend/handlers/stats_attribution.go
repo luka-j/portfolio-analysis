@@ -32,7 +32,6 @@ func (h *StatsHandler) GetAttribution(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -52,7 +51,7 @@ func (h *StatsHandler) GetAttribution(c *gin.Context) {
 		}
 	}
 
-	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel, cachedOnly)
+	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing per-position values: " + err.Error()})
 		return
@@ -71,7 +70,7 @@ func (h *StatsHandler) GetAttribution(c *gin.Context) {
 	}
 
 	// Portfolio TWR for reconciliation.
-	portfolioReturns, _, _, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	portfolioReturns, _, _, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
 	totalTWR := 0.0
 	if err == nil {
 		if sm := stats.CalculateStandaloneMetrics(portfolioReturns, riskFreeRate); true {
@@ -113,7 +112,6 @@ func (h *StatsHandler) GetCorrelations(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -126,7 +124,7 @@ func (h *StatsHandler) GetCorrelations(c *gin.Context) {
 		from = time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
-	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel, cachedOnly)
+	perPos, err := h.PortfolioService.GetDailyValuesPerPosition(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing per-position values: " + err.Error()})
 		return

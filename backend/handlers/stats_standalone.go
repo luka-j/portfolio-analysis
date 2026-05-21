@@ -54,10 +54,9 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	// Portfolio daily returns.
-	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel, cachedOnly)
+	portfolioReturns, startDates, endDates, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "computing portfolio returns: " + err.Error()})
 		return
@@ -103,7 +102,7 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 					continue
 				}
 
-				sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel, cachedOnly)
+				sRet, _, sEnd, err := h.PortfolioService.GetDailyReturns(syntheticData, from, to, currency, acctModel)
 				if err != nil {
 					results = append(results, models.StandaloneResult{Symbol: sym, Error: "computing scenario returns: " + err.Error()})
 					continue
@@ -139,7 +138,7 @@ func (h *StatsHandler) GetStandalone(c *gin.Context) {
 			}
 
 			// Market symbol — use shared helpers.
-			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel, cachedOnly)
+			priceMap, err := buildBenchmarkPriceMap(h.MarketProvider, h.CurrencyGetter, sym, from, to, currency, acctModel)
 			if err != nil {
 				results = append(results, models.StandaloneResult{
 					Symbol: sym,

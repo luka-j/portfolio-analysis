@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { addTransaction, type AddTransactionRequest, type PositionValue } from '../api'
 import AutocompleteInput, { type AutocompleteOption } from './AutocompleteInput'
 import DatePicker from './DatePicker'
@@ -26,10 +27,29 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
   const [currency, setCurrency] = useState('USD')
   const [commission, setCommission] = useState('')
   const [taxCostBasis, setTaxCostBasis] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+
+  const mutation = useMutation({
+    mutationFn: (args: { req: AddTransactionRequest; force: boolean }) => addTransaction(args.req),
+    onSuccess: (res, variables) => {
+      if (res.status === 'duplicate' && !variables.force) {
+        setDuplicateId(res.id)
+      } else {
+        setSaved(true)
+        setTimeout(() => {
+          onSuccess()
+          onClose()
+        }, 800)
+      }
+    },
+    onError: (err: unknown) => {
+      setError(err instanceof Error ? err.message : 'Failed to save transaction')
+    }
+  })
+
+  const submitting = mutation.isPending
 
   useEffect(() => {
     document.body.style.overflow = 'hidden'
@@ -49,7 +69,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
   const total = (parseFloat(quantity) || 0) * (parseFloat(price) || 0)
 
 
-  async function submit(force = false) {
+  function submit(force = false) {
     setError('')
     const qty = parseFloat(quantity)
     const prc = parseFloat(price)
@@ -77,23 +97,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
       req.tax_cost_basis = parseFloat(taxCostBasis) || 0
     }
 
-    setSubmitting(true)
-    try {
-      const res = await addTransaction(req)
-      if (res.status === 'duplicate' && !force) {
-        setDuplicateId(res.id)
-      } else {
-        setSaved(true)
-        setTimeout(() => {
-          onSuccess()
-          onClose()
-        }, 800)
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save transaction')
-    } finally {
-      setSubmitting(false)
-    }
+    mutation.mutate({ req, force })
   }
 
   const tabs: { key: TxType; label: string }[] = [

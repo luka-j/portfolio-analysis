@@ -354,7 +354,7 @@ func (h *ScenarioHandler) buildMetricsBundle(data *models.FlexQueryData, currenc
 	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	from := to.AddDate(-1, 0, 0) // 1-year window
 
-	returns, _, _, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, models.AccountingModelHistorical, false)
+	returns, _, _, err := h.PortfolioService.GetDailyReturns(data, from, to, currency, models.AccountingModelHistorical)
 	if err != nil || len(returns) == 0 {
 		// Graceful degradation: return empty bundle if data is insufficient.
 		return &metricsBundle{}, nil
@@ -364,7 +364,7 @@ func (h *ScenarioHandler) buildMetricsBundle(data *models.FlexQueryData, currenc
 
 	// Compact holdings summary.
 	holdingsSummary := ""
-	if result, err := h.PortfolioService.GetCurrentValue(data, currency, models.AccountingModelSpot, false); err == nil {
+	if result, err := h.PortfolioService.GetCurrentValue(data, currency, models.AccountingModelSpot); err == nil {
 		type pos struct {
 			Symbol string  `json:"symbol"`
 			Value  float64 `json:"value"`

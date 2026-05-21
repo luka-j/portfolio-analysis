@@ -98,7 +98,7 @@ type mockHandlerMarketProvider struct {
 	prices map[string][]models.PricePoint
 }
 
-func (m *mockHandlerMarketProvider) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+func (m *mockHandlerMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	pts, ok := m.prices[symbol]
 	if !ok {
 		return nil, fmt.Errorf("no mock data for %s", symbol)
@@ -129,7 +129,7 @@ func (m *mockHandlerMarketProvider) TradingDates(from, to time.Time) ([]time.Tim
 	return dates, nil
 }
 
-func (m *mockHandlerMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockHandlerMarketProvider) GetLatestPrice(symbol string) (float64, error) {
 	pts, ok := m.prices[symbol]
 	if !ok || len(pts) == 0 {
 		return 0, fmt.Errorf("no mock data for %s", symbol)

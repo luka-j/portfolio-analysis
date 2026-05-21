@@ -13,7 +13,7 @@ import (
 
 func getPriceAt(mp market.Provider, symbol string, date time.Time) (float64, error) {
 	from := date.AddDate(0, 0, -5)
-	prices, err := mp.GetHistory(symbol, from, date, false)
+	prices, err := mp.GetHistory(symbol, from, date)
 	if err != nil {
 		return 0, err
 	}
@@ -55,7 +55,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 		if cur == targetCur || fxSvc == nil {
 			return amount, nil
 		}
-		return fxSvc.Convert(amount, cur, targetCur, date, false)
+		return fxSvc.Convert(amount, cur, targetCur, date)
 	}
 
 	for _, t := range realData.Trades {
@@ -67,7 +67,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 			if val == 0 {
 				p, _ := getPriceAt(mp, t.Symbol, t.DateTime)
 				if p == 0 {
-					p, _ = mp.GetLatestPrice(t.Symbol, false)
+					p, _ = mp.GetLatestPrice(t.Symbol)
 				}
 				if p == 0 {
 					p = 1
@@ -77,7 +77,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 			if val > 0 {
 				cval := val
 				if t.Currency != targetCur && fxSvc != nil {
-					cval, _ = fxSvc.Convert(val, t.Currency, targetCur, t.DateTime, false)
+					cval, _ = fxSvc.Convert(val, t.Currency, targetCur, t.DateTime)
 				}
 				manualFlows = append(manualFlows, models.CashFlow{
 					Date:   t.DateTime,
@@ -137,7 +137,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 
 				price, err := getPriceAt(mp, item.Symbol, cf.Date)
 				if err != nil || price == 0 {
-					price, _ = mp.GetLatestPrice(item.Symbol, false)
+					price, _ = mp.GetLatestPrice(item.Symbol)
 					if price == 0 {
 						price = 1 // Prevent div by zero
 					}
@@ -150,7 +150,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 
 				var allocAmountNative float64 = allocAmount
 				if assetCur != targetCur && fxSvc != nil {
-					allocAmountNative, _ = fxSvc.Convert(allocAmount, targetCur, assetCur, cf.Date, false)
+					allocAmountNative, _ = fxSvc.Convert(allocAmount, targetCur, assetCur, cf.Date)
 				}
 
 				qty := allocAmountNative / price
@@ -188,7 +188,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 
 				price, err := getPriceAt(mp, item.Symbol, cf.Date)
 				if err != nil || price == 0 {
-					price, _ = mp.GetLatestPrice(item.Symbol, false)
+					price, _ = mp.GetLatestPrice(item.Symbol)
 					if price == 0 {
 						price = 1
 					}
@@ -202,7 +202,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 				nativeVal := qty * price
 				valTargetCur := nativeVal
 				if assetCur != targetCur && fxSvc != nil {
-					valTargetCur, _ = fxSvc.Convert(nativeVal, assetCur, targetCur, cf.Date, false)
+					valTargetCur, _ = fxSvc.Convert(nativeVal, assetCur, targetCur, cf.Date)
 				}
 
 				hVals = append(hVals, holdingVal{
@@ -230,7 +230,7 @@ func buildRedirectScenario(spec ScenarioSpec, realData *models.FlexQueryData, mp
 
 				sellValNative := sellValTargetCur
 				if hv.cur != targetCur && fxSvc != nil {
-					sellValNative, _ = fxSvc.Convert(sellValTargetCur, targetCur, hv.cur, cf.Date, false)
+					sellValNative, _ = fxSvc.Convert(sellValTargetCur, targetCur, hv.cur, cf.Date)
 				}
 
 				sellQty := sellValNative / hv.price

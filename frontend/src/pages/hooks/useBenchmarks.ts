@@ -37,7 +37,7 @@ export function useBenchmarks(params: BenchmarksParams) {
       try {
         const allSymsStr = [...benchmarkSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
         const [cumRes, comp] = await Promise.all([
-          benchmarkSymbols.length > 0 ? getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, benchmarkSymbols.join(','), active) : Promise.resolve({results: []}),
+          benchmarkSymbols.length > 0 ? getCumulativeSeries(effectiveFrom, to, currency, acctModel, benchmarkSymbols.join(','), active) : Promise.resolve({results: []}),
           comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active),
         ])
         if (benchmarkSymbols.length > 0) {
@@ -60,7 +60,7 @@ export function useBenchmarks(params: BenchmarksParams) {
     const refresh = async () => {
       const updated = await Promise.all(scenarioBenchmarks.map(async sb => {
         try {
-          const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, undefined, sb.id)
+          const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, undefined, sb.id)
           const twr = res.results.find(r => r.symbol === 'Portfolio')?.series ?? []
           const mwr = res.results.find(r => r.symbol === 'Portfolio-MWR')?.series ?? []
           return { ...sb, twr, mwr }
@@ -90,7 +90,7 @@ export function useBenchmarks(params: BenchmarksParams) {
       const allSymsStr = [...allSymbols, ...scenarioBenchmarks.map(sb => `scenario:${sb.id}`)].join(',')
       
       const [cumRes, comp] = await Promise.all([
-        getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, newSymbols.join(','), active),
+        getCumulativeSeries(effectiveFrom, to, currency, acctModel, newSymbols.join(','), active),
         comparePortfolio(allSymsStr, currency, effectiveFrom, to, acctModel, riskFreeRate, active),
       ])
       setCumulativeResults(prev => {
@@ -148,7 +148,7 @@ export function useBenchmarks(params: BenchmarksParams) {
     if (scenarioBenchmarks.find(sb => sb.id === id)) return
     setScenarioBenchmarkLoading(true)
     try {
-      const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, false, undefined, id)
+      const res = await getCumulativeSeries(effectiveFrom, to, currency, acctModel, undefined, id)
       const twr = res.results.find(r => r.symbol === 'Portfolio')?.series ?? []
       const mwr = res.results.find(r => r.symbol === 'Portfolio-MWR')?.series ?? []
       setScenarioBenchmarks(prev => [...prev, { id, name, twr, mwr }])

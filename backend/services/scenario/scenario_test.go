@@ -17,7 +17,7 @@ type mockMarketProvider struct {
 	errSym string
 }
 
-func (m *mockMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
+func (m *mockMarketProvider) GetLatestPrice(symbol string) (float64, error) {
 	if symbol == m.errSym {
 		return 0, errors.New("synthetic error")
 	}
@@ -28,7 +28,7 @@ func (m *mockMarketProvider) GetLatestPrice(symbol string, cachedOnly bool) (flo
 	return p, nil
 }
 
-func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+func (m *mockMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	pts, ok := m.hist[symbol]
 	if !ok {
 		return nil, errors.New("no history")

@@ -55,7 +55,6 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 	if !ok {
 		return
 	}
-	cachedOnly := parseCachedOnly(c)
 
 	from, to, err := parseDateRange(c)
 	if err != nil {
@@ -75,13 +74,13 @@ func (h *StatsHandler) GetStats(c *gin.Context) {
 	}
 
 	// Get daily values and cash flows for the calculations.
-	hist, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
+	hist, err := h.PortfolioService.GetDailyValues(data, from, to, currency, acctModel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel, cachedOnly, to)
+	cashFlows, err := h.PortfolioService.GetCashFlows(data, currency, acctModel, to)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

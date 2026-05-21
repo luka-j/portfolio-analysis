@@ -24,14 +24,14 @@ import (
 // Provider is the interface for fetching historical market data.
 // This allows swapping in a mock for testing.
 type Provider interface {
-	GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error)
+	GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error)
 	// TradingDates returns the set of market-open dates in [from, to], ordered ascending.
 	// Used by the portfolio service to skip non-trading days without forward-filling
 	// price data across every calendar day.
 	TradingDates(from, to time.Time) ([]time.Time, error)
 	// GetLatestPrice returns the most recent price for symbol, trying a live/intraday
 	// fetch first and falling back to the latest historical close.
-	GetLatestPrice(symbol string, cachedOnly bool) (float64, error)
+	GetLatestPrice(symbol string) (float64, error)
 }
 
 // CurrencyGetter can report the native trading currency of a symbol.
@@ -118,7 +118,7 @@ func (s *YahooFinanceService) HasCachedData(symbol string) bool {
 // GetHistory returns daily price data for the symbol in [from, to].
 // Concurrent callers for the same (symbol, from, to) are collapsed via singleflight
 // so that only one upstream Yahoo fetch is issued and all callers share the result.
-func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cachedOnly bool) ([]models.PricePoint, error) {
+func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
 	// PENDING_CASH is a synthetic cash bucket, not a real security — skip entirely.
 	if symbol == "PENDING_CASH" {
 		return nil, nil
@@ -126,10 +126,6 @@ func (s *YahooFinanceService) GetHistory(symbol string, from, to time.Time, cach
 	// Truncate dates to midnight for consistency.
 	fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
 	toDate := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
-
-	if cachedOnly {
-		return s.loadCache(symbol, fromDate, toDate)
-	}
 
 	key := fmt.Sprintf("%s|%d|%d", symbol, fromDate.Unix(), toDate.Unix())
 	v, err, _ := s.sfHistory.Do(key, func() (interface{}, error) {
@@ -440,28 +436,19 @@ func (s *YahooFinanceService) getCurrencyFromYahoo(symbol string) (string, error
 // It checks the database first; if cachedOnly is false and stored price is older than 5 minutes
 // it fetches fresh data from Yahoo. Concurrent fresh-fetches for the same symbol are
 // collapsed via singleflight so that N parallel callers issue only one Yahoo request.
-func (s *YahooFinanceService) GetCurrentPrice(symbol string, cachedOnly bool) (float64, error) {
+func (s *YahooFinanceService) GetCurrentPrice(symbol string) (float64, error) {
 	const maxAge = 5 * time.Minute
 
 	if s.DB != nil {
 		var cp models.CurrentPrice
 		if err := s.DB.Where("symbol = ?", symbol).First(&cp).Error; err == nil {
-			if cachedOnly || time.Since(cp.FetchedAt) < maxAge {
+			if time.Since(cp.FetchedAt) < maxAge {
 				if cp.Price == -1 {
 					return 0, fmt.Errorf("no current price fetched for %s (negative cache)", symbol)
 				}
 				return cp.Price, nil
 			}
 		}
-	}
-
-	if cachedOnly {
-		// FALLBACK: if no current price entry, try to get the latest close from history.
-		var md models.MarketData
-		if err := s.DB.Where("symbol = ?", symbol).Order("date DESC").First(&md).Error; err == nil {
-			return md.AdjClose, nil
-		}
-		return 0, fmt.Errorf("no cached price for %s", symbol)
 	}
 
 	v, err, _ := s.sfCurrent.Do(symbol, func() (interface{}, error) {
@@ -567,8 +554,8 @@ func (s *YahooFinanceService) fetchCurrentPriceFromYahoo(symbol string) (float64
 // GetLatestPrice returns the most recent price for symbol by trying the live
 // intraday price first (via GetCurrentPrice) and falling back to the latest
 // historical close from the last 5 days.
-func (s *YahooFinanceService) GetLatestPrice(symbol string, cachedOnly bool) (float64, error) {
-	p, err := s.GetCurrentPrice(symbol, cachedOnly)
+func (s *YahooFinanceService) GetLatestPrice(symbol string) (float64, error) {
+	p, err := s.GetCurrentPrice(symbol)
 	if err == nil && p > 0 {
 		return p, nil
 	}
@@ -577,7 +564,7 @@ func (s *YahooFinanceService) GetLatestPrice(symbol string, cachedOnly bool) (fl
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	lookback := today.AddDate(0, 0, -5)
 
-	prices, histErr := s.GetHistory(symbol, lookback, today, cachedOnly)
+	prices, histErr := s.GetHistory(symbol, lookback, today)
 	if histErr == nil && len(prices) > 0 {
 		last := prices[len(prices)-1]
 		if last.AdjClose != 0 {

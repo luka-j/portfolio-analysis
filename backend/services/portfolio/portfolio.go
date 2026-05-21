@@ -25,7 +25,7 @@ type Service struct {
 	CashBucketExpiryDays int
 
 	// sfDailyValues collapses concurrent GetDailyValuesFor calls for the same
-	// (userHash, from, to, currency, acctModel, cachedOnly) tuple. This matters
+	// (userHash, from, to, currency, acctModel) tuple. This matters
 	// because history/stats/returns handlers all derive their output from the
 	// same underlying daily-values computation, and the frontend commonly fires
 	// them in parallel on landing.
@@ -44,17 +44,15 @@ func NewService(mp market.Provider, fxSvc *fx.Service, cashBucketExpiryDays int)
 // for concurrent use by the parallel holdings loop.
 type fxMemo struct {
 	fx         *fx.Service
-	cachedOnly bool
 
 	mu       sync.RWMutex
 	spot     map[string]float64            // key: "from|to"
 	hist     map[string]map[string]float64 // outer: "from|to", inner: "YYYY-MM-DD"
 }
 
-func newFXMemo(svc *fx.Service, cachedOnly bool) *fxMemo {
+func newFXMemo(svc *fx.Service) *fxMemo {
 	return &fxMemo{
 		fx:         svc,
-		cachedOnly: cachedOnly,
 		spot:       make(map[string]float64),
 		hist:       make(map[string]map[string]float64),
 	}
@@ -72,7 +70,7 @@ func (m *fxMemo) SpotRate(from, to string) (float64, error) {
 		return r, nil
 	}
 	m.mu.RUnlock()
-	r, err := m.fx.GetSpotRate(from, to, m.cachedOnly)
+	r, err := m.fx.GetSpotRate(from, to)
 	if err != nil {
 		return 0, err
 	}
@@ -97,7 +95,7 @@ func (m *fxMemo) HistoricalRate(from, to string, date time.Time) (float64, error
 		}
 	}
 	m.mu.RUnlock()
-	r, err := m.fx.GetRate(from, to, date, m.cachedOnly)
+	r, err := m.fx.GetRate(from, to, date)
 	if err != nil {
 		return 0, err
 	}
@@ -212,8 +210,8 @@ func (s *Service) getYahooSymbolMap(data *models.FlexQueryData) map[string]strin
 // GetCurrentValue returns the portfolio value in the requested display currency.
 // Equivalent to GetCurrentValueMulti with a single-currency slice; retained for
 // callers that only need one currency projection.
-func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioValueResponse, error) {
-	results, err := s.GetCurrentValueMulti(data, []string{currency}, acctModel, cachedOnly)
+func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) (*models.PortfolioValueResponse, error) {
+	results, err := s.GetCurrentValueMulti(data, []string{currency}, acctModel)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +223,7 @@ func (s *Service) GetCurrentValue(data *models.FlexQueryData, currency string, a
 // the market provider's singleflight) and projected to all target currencies locally,
 // so wall-clock cost is O(unique_symbols / limiter_rate) rather than O(currencies × symbols).
 // The first currency in the slice is the "primary" one, used for scalar Price/Value fields.
-func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []string, acctModel models.AccountingModel, cachedOnly bool) (map[string]*models.PortfolioValueResponse, error) {
+func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []string, acctModel models.AccountingModel) (map[string]*models.PortfolioValueResponse, error) {
 	if len(currencies) == 0 {
 		return nil, fmt.Errorf("GetCurrentValueMulti: at least one currency required")
 	}
@@ -270,20 +268,20 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 		wg.Add(1)
 		go func(k, sym string) {
 			defer wg.Done()
-			p, err := s.MarketProvider.GetLatestPrice(sym, cachedOnly)
+			p, err := s.MarketProvider.GetLatestPrice(sym)
 			priceMu.Lock()
 			priceByKey[k] = priceResult{price: p, err: err}
 			priceMu.Unlock()
 
 			// Pre-warm caches in the background.
-			// If it's a cachedOnly request, we pre-warm both the latest price and history.
+			// If it's a false request, we pre-warm both the latest price and history.
 			// If it's a fresh request, the latest price was already fetched, but we still pre-warm history
 			// in the background so that subsequent timeline queries (history, returns, stats) are warmed.
 			go func() {
-				if cachedOnly {
-					_, _ = s.MarketProvider.GetLatestPrice(sym, false)
+				if false {
+					_, _ = s.MarketProvider.GetLatestPrice(sym)
 				}
-				_, _ = s.MarketProvider.GetHistory(sym, inception, today, false)
+				_, _ = s.MarketProvider.GetHistory(sym, inception, today)
 			}()
 		}(k, querySymbol)
 	}
@@ -297,7 +295,7 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 		realizedGL map[string]float64
 		commission map[string]float64
 	}
-	sharedMemo := newFXMemo(s.FXService, cachedOnly)
+	sharedMemo := newFXMemo(s.FXService)
 
 	ccyMaps := make(map[string]perCurrencyMaps, len(currencies))
 	for _, cur := range currencies {
@@ -439,8 +437,8 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 
 // computeCurrentValueMaps is a backwards-compatible wrapper around
 // computeCurrentValueMapsMemo that allocates a fresh FX memo for the call.
-func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool) (costBasisMap, realizedGLMap, commissionsMap map[string]float64) {
-	return s.computeCurrentValueMapsMemo(data, currency, acctModel, newFXMemo(s.FXService, cachedOnly))
+func (s *Service) computeCurrentValueMaps(data *models.FlexQueryData, currency string, acctModel models.AccountingModel) (costBasisMap, realizedGLMap, commissionsMap map[string]float64) {
+	return s.computeCurrentValueMapsMemo(data, currency, acctModel, newFXMemo(s.FXService))
 }
 
 // computeCurrentValueMapsMemo returns cost-basis, realized GL, and commissions maps in
@@ -583,7 +581,7 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 
 		convertedPrice := t.Price
 		if !isOriginal && t.Currency != displayCurrency {
-			cp, err := s.FXService.Convert(t.Price, t.Currency, displayCurrency, t.DateTime, false) // trades usually don't need cachedOnly logic
+			cp, err := s.FXService.Convert(t.Price, t.Currency, displayCurrency, t.DateTime) // trades usually don't need false logic
 			if err != nil {
 				// Fall back to native price on FX error
 				cp = t.Price
@@ -633,7 +631,7 @@ func (s *Service) GetTradesForSymbol(data *models.FlexQueryData, symbol, exchang
 
 
 // GetDailyValues returns the portfolio value for each day in [from, to].
-// Concurrent callers with the same (userHash, from, to, currency, acctModel, cachedOnly)
+// Concurrent callers with the same (userHash, from, to, currency, acctModel)
 // tuple share one underlying computation via singleflight — this is the dominant
 // wall-clock win when the landing page fires history + stats + returns in parallel
 // for the same range. Results are cloned so downstream mutation is safe.
@@ -642,18 +640,16 @@ func (s *Service) GetDailyValues(
 	from, to time.Time,
 	currency string,
 	acctModel models.AccountingModel,
-	cachedOnly bool,
 ) (*models.PortfolioHistoryResponse, error) {
-	key := fmt.Sprintf("dv|%s|%s|%s|%s|%s|%v",
+	key := fmt.Sprintf("dv|%s|%s|%s|%s|%s",
 		data.UserHash,
 		from.Format("2006-01-02"),
 		to.Format("2006-01-02"),
 		currency,
 		string(acctModel),
-		cachedOnly,
 	)
 	v, err, _ := s.sfDailyValues.Do(key, func() (interface{}, error) {
-		return s.getDailyValuesUncached(data, from, to, currency, acctModel, cachedOnly)
+		return s.getDailyValuesUncached(data, from, to, currency, acctModel)
 	})
 	if err != nil {
 		return nil, err
@@ -676,7 +672,6 @@ func (s *Service) getDailyValuesUncached(
 	from, to time.Time,
 	currency string,
 	acctModel models.AccountingModel,
-	cachedOnly bool,
 ) (*models.PortfolioHistoryResponse, error) {
 
 	// Validate single currency when using original accounting model.
@@ -711,7 +706,7 @@ func (s *Service) getDailyValuesUncached(
 		for fromCur := range nativeCurrencies {
 			pairKey := fromCur + currency
 			fxSymbol := fmt.Sprintf("%s%s=X", fromCur, currency)
-			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
+			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to)
 			if err != nil {
 				slog.Warn("portfolio: FX history prefetch failed", "pair", fxSymbol, "err", err)
 				continue
@@ -735,9 +730,9 @@ func (s *Service) getDailyValuesUncached(
 				return amount, nil
 			}
 			if acctModel == models.AccountingModelSpot {
-				return s.FXService.ConvertSpot(amount, cur, currency, cachedOnly)
+				return s.FXService.ConvertSpot(amount, cur, currency)
 			}
-			return s.FXService.Convert(amount, cur, currency, date, cachedOnly)
+			return s.FXService.Convert(amount, cur, currency, date)
 		}
 		br, err := cashbucket.Process(tradeFlows, nil, makeDividendSlice(data.CashDividends), s.CashBucketExpiryDays, to, bucketConvertFn)
 		if err != nil {
@@ -791,7 +786,7 @@ func (s *Service) getDailyValuesUncached(
 		wg.Add(1)
 		go func(req *symbolFetch) {
 			defer wg.Done()
-			req.prices, req.err = s.MarketProvider.GetHistory(req.querySymbol, from, to, cachedOnly)
+			req.prices, req.err = s.MarketProvider.GetHistory(req.querySymbol, from, to)
 		}(f)
 	}
 	wg.Wait()
@@ -848,7 +843,7 @@ func (s *Service) getDailyValuesUncached(
 				if nativeCurrency == currency || nativeCurrency == "" {
 					dailyTotals[i] += nativeVal
 				} else {
-					v, err := s.FXService.ConvertSpot(nativeVal, nativeCurrency, currency, cachedOnly)
+					v, err := s.FXService.ConvertSpot(nativeVal, nativeCurrency, currency)
 					if err != nil {
 						return nil, err
 					}
@@ -866,7 +861,7 @@ func (s *Service) getDailyValuesUncached(
 						}
 					}
 					// fxData miss — fall back to live DB query (should be rare).
-					v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d, cachedOnly)
+					v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d)
 					if err != nil {
 						return nil, err
 					}
@@ -940,19 +935,18 @@ func fxRateAt(prices []models.PricePoint, d time.Time) float64 {
 
 // GetCashFlows returns external cash flows for IRR/TWR calculation, converted to the target currency.
 // It applies cash-bucket logic to prevent cross-broker reinvestments from appearing as outflows+inflows.
-// Concurrent callers with the same (userHash, currency, acctModel, cachedOnly, asOf)
+// Concurrent callers with the same (userHash, currency, acctModel, asOf)
 // tuple share one underlying computation via singleflight. Results are cloned per
 // caller for safety.
-func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) ([]models.CashFlow, error) {
-	key := fmt.Sprintf("cf|%s|%s|%s|%v|%s",
+func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, asOf time.Time) ([]models.CashFlow, error) {
+	key := fmt.Sprintf("cf|%s|%s|%s|%s",
 		data.UserHash,
 		currency,
 		string(acctModel),
-		cachedOnly,
 		asOf.Format("2006-01-02"),
 	)
 	v, err, _ := s.sfDailyValues.Do(key, func() (interface{}, error) {
-		return s.getCashFlowsUncached(data, currency, acctModel, cachedOnly, asOf)
+		return s.getCashFlowsUncached(data, currency, acctModel, asOf)
 	})
 	if err != nil {
 		return nil, err
@@ -965,7 +959,7 @@ func (s *Service) GetCashFlows(data *models.FlexQueryData, currency string, acct
 
 // getCashFlowsUncached performs the actual cash-flow computation; always invoked
 // through GetCashFlows so the singleflight wrapper can dedup concurrent calls.
-func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) ([]models.CashFlow, error) {
+func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, asOf time.Time) ([]models.CashFlow, error) {
 	var rawTradeFlows []models.Trade
 	for _, t := range data.Trades {
 		if isFXTrade(t) || t.BuySell == "TRANSFER_IN" {
@@ -987,9 +981,9 @@ func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency stri
 		var err error
 		if ct.Currency != currency && acctModel != models.AccountingModelOriginal {
 			if acctModel == models.AccountingModelSpot {
-				amount, err = s.FXService.ConvertSpot(amount, ct.Currency, currency, cachedOnly)
+				amount, err = s.FXService.ConvertSpot(amount, ct.Currency, currency)
 			} else {
-				amount, err = s.FXService.Convert(amount, ct.Currency, currency, ct.DateTime, cachedOnly)
+				amount, err = s.FXService.Convert(amount, ct.Currency, currency, ct.DateTime)
 			}
 			if err != nil {
 				return nil, err
@@ -1004,9 +998,9 @@ func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency stri
 			return amount, nil
 		}
 		if acctModel == models.AccountingModelSpot {
-			return s.FXService.ConvertSpot(amount, from, currency, cachedOnly)
+			return s.FXService.ConvertSpot(amount, from, currency)
 		}
-		return s.FXService.Convert(amount, from, currency, date, cachedOnly)
+		return s.FXService.Convert(amount, from, currency, date)
 	}
 
 	result, err := cashbucket.Process(rawTradeFlows, dividendFlows, makeDividendSlice(data.CashDividends), s.CashBucketExpiryDays, asOf, convertFn)
@@ -1020,13 +1014,13 @@ func (s *Service) getCashFlowsUncached(data *models.FlexQueryData, currency stri
 // GetDailyReturns returns cash-flow-adjusted daily portfolio return series for statistics.
 // Cash flows (deposits/withdrawals) are removed from each day's return so that the series
 // reflects pure market performance, comparable to a benchmark's price return series.
-func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) ([]float64, []string, []string, error) {
-	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, cachedOnly) 
+func (s *Service) GetDailyReturns(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) ([]float64, []string, []string, error) {
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel) 
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly, to)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, to)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1083,7 +1077,6 @@ func (s *Service) GetDailyValuesPerPosition(
 	from, to time.Time,
 	currency string,
 	acctModel models.AccountingModel,
-	cachedOnly bool,
 ) (*PerPositionDailyValues, error) {
 	if acctModel == models.AccountingModelOriginal {
 		currencies := make(map[string]bool)
@@ -1117,7 +1110,7 @@ func (s *Service) GetDailyValuesPerPosition(
 		for fromCur := range nativeCurrencies {
 			pairKey := fromCur + currency
 			fxSymbol := fmt.Sprintf("%s%s=X", fromCur, currency)
-			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to, cachedOnly)
+			pts, err := s.MarketProvider.GetHistory(fxSymbol, from.AddDate(0, 0, -5), to)
 			if err != nil {
 				slog.Warn("portfolio: FX history prefetch failed (per-position)", "pair", fxSymbol, "err", err)
 				continue
@@ -1164,7 +1157,7 @@ func (s *Service) GetDailyValuesPerPosition(
 		wg.Add(1)
 		go func(req *symbolFetch) {
 			defer wg.Done()
-			req.prices, req.err = s.MarketProvider.GetHistory(req.querySymbol, from, to, cachedOnly)
+			req.prices, req.err = s.MarketProvider.GetHistory(req.querySymbol, from, to)
 		}(f)
 	}
 	wg.Wait()
@@ -1189,7 +1182,7 @@ func (s *Service) GetDailyValuesPerPosition(
 		case models.AccountingModelOriginal:
 			return 1
 		case models.AccountingModelSpot:
-			r, err := s.FXService.ConvertSpot(1, nativeCcy, currency, cachedOnly)
+			r, err := s.FXService.ConvertSpot(1, nativeCcy, currency)
 			if err != nil {
 				return 0
 			}
@@ -1201,7 +1194,7 @@ func (s *Service) GetDailyValuesPerPosition(
 					return rate
 				}
 			}
-			r, err := s.FXService.Convert(1, nativeCcy, currency, d, cachedOnly)
+			r, err := s.FXService.Convert(1, nativeCcy, currency, d)
 			if err != nil {
 				return 0
 			}
@@ -1299,7 +1292,7 @@ func (s *Service) GetDailyValuesPerPosition(
 				if nativeCurrency == currency || nativeCurrency == "" {
 					displayVal = nativeVal
 				} else {
-					v, err := s.FXService.ConvertSpot(nativeVal, nativeCurrency, currency, cachedOnly)
+					v, err := s.FXService.ConvertSpot(nativeVal, nativeCurrency, currency)
 					if err != nil {
 						continue
 					}
@@ -1314,14 +1307,14 @@ func (s *Service) GetDailyValuesPerPosition(
 						if rate := fxRateAt(pts, d); rate != 0 {
 							displayVal = nativeVal * rate
 						} else {
-							v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d, cachedOnly)
+							v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d)
 							if err != nil {
 								continue
 							}
 							displayVal = v
 						}
 					} else {
-						v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d, cachedOnly)
+						v, err := s.FXService.Convert(nativeVal, nativeCurrency, currency, d)
 						if err != nil {
 							continue
 						}
@@ -1349,8 +1342,8 @@ func (s *Service) GetDailyValuesPerPosition(
 // over [from, to].  Each data point expresses the portfolio's growth factor (as a
 // percentage) relative to the first day, properly adjusted for external cash flows
 // (deposits / withdrawals) so that capital movements do not distort the metric.
-func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioHistoryResponse, error) {
-	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
+func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) (*models.PortfolioHistoryResponse, error) {
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,7 +1355,7 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 		}, nil
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly, to)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, to)
 	if err != nil {
 		return nil, err
 	}
@@ -1415,8 +1408,8 @@ func (s *Service) GetCumulativeTWR(data *models.FlexQueryData, from, to time.Tim
 	}, nil
 }
 
-func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel, cachedOnly bool) (*models.PortfolioHistoryResponse, error) {
-	hist, err := s.GetDailyValues(data, from, to, currency, acctModel, cachedOnly)
+func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Time, currency string, acctModel models.AccountingModel) (*models.PortfolioHistoryResponse, error) {
+	hist, err := s.GetDailyValues(data, from, to, currency, acctModel)
 	if err != nil {
 		return nil, err
 	}
@@ -1428,7 +1421,7 @@ func (s *Service) GetCumulativeMWR(data *models.FlexQueryData, from, to time.Tim
 		}, nil
 	}
 
-	cashFlows, err := s.GetCashFlows(data, currency, acctModel, cachedOnly, to)
+	cashFlows, err := s.GetCashFlows(data, currency, acctModel, to)
 	if err != nil {
 		return nil, err
 	}
@@ -1504,8 +1497,8 @@ func makeDividendSlice(cds []models.CashDividend) []cashbucket.Dividend {
 }
 
 // computePendingCash returns the current aggregate value of all active (non-expired) cash buckets.
-func (s *Service) computePendingCash(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, cachedOnly bool, asOf time.Time) (float64, error) {
-	return s.computePendingCashMemo(data, currency, acctModel, newFXMemo(s.FXService, cachedOnly), asOf)
+func (s *Service) computePendingCash(data *models.FlexQueryData, currency string, acctModel models.AccountingModel, asOf time.Time) (float64, error) {
+	return s.computePendingCashMemo(data, currency, acctModel, newFXMemo(s.FXService), asOf)
 }
 
 // computePendingCashMemo is the memo-aware variant so that callers computing

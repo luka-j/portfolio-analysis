@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
+import { createContext, useContext, useEffect, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { listScenarios, type ScenarioSummary } from '../api'
 import { usePersistentState } from '../utils/usePersistentState'
 
@@ -23,27 +24,23 @@ const ScenarioContext = createContext<ScenarioContextValue>({
 export function ScenarioProvider({ children }: { children: React.ReactNode }) {
   const [active, setActive] = usePersistentState<number | null>('scenario_active', null)
   const [compare, setCompare] = usePersistentState<number | null>('scenario_compare', null)
-  const [scenarios, setScenarios] = useState<ScenarioSummary[]>([])
-  const mountedRef = useRef(true)
+  const queryClient = useQueryClient()
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => { mountedRef.current = false }
-  }, [])
+  const { data: scenarios = [] } = useQuery({
+    queryKey: ['scenarios'],
+    queryFn: async () => {
+      try {
+        const list = await listScenarios()
+        return list ?? []
+      } catch {
+        return []
+      }
+    },
+  })
 
   const refresh = useCallback(async () => {
-    try {
-      const list = await listScenarios()
-      if (mountedRef.current) setScenarios(list ?? [])
-    } catch {
-      // swallow — user may not be logged in yet
-    }
-  }, [])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh()
-  }, [refresh])
+    await queryClient.invalidateQueries({ queryKey: ['scenarios'] })
+  }, [queryClient])
 
   // If a persisted active/compare scenario no longer exists after refresh, reset it.
   useEffect(() => {

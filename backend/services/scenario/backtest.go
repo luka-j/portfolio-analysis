@@ -48,7 +48,7 @@ func buildBacktest(spec ScenarioSpec, mp market.Provider, fxSvc *fx.Service) (*m
 		// expects Yahoo symbols (e.g. "4GLD.DE"). For basket items we only have item.Symbol
 		// as input, so we try the symbol as-is first. Users must enter Yahoo-format symbols
 		// for backtest to work — this is documented in the scenario editor UI.
-		pts, err := mp.GetHistory(item.Symbol, cfg.StartDate.Time().AddDate(0, 0, -5), endDate, false)
+		pts, err := mp.GetHistory(item.Symbol, cfg.StartDate.Time().AddDate(0, 0, -5), endDate)
 		if err != nil || len(pts) == 0 {
 			return nil, fmt.Errorf("no historical data for backtest symbol %s: %w", item.Symbol, err)
 		}
@@ -202,7 +202,7 @@ func addAllocationTrades(
 		allocationCurrency := totalAmount * weight
 		allocationNative := allocationCurrency
 		if sym.currency != currency && fxSvc != nil {
-			rate, err := fxSvc.GetRate(currency, sym.currency, tradeDate, false)
+			rate, err := fxSvc.GetRate(currency, sym.currency, tradeDate)
 			if err != nil || rate == 0 {
 				return fmt.Errorf("FX %s→%s on %s for %s: %w", currency, sym.currency, ds, sym.symbol, err)
 			}
