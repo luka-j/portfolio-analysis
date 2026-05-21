@@ -102,3 +102,9 @@ a {
 .nav-link.active::after {
   width: 100%;
 }
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

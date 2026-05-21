@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import PageLayout from '../components/PageLayout'
 import SegmentedControl from '../components/SegmentedControl'
-import Spinner from '../components/Spinner'
 import ErrorAlert from '../components/ErrorAlert'
+import { Skeleton } from '../components/Skeleton'
 import { getPortfolioBreakdown, type BreakdownSection, type BreakdownEntry } from '../api'
 import { CURRENCIES } from '../utils/format'
 import { usePersistentState } from '../utils/usePersistentState'
@@ -223,7 +223,19 @@ export default function BreakdownPage() {
           </div>
         </div>
 
-        {loading && <Spinner label="Loading breakdowns…" className="py-40" />}
+        {loading && (
+          <div className="flex flex-col gap-12 animate-fade-in pb-20">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="py-2 w-full flex flex-col items-center">
+                <Skeleton className="h-8 w-64 mb-6" />
+                <div className="flex flex-col lg:flex-row gap-12 items-center lg:items-start w-full">
+                  <Skeleton className="w-72 h-72 rounded-full shrink-0" />
+                  <Skeleton className="flex-1 w-full max-w-2xl h-72" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {error && !loading && <ErrorAlert message={error} className="mb-8" />}
 

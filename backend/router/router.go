@@ -140,6 +140,8 @@ func buildRouter(
 	// Stats endpoints.
 	sh := handlers.NewStatsHandler(svc.Repo, svc.Portfolio, mp, svc.FX, cg)
 	sh.PortfolioResolver = resolver
+	api.GET("/portfolio/analysis-dashboard", sh.GetAnalysisDashboard)
+	api.GET("/portfolio/analysis-holdings", sh.GetAnalysisHoldings)
 	api.GET("/portfolio/stats", sh.GetStats)
 	api.GET("/portfolio/compare", sh.Compare)
 	api.GET("/portfolio/standalone", sh.GetStandalone)

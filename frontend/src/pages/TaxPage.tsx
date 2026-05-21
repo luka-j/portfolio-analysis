@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
-import Spinner from '../components/Spinner'
 import SegmentedControl from '../components/SegmentedControl'
 import SelectInput from '../components/SelectInput'
 import ErrorAlert from '../components/ErrorAlert'
@@ -10,6 +9,7 @@ import type { TaxReportResponse, TaxTransaction } from '../api'
 import { escapeCSVField } from '../utils/format'
 import { usePrivacy } from '../utils/PrivacyContext'
 import { useScenario } from '../context/ScenarioContext'
+import { Skeleton } from '../components/Skeleton'
 
 type FxMethod = 'historical' | 'universal'
 
@@ -227,7 +227,19 @@ export default function TaxPage() {
         )}
 
         {loading ? (
-          <Spinner label="Calculating tax report…" className="py-40" />
+          <div className="flex flex-col gap-16 w-full max-w-6xl pb-12 opacity-60">
+            {[1, 2].map(i => (
+              <section key={i} className="flex flex-col items-center w-full">
+                <Skeleton className="h-8 w-64 mb-6" />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 w-full">
+                  {[1, 2, 3].map(j => <Skeleton key={j} className="h-24 rounded-2xl" />)}
+                </div>
+                <div className="w-full flex flex-col gap-2 mt-4">
+                  {[...Array(5)].map((_, j) => <Skeleton key={j} className="h-12 w-full" />)}
+                </div>
+              </section>
+            ))}
+          </div>
         ) : error ? (
           <ErrorAlert message={error} className="mb-8" />
         ) : report ? (

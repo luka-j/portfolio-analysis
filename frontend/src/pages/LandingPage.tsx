@@ -15,6 +15,7 @@ import { formatCurrencyCompact, formatDate, CURRENCIES, CURRENCY_SYMBOLS, getFro
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
 import { useScenario } from '../context/ScenarioContext'
+import { Skeleton } from '../components/Skeleton'
 
 const PERIODS = [
   { label: '1M', months: 1 },
@@ -542,7 +543,7 @@ export default function LandingPage() {
               <div className="absolute top-2 right-2 z-10 w-3.5 h-3.5 rounded-full border border-indigo-400/30 border-t-indigo-300/60 animate-spin opacity-50" />
             )}
             {chartLoading ? (
-              <div className="h-full flex items-center justify-center text-slate-500 font-black uppercase tracking-[0.3em] text-[10px] animate-pulse">Loading chart…</div>
+              <Skeleton className="absolute inset-0 z-10 rounded-2xl" />
             ) : chartData.length === 0 ? (
               <div className="h-full flex items-center justify-center text-slate-500 font-black uppercase tracking-[0.3em] text-[10px]">No data available</div>
             ) : (

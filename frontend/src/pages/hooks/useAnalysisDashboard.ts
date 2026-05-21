@@ -1,10 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
-  getPortfolioStats,
-  getPortfolioReturns,
+  getAnalysisDashboard,
+  getAnalysisHoldings,
   getStandaloneMetrics,
-  getAttribution,
-  getCorrelations,
   type StatsResponse,
   type DailyValue,
   type StandaloneResult,
@@ -13,7 +11,7 @@ import {
 import type { AnalysisParams } from './types'
 import { formatSymbolName } from './types'
 
-export function useAnalysisData(params: AnalysisParams) {
+export function useAnalysisDashboard(params: AnalysisParams) {
   const { currency, acctModel, from, to, effectiveFrom, active, riskFreeRate, scenarios } = params
 
   const [stats, setStats] = useState<StatsResponse | null>(null)
@@ -38,60 +36,43 @@ export function useAnalysisData(params: AnalysisParams) {
 
   const loadGenRef = useRef(0)
 
-  const loadData = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     loadGenRef.current += 1
     const gen = loadGenRef.current
     setLoading(true)
     setRefreshing(false)
     setError('')
 
-    let freshStats = false
-    let freshHist = false
+    let freshArrived = false
 
-    const checkCachedDone = () => {
-      if (gen === loadGenRef.current && !freshStats && !freshHist) {
+    getAnalysisDashboard(from, to, currency, acctModel, riskFreeRate, true, undefined, active).then(res => {
+      if (gen === loadGenRef.current && !freshArrived && Object.keys(res.stats).length > 0) {
+        setStats({ currency: res.currency, accounting_model: res.accounting_model, statistics: res.stats })
+        setPortfolioHistory(res.twr_history ?? [])
+        setMwrHistory(res.mwr_history ?? [])
         setLoading(false)
         setRefreshing(true)
       }
-    }
-
-    getPortfolioStats(from, to, currency, acctModel, true, undefined, active).then(st => {
-      if (gen === loadGenRef.current && !freshStats && Object.keys(st.statistics).length > 0) {
-        setStats(st)
-        checkCachedDone()
-      }
     }).catch(() => {})
 
-    getPortfolioReturns(from, to, currency, acctModel, 'twr', true, undefined, active).then(hist => {
-      if (gen === loadGenRef.current && !freshHist && hist.data.length > 0) {
-        setPortfolioHistory(hist.data ?? [])
-        checkCachedDone()
+    getAnalysisDashboard(from, to, currency, acctModel, riskFreeRate, false, undefined, active).then(res => {
+      if (gen === loadGenRef.current) {
+        freshArrived = true
+        setStats({ currency: res.currency, accounting_model: res.accounting_model, statistics: res.stats })
+        setPortfolioHistory(res.twr_history ?? [])
+        setMwrHistory(res.mwr_history ?? [])
       }
-    }).catch(() => {})
-
-    Promise.all([
-      getPortfolioStats(from, to, currency, acctModel, false, undefined, active).then(st => {
-        freshStats = true
-        if (gen === loadGenRef.current) setStats(st)
-      }),
-      getPortfolioReturns(from, to, currency, acctModel, 'twr', false, undefined, active).then(hist => {
-        freshHist = true
-        if (gen === loadGenRef.current) setPortfolioHistory(hist.data ?? [])
-      }),
-      getPortfolioReturns(from, to, currency, acctModel, 'mwr', false, undefined, active).then(hist => {
-        if (gen === loadGenRef.current) setMwrHistory(hist.data ?? [])
-      }).catch(() => {}),
-    ]).catch(err => {
-      if (gen === loadGenRef.current) setError(err instanceof Error ? err.message : 'Failed to load')
+    }).catch(err => {
+      if (gen === loadGenRef.current) setError(err instanceof Error ? err.message : 'Failed to load dashboard')
     }).finally(() => {
       if (gen === loadGenRef.current) {
         setLoading(false)
         setRefreshing(false)
       }
     })
-  }, [currency, acctModel, from, to, active])
+  }, [currency, acctModel, from, to, active, riskFreeRate])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { loadDashboard() }, [loadDashboard])
 
   const loadStandalone = useCallback(async (symbols = '') => {
     const gen = loadGenRef.current
@@ -128,13 +109,10 @@ export function useAnalysisData(params: AnalysisParams) {
     setHoldingsLoading(true)
     setHoldingsError('')
     try {
-      const [attrRes, corrRes] = await Promise.all([
-        getAttribution(effectiveFrom, to, currency, acctModel, riskFreeRate, active),
-        getCorrelations(effectiveFrom, to, currency, acctModel, active),
-      ])
-      setAttributionData(attrRes.positions)
-      setAttributionTWR(attrRes.total_twr)
-      setCorrelationData({ symbols: corrRes.symbols, matrix: corrRes.matrix })
+      const res = await getAnalysisHoldings(effectiveFrom, to, currency, acctModel, riskFreeRate, false, undefined, active)
+      setAttributionData(res.attribution.positions)
+      setAttributionTWR(res.attribution.total_twr)
+      setCorrelationData({ symbols: res.correlations.symbols, matrix: res.correlations.matrix })
     } catch (err) {
       setHoldingsError(err instanceof Error ? err.message : 'Failed to load holdings data')
     } finally {

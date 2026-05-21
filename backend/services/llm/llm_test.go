@@ -16,11 +16,12 @@ func TestPortfolioTools(t *testing.T) {
 	if tool == nil {
 		t.Fatal("PortfolioTools() returned nil")
 	}
-	if len(tool.FunctionDeclarations) != 12 {
-		t.Fatalf("expected 12 function declarations, got %d", len(tool.FunctionDeclarations))
+	if len(tool.FunctionDeclarations) != 13 {
+		t.Fatalf("expected 13 function declarations, got %d", len(tool.FunctionDeclarations))
 	}
 
 	expectedNames := []string{
+		llm.ToolRunPortfolioAnalysis,
 		llm.ToolGetCurrentAllocations,
 		llm.ToolGetRiskMetrics,
 		llm.ToolGetBenchmarkMetrics,
@@ -51,6 +52,7 @@ func TestPortfolioTools(t *testing.T) {
 // TestToolConstants verifies that the tool name constants are non-empty and unique.
 func TestToolConstants(t *testing.T) {
 	names := []string{
+		llm.ToolRunPortfolioAnalysis,
 		llm.ToolGetCurrentAllocations,
 		llm.ToolGetRiskMetrics,
 		llm.ToolGetBenchmarkMetrics,

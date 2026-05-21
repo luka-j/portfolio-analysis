@@ -254,3 +254,20 @@ type CorrelationMatrixResponse struct {
 	Symbols         []string    `json:"symbols"`
 	Matrix          [][]float64 `json:"matrix"`
 }
+
+// AnalysisDashboardResponse is the response for GET /portfolio/analysis-dashboard.
+type AnalysisDashboardResponse struct {
+	Currency        string                 `json:"currency"`
+	AccountingModel string                 `json:"accounting_model"`
+	Stats           map[string]interface{} `json:"stats"`
+	TWRHistory      []DailyValue           `json:"twr_history"`
+	MWRHistory      []DailyValue           `json:"mwr_history"`
+}
+
+// AnalysisHoldingsResponse is the response for GET /portfolio/analysis-holdings.
+type AnalysisHoldingsResponse struct {
+	Currency        string              `json:"currency"`
+	AccountingModel string              `json:"accounting_model"`
+	Attribution     AttributionResponse `json:"attribution"`
+	Correlations    CorrelationMatrixResponse `json:"correlations"`
+}

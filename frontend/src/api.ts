@@ -158,6 +158,42 @@ export interface StandaloneResponse {
   results: StandaloneResult[];
 }
 
+export interface AnalysisDashboardResponse {
+  currency: string;
+  accounting_model: string;
+  stats: Record<string, number>;
+  twr_history: DailyValue[];
+  mwr_history: DailyValue[];
+}
+
+export interface AttributionResult {
+  symbol: string;
+  avg_weight: number;
+  return: number;
+  contribution: number;
+}
+
+export interface AttributionResponse {
+  currency: string;
+  accounting_model: string;
+  total_twr: number;
+  positions: AttributionResult[];
+}
+
+export interface CorrelationMatrixResponse {
+  currency: string;
+  accounting_model: string;
+  symbols: string[];
+  matrix: number[][];
+}
+
+export interface AnalysisHoldingsResponse {
+  currency: string;
+  accounting_model: string;
+  attribution: AttributionResponse;
+  correlations: CorrelationMatrixResponse;
+}
+
 export interface ImportedTransaction {
   id: string;
   symbol: string;
@@ -458,6 +494,24 @@ export async function getPortfolioStats(
 ): Promise<StatsResponse> {
   return request<StatsResponse>(
     `/portfolio/stats?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`,
+    { signal }
+  );
+}
+
+export async function getAnalysisDashboard(
+  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+): Promise<AnalysisDashboardResponse> {
+  return request<AnalysisDashboardResponse>(
+    `/portfolio/analysis-dashboard?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`,
+    { signal }
+  );
+}
+
+export async function getAnalysisHoldings(
+  from: string, to: string, currency: string, accountingModel = 'historical', riskFreeRate = 0.05, cachedOnly = false, signal?: AbortSignal, scenarioId?: number | null
+): Promise<AnalysisHoldingsResponse> {
+  return request<AnalysisHoldingsResponse>(
+    `/portfolio/analysis-holdings?from=${from}&to=${to}&currency=${currency}&accounting_model=${accountingModel}&risk_free_rate=${riskFreeRate}${cachedOnly ? '&cachedOnly=true' : ''}${scenarioParam(scenarioId)}`,
     { signal }
   );
 }

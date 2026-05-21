@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
-import Spinner from '../components/Spinner'
 import ErrorAlert from '../components/ErrorAlert'
 import CompareScenariosChip from '../components/CompareScenariosChip'
 import StatCards from '../components/analysis/StatCards'
@@ -33,10 +32,11 @@ const WINDOW_OPTIONS = [
   { label: '6M',  value: 126 },
 ]
 
-import { useAnalysisData } from './hooks/useAnalysisData'
+import { useAnalysisDashboard } from './hooks/useAnalysisDashboard'
 import { useBenchmarks } from './hooks/useBenchmarks'
 import { useChartModeData } from './hooks/useChartModeData'
 import { useCompareOverlay } from './hooks/useCompareOverlay'
+import { Skeleton } from '../components/Skeleton'
 import { useAnalysisChartData } from './hooks/useAnalysisChartData'
 import type { ChartMode } from './hooks/types'
 import PerformanceChart from '../components/analysis/PerformanceChart'
@@ -92,8 +92,13 @@ export default function AnalysisPage() {
 
   const analysisParams = { currency, acctModel, from, to, active, riskFreeRate, scenarios, effectiveFrom: from, compare }
 
-  const analysisData = useAnalysisData(analysisParams)
-  const { stats, portfolioHistory, mwrHistory, loading, refreshing, error, standaloneResults, standaloneLoading, standaloneRefreshing, standaloneError, loadStandalone, attributionData, attributionTWR, correlationData, holdingsLoading, holdingsError } = analysisData
+  const {
+    stats, portfolioHistory, mwrHistory, loading, error, refreshing,
+    standaloneResults, standaloneLoading, standaloneRefreshing, standaloneError,
+    loadStandalone,
+    attributionData, attributionTWR, correlationData,
+    holdingsLoading, holdingsError
+  } = useAnalysisDashboard(analysisParams)
 
   // Re-calculate effectiveFrom once we have portfolio history
   const effectiveFrom = period === 0 ? (portfolioHistory[0]?.date ?? from) : from
@@ -266,8 +271,11 @@ export default function AnalysisPage() {
         </div>
 
         {loading ? (
-          <Spinner label="Compiling statistics…" className="py-10" />
-        ) : stats ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 mb-8">
+          {[...Array(7)].map((_, i) => <Skeleton key={i} className="h-28" />)}
+        </div>
+      ) : stats ? (
+        <div className="mb-8">
           <StatCards
             stats={stats}
             compare={compare}
@@ -280,9 +288,10 @@ export default function AnalysisPage() {
             portfolioStandalone={portfolioStandalone}
             compareStandalone={compareStandalone}
           />
-        ) : (
-          <p className="text-slate-500 text-center text-sm py-10">Historical context required to generate statistics.</p>
-        )}
+        </div>
+      ) : (
+        <p className="text-slate-500 text-center text-sm py-10">Historical context required to generate statistics.</p>
+      )}
       </div>
 
       {/* ── Section 2: Benchmarking ───────────────────────────────────────────── */}
@@ -347,9 +356,7 @@ export default function AnalysisPage() {
         {(chartMode === 'twr' ? mergedChartData.length > 0 : chartMode === 'mwr' ? mwrChartData.length > 0 : true) ? (
           <div className="h-100 mb-10 w-full relative">
             {chartModeLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-bg/60 z-10 rounded-2xl">
-                <Spinner label="Loading…" />
-              </div>
+              <Skeleton className="absolute inset-0 z-10" />
             )}
             <PerformanceChart
               chartMode={chartMode}

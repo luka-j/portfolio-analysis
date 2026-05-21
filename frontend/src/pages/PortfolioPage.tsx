@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import HoverTooltip from '../components/HoverTooltip'
 import SegmentedControl from '../components/SegmentedControl'
-import Spinner from '../components/Spinner'
 import EditAssetModal from '../components/EditAssetModal'
 import AddTransactionModal from '../components/AddTransactionModal'
 import DateRangePicker from '../components/DateRangePicker'
@@ -14,6 +13,7 @@ import { formatCurrency, formatNumber, formatQuantity, formatDate } from '../uti
 import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
 import { useScenario } from '../context/ScenarioContext'
+import { Skeleton } from '../components/Skeleton'
 
 const FX_METHOD_OPTIONS = [
   { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the currency, accounting for currency movements over time.' },
@@ -295,9 +295,7 @@ export default function PortfolioPage() {
 
         {error && <ErrorAlert message={error} className="mb-10" />}
 
-        {loading ? (
-          <Spinner label="Loading…" className="py-24" />
-        ) : positions.length === 0 ? (
+        {!loading && positions.length === 0 ? (
           <div className="text-center py-24 text-slate-500 font-black uppercase tracking-[0.2em] text-[11px]">No holdings found. Upload your data first.</div>
         ) : (
           <div className="w-full selection:bg-indigo-500/20 overflow-x-auto">
@@ -389,7 +387,13 @@ export default function PortfolioPage() {
 
             {/* Rows */}
             <div className="divide-y divide-[#2a2e42]/40">
-              {sortedPositions.map(pos => {
+              {loading ? (
+                [...Array(8)].map((_, i) => (
+                  <div key={i} className="px-8 py-4">
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                ))
+              ) : sortedPositions.map(pos => {
                 const isPendingCash = pos.symbol === 'PENDING_CASH'
                 const value = pos.value || 0
                 const price = pos.price || 0
