@@ -654,6 +654,9 @@ func (h *PortfolioHandler) MapSymbol(c *gin.Context) {
 		return
 	}
 
+	// Invalidate LLM cache since symbol mapping changed
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
+
 	c.JSON(http.StatusOK, gin.H{"message": "symbol mapped successfully"})
 }
 
@@ -949,6 +952,9 @@ func (h *PortfolioHandler) EditAsset(c *gin.Context) {
 			return
 		}
 	}
+
+	// Invalidate LLM cache since asset metadata changed
+	h.Repo.DB.Where("user_hash = ?", userHash).Delete(&models.LLMCache{})
 
 	c.JSON(http.StatusOK, gin.H{"message": "asset updated"})
 }

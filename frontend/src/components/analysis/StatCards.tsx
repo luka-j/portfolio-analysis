@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import HoverTooltip from '../HoverTooltip'
 import Spinner from '../Spinner'
 import type { StatsResponse, StandaloneResult } from '../../api'
@@ -31,7 +32,7 @@ interface StatCardsProps {
   compareStandalone: StandaloneResult | null
 }
 
-export default function StatCards({
+const StatCards = memo(function StatCards({
   stats,
   compare,
   compareStats,
@@ -251,4 +252,6 @@ export default function StatCards({
       )}
     </div>
   )
-}
+})
+
+export default StatCards

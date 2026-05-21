@@ -201,3 +201,9 @@ type ChatMessage struct {
 	Content   string `gorm:"type:text;not null"`
 	CreatedAt time.Time
 }
+
+// TradingCalendar stores the set of unique market-open dates to avoid full-table scans on market_data.
+type TradingCalendar struct {
+	Date time.Time `gorm:"primaryKey;index;not null"`
+}
+

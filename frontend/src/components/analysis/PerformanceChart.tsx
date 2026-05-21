@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, memo } from 'react'
 import {
   LineChart, Line, AreaChart, Area, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -146,7 +146,7 @@ function processAllCompareRanges(
   });
 }
 
-export default function PerformanceChart({
+const PerformanceChart = memo(function PerformanceChart({
   chartMode,
   mergedChartData,
   mwrChartData,
@@ -351,4 +351,6 @@ export default function PerformanceChart({
       </ComposedChart>
     </ResponsiveContainer>
   )
-}
+})
+
+export default PerformanceChart

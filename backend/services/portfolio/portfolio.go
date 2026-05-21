@@ -275,15 +275,16 @@ func (s *Service) GetCurrentValueMulti(data *models.FlexQueryData, currencies []
 			priceByKey[k] = priceResult{price: p, err: err}
 			priceMu.Unlock()
 
-			// Pre-warm caches in the background if this was a fast cached-only request.
-			// The singleflight in the market provider will collapse these background
-			// fetches with any concurrent fresh requests from other endpoints.
-			if cachedOnly {
-				go func() {
+			// Pre-warm caches in the background.
+			// If it's a cachedOnly request, we pre-warm both the latest price and history.
+			// If it's a fresh request, the latest price was already fetched, but we still pre-warm history
+			// in the background so that subsequent timeline queries (history, returns, stats) are warmed.
+			go func() {
+				if cachedOnly {
 					_, _ = s.MarketProvider.GetLatestPrice(sym, false)
-					_, _ = s.MarketProvider.GetHistory(sym, inception, today, false)
-				}()
-			}
+				}
+				_, _ = s.MarketProvider.GetHistory(sym, inception, today, false)
+			}()
 		}(k, querySymbol)
 	}
 	wg.Wait()

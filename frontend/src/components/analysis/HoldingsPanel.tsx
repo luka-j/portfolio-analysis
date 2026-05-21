@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import Spinner from '../Spinner'
@@ -29,7 +30,7 @@ interface HoldingsPanelProps {
   active: number | null
 }
 
-export default function HoldingsPanel({
+const HoldingsPanel = memo(function HoldingsPanel({
   attributionData,
   holdingsLoading,
   holdingsError,
@@ -166,5 +167,7 @@ export default function HoldingsPanel({
       </div>
     </div>
   )
-}
+})
+
+export default HoldingsPanel
 

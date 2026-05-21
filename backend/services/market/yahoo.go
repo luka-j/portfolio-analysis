@@ -97,9 +97,8 @@ func NewYahooFinanceServiceWithTransport(transport http.RoundTripper) *YahooFina
 // every calendar day when computing daily portfolio values.
 func (s *YahooFinanceService) TradingDates(from, to time.Time) ([]time.Time, error) {
 	var dates []time.Time
-	err := s.DB.Model(&models.MarketData{}).
-		Where("date >= ? AND date <= ? AND volume != -1", from, to).
-		Distinct("date").
+	err := s.DB.Model(&models.TradingCalendar{}).
+		Where("date >= ? AND date <= ?", from, to).
 		Order("date ASC").
 		Pluck("date", &dates).Error
 	return dates, err
@@ -793,6 +792,28 @@ func (s *YahooFinanceService) saveCache(symbol string, points []models.PricePoin
 		Columns:   []clause.Column{{Name: "symbol"}, {Name: "date"}},
 		DoUpdates: clause.AssignmentColumns([]string{"open", "high", "low", "close", "adj_close", "volume"}),
 	}).Create(&batch).Error
+	if err != nil {
+		return err
+	}
 
-	return err
+	// Extract unique, non-dummy trading dates to save to trading_calendars.
+	var calDays []models.TradingCalendar
+	calSeen := make(map[string]bool)
+	for _, p := range points {
+		if p.Volume != -1 {
+			ds := p.Date.Format("2006-01-02")
+			if !calSeen[ds] {
+				calSeen[ds] = true
+				calDays = append(calDays, models.TradingCalendar{Date: p.Date})
+			}
+		}
+	}
+	if len(calDays) > 0 {
+		// Bulk upsert into trading_calendars using ON CONFLICT DO NOTHING.
+		if err := s.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&calDays).Error; err != nil {
+			slog.Warn("market: failed to save to trading calendar", "err", err)
+		}
+	}
+
+	return nil
 }

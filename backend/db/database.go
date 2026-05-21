@@ -75,9 +75,28 @@ func Init(dsn string) (*gorm.DB, error) {
 		&models.ScenarioRecord{},
 		&models.ChatThread{},
 		&models.ChatMessage{},
+		&models.TradingCalendar{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("migrating database: %w", err)
+	}
+
+	// Backfill TradingCalendar from existing MarketData if it is empty.
+	var tcCount int64
+	if err := database.Model(&models.TradingCalendar{}).Count(&tcCount).Error; err == nil && tcCount == 0 {
+		slog.Info("database: backfilling TradingCalendar from existing MarketData")
+		err = database.Exec(`
+			INSERT INTO trading_calendars (date)
+			SELECT DISTINCT date 
+			FROM market_data 
+			WHERE volume != -1
+			ON CONFLICT DO NOTHING
+		`).Error
+		if err != nil {
+			slog.Warn("database: failed to backfill TradingCalendar", "err", err)
+		} else {
+			slog.Info("database: successfully backfilled TradingCalendar")
+		}
 	}
 
 	// Backfill PublicID for transaction rows created before UUID support was added.

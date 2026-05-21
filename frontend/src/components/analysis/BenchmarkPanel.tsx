@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import React, { useRef, useEffect } from 'react'
+import React, { useRef, useEffect, memo } from 'react'
 import AutocompleteInput from '../AutocompleteInput'
 import ErrorAlert from '../ErrorAlert'
 import HoverTooltip from '../HoverTooltip'
@@ -48,7 +48,7 @@ interface BenchmarkPanelProps {
   children?: React.ReactNode
 }
 
-export default function BenchmarkPanel({
+const BenchmarkPanel = memo(function BenchmarkPanel({
   marketSymbols,
   scenarios,
   active,
@@ -293,4 +293,6 @@ export default function BenchmarkPanel({
       )}
     </div>
   )
-}
+})
+
+export default BenchmarkPanel
