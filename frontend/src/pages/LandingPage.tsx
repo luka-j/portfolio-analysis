@@ -81,7 +81,7 @@ export default function LandingPage() {
   const shouldShowLlm = hasTransactions === true && currValue > 0
 
   const fromDate = useMemo(() => getFromDate(period), [period])
-  const toDate = useMemo(() => formatDate(new Date()), [period])
+  const toDate = useMemo(() => formatDate(new Date()), [])
 
   const { data: statsData, isFetching: statsRefreshing } = useQuery({
     queryKey: ['portfolioStats', period, currency, active],
@@ -214,7 +214,7 @@ export default function LandingPage() {
     }
   }, [pendingFirstUpload, navigate, invalidateAll])
 
-  const createUploadHandler = (mutation: any) =>
+  const createUploadHandler = (mutation: { mutate: (variables: File, options?: { onSettled?: () => void }) => void }) =>
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (!file) return

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import PageLayout from '../components/PageLayout'
 import SegmentedControl from '../components/SegmentedControl'
@@ -28,6 +28,11 @@ export default function TaxPage() {
   const [rateInputs, setRateInputs] = useState<Record<string, string>>({})
   const [shouldFetchUniversal, setShouldFetchUniversal] = useState(false)
 
+  // Track previous states to adjust dependent states during render without using useEffect
+  const [prevYear, setPrevYear] = useState(year)
+  const [prevActive, setPrevActive] = useState(active)
+  const [prevCurrencies, setPrevCurrencies] = useState<string[]>([])
+
   // Extract unique currencies from a report's transactions
   const extractCurrencies = (data: TaxReportResponse): string[] => {
     const all = [...data.employment_income.transactions, ...data.investment_income.transactions]
@@ -46,9 +51,22 @@ export default function TaxPage() {
     return extractCurrencies(baseReport)
   }, [baseReport])
 
-  // Sync rate inputs when currencies change, keeping existing rates if they still exist
-  useEffect(() => {
-    if (currencies.length === 0) return
+  // Adjust states during render when dependencies change
+  if (year !== prevYear) {
+    setPrevYear(year)
+    setShouldFetchUniversal(false)
+  }
+  if (active !== prevActive) {
+    setPrevActive(active)
+    setShouldFetchUniversal(false)
+  }
+
+  const currenciesChanged = currencies.length !== prevCurrencies.length ||
+    currencies.some((c, i) => c !== prevCurrencies[i])
+
+  if (currenciesChanged) {
+    setPrevCurrencies(currencies)
+    setShouldFetchUniversal(false)
     setRateInputs(prev => {
       const next: Record<string, string> = {}
       for (const c of currencies) {
@@ -56,12 +74,7 @@ export default function TaxPage() {
       }
       return next
     })
-  }, [currencies])
-
-  // Reset shouldFetchUniversal when year, active, or currencies change
-  useEffect(() => {
-    setShouldFetchUniversal(false)
-  }, [year, active, currencies])
+  }
 
   const allRatesFilled = currencies.length > 0 && currencies.every(c => {
     const v = parseFloat(rateInputs[c] ?? '')

@@ -49,7 +49,7 @@ const StatCards = memo(function StatCards({
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 min-w-0">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 text-center">{activeLabel}</p>
-          <div className="grid grid-cols-2 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
             {(() => {
               const twrVal = typeof stats.statistics['twr'] === 'number' ? stats.statistics['twr'] as number : null
               const mwrVal = typeof stats.statistics['mwr'] === 'number' ? stats.statistics['mwr'] as number : null
@@ -73,7 +73,7 @@ const StatCards = memo(function StatCards({
               </>)
             })()}
             {standaloneLoading && !portfolioStandalone && (
-              <div className="col-span-2 lg:col-span-7 flex justify-center py-2"><Spinner label="Computing…" /></div>
+              <div className="col-span-2 lg:col-span-4 flex justify-center py-2"><Spinner label="Computing…" /></div>
             )}
             {portfolioStandalone && (<>
               <button onClick={() => handleStatCardClick('rolling_sharpe')} className="relative group bg-surface/40 rounded-2xl px-2 py-3 flex flex-col items-center text-center border border-white/5 cursor-pointer hover:border-indigo-500/30 hover:bg-surface/60 transition-all">
@@ -117,7 +117,7 @@ const StatCards = memo(function StatCards({
           {compareDataLoading ? (
             <div className="flex justify-center py-10"><Spinner label="Loading…" /></div>
           ) : compareStats ? (
-            <div className="grid grid-cols-2 lg:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
               {(() => {
                 const twrVal = typeof compareStats.statistics['twr'] === 'number' ? compareStats.statistics['twr'] as number : null
                 const mwrVal = typeof compareStats.statistics['mwr'] === 'number' ? compareStats.statistics['mwr'] as number : null
