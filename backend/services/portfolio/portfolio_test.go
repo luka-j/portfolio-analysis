@@ -402,3 +402,57 @@ func TestGetDailyValues_BasicTimeSeries(t *testing.T) {
 	assert.Equal(t, "2024-01-02", hist.Data[1].Date)
 	assert.Equal(t, 1100.0, hist.Data[1].Value) // 10 * 110
 }
+
+func TestGetAllEnrichedTrades(t *testing.T) {
+	day1 := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
+	day2 := day1.AddDate(0, 0, 1)
+
+	data := &models.FlexQueryData{
+		Trades: []models.Trade{
+			{
+				PublicID:        "buy-uuid",
+				Symbol:          "AAPL",
+				ListingExchange: "NASDAQ",
+				Currency:        "USD",
+				BuySell:         "BUY",
+				Quantity:        10,
+				Price:           100,
+				DateTime:        day1,
+			},
+			{
+				PublicID:        "sell-uuid",
+				Symbol:          "AAPL",
+				ListingExchange: "NASDAQ",
+				Currency:        "USD",
+				BuySell:         "SELL",
+				Quantity:        -5,
+				Price:           120,
+				DateTime:        day2,
+			},
+		},
+	}
+
+	mockProvider := &mockMarketProvider{
+		current: 130, // AAPL latest price is 130
+	}
+
+	svc := NewService(mockProvider, nil, 0)
+	enriched, err := svc.GetAllEnrichedTrades(data, "USD", models.AccountingModelOriginal)
+	require.NoError(t, err)
+	require.Len(t, enriched, 2)
+
+	// Since we sort chronologically descending (newest first) in GetAllEnrichedTrades,
+	// enriched[0] should be the SELL trade (day2), and enriched[1] should be the BUY trade (day1).
+	assert.Equal(t, "sell-uuid", enriched[0].ID)
+	assert.Equal(t, "SELL", enriched[0].Side)
+	assert.Equal(t, 5.0, enriched[0].Quantity)
+	assert.Equal(t, 100.0, enriched[0].RealizedGain) // 5 * (120 - 100) = 100
+	assert.Equal(t, 0.0, enriched[0].UnrealizedGain)
+
+	assert.Equal(t, "buy-uuid", enriched[1].ID)
+	assert.Equal(t, "BUY", enriched[1].Side)
+	assert.Equal(t, 10.0, enriched[1].Quantity)
+	assert.Equal(t, 0.0, enriched[1].RealizedGain)
+	assert.Equal(t, 150.0, enriched[1].UnrealizedGain) // 5 shares remaining * (130 - 100) = 150
+}
+

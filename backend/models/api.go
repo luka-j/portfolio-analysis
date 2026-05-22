@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // API response types for all HTTP endpoints.
 // Domain types and ORM types live in domain.go and db.go respectively.
 
@@ -80,6 +82,35 @@ type TradesResponse struct {
 	DisplayCurrency string       `json:"display_currency"`
 	Trades          []TradeEntry `json:"trades"`
 }
+
+// EnrichedTrade represents a trade with FIFO realized and unrealized gains.
+type EnrichedTrade struct {
+	ID              string    `json:"id"`
+	EntryMethod     string    `json:"entry_method,omitempty"`
+	Date            string    `json:"date"` // YYYY-MM-DD
+	DateTime        time.Time `json:"date_time"`
+	Side            string    `json:"side"` // BUY or SELL
+	Symbol          string    `json:"symbol"`
+	ListingExchange string    `json:"listing_exchange,omitempty"`
+	Quantity        float64   `json:"quantity"`
+	Price           float64   `json:"price"` // native price
+	NativeCurrency  string    `json:"native_currency"`
+	ConvertedPrice  float64   `json:"converted_price"` // converted to display currency
+	Commission      float64   `json:"commission"`
+	Proceeds        float64   `json:"proceeds"`
+	RealizedGain    float64   `json:"realized_gain"` // converted to display currency
+	UnrealizedGain  float64   `json:"unrealized_gain"` // converted to display currency
+	YahooSymbol     string    `json:"yahoo_symbol,omitempty"`
+}
+
+// TransactionsResponse is the response for GET /portfolio/transactions.
+type TransactionsResponse struct {
+	Currency        string          `json:"currency"`
+	AccountingModel string          `json:"accounting_model"`
+	Trades          []EnrichedTrade `json:"trades"`
+	TotalCount      int             `json:"total_count"`
+}
+
 
 // DailyValue is one day's portfolio value.
 type DailyValue struct {

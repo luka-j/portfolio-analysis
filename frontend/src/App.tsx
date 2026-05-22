@@ -12,6 +12,7 @@ const BreakdownPage = lazy(() => import('./pages/BreakdownPage'))
 const TaxPage = lazy(() => import('./pages/TaxPage'))
 const LLMPage = lazy(() => import('./pages/LLMPage'))
 const ScenarioEditPage = lazy(() => import('./pages/ScenarioEditPage'))
+const TransactionsPage = lazy(() => import('./pages/TransactionsPage'))
 
 /** Listens for 401 events dispatched by the api layer and redirects to /login. */
 function UnauthorizedListener() {
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<ProtectedRoute><LandingPage /></ProtectedRoute>} />
             <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
+            <Route path="/transactions" element={<ProtectedRoute><TransactionsPage /></ProtectedRoute>} />
             <Route path="/analysis" element={<ProtectedRoute><AnalysisPage /></ProtectedRoute>} />
             <Route path="/breakdown" element={<ProtectedRoute><BreakdownPage /></ProtectedRoute>} />
             <Route path="/tax" element={<ProtectedRoute><TaxPage /></ProtectedRoute>} />

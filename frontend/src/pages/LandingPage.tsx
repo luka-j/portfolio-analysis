@@ -154,6 +154,8 @@ export default function LandingPage() {
   }
 
   const invalidateAll = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['portfolioValue'] })
+    queryClient.invalidateQueries({ queryKey: ['portfolioPriceHistory'] })
     queryClient.invalidateQueries({ queryKey: ['portfolioValueMulti'] })
     queryClient.invalidateQueries({ queryKey: ['portfolioStats'] })
     queryClient.invalidateQueries({ queryKey: ['portfolioValueHistory'] })

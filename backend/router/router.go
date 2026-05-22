@@ -125,6 +125,7 @@ func buildRouter(
 	api.GET("/portfolio/history", ph.GetHistory)
 	api.GET("/portfolio/history/returns", ph.GetReturns)
 	api.GET("/portfolio/trades", ph.GetTrades)
+	api.GET("/portfolio/transactions", ph.GetAllTrades)
 	api.GET("/portfolio/price-history", ph.GetPriceHistory)
 	api.PUT("/portfolio/symbols/:symbol/mapping", ph.MapSymbol)
 	api.PUT("/portfolio/assets/:symbol", ph.EditAsset)

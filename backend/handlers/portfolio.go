@@ -397,6 +397,60 @@ func (h *PortfolioHandler) GetTrades(c *gin.Context) {
 	})
 }
 
+// GetAllTrades handles GET /api/v1/portfolio/transactions
+func (h *PortfolioHandler) GetAllTrades(c *gin.Context) {
+	userHash := c.GetString(middleware.UserHashKey)
+	data, ok := h.loadPortfolioData(c, h.Repo, userHash)
+	if !ok {
+		return
+	}
+
+	displayCurrency := c.DefaultQuery("currency", "USD")
+	acctModel, ok := parseAccountingModel(c)
+	if !ok {
+		return
+	}
+
+	trades, err := h.PortfolioService.GetAllEnrichedTrades(data, displayCurrency, acctModel)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	total := len(trades)
+	limit := 100
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+
+	paginatedTrades := trades[start:end]
+
+	c.JSON(http.StatusOK, models.TransactionsResponse{
+		Currency:        displayCurrency,
+		AccountingModel: string(acctModel),
+		Trades:          paginatedTrades,
+		TotalCount:      total,
+	})
+}
+
+
 // GetReturns handles GET /api/v1/portfolio/history/returns
 // Returns the daily cumulative return series (TWR or MWR in %) so the frontend can
 // plot a true return chart, uncontaminated by cash flows.

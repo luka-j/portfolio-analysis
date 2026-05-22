@@ -201,7 +201,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
                   <span className="relative group inline-flex items-center gap-1 cursor-default">
                     FMV (on purchase date)
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-500 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
-                    <HoverTooltip align="left" className="w-56 font-normal normal-case tracking-normal">
+                    <HoverTooltip align="right" className="w-56 font-normal normal-case tracking-normal">
                       Fair market value — the stock's closing price on the ESPP purchase date. Used to calculate taxable employment income (FMV minus your purchase price).
                     </HoverTooltip>
                   </span>
@@ -209,7 +209,7 @@ export default function AddTransactionModal({ positions, onSuccess, onClose }: P
                   <span className="relative group inline-flex items-center gap-1 cursor-default">
                     FMV (on vest date)
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-500 shrink-0"><circle cx="5" cy="5" r="4"/><path d="M5 4.5v2M5 3h.01"/></svg>
-                    <HoverTooltip align="left" className="w-56 font-normal normal-case tracking-normal">
+                    <HoverTooltip align="right" className="w-56 font-normal normal-case tracking-normal">
                       Fair market value — the stock's closing price on the vest date. The full FMV is taxed as employment income; cost basis is set to zero.
                     </HoverTooltip>
                   </span>

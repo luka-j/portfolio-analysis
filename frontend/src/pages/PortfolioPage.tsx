@@ -15,6 +15,8 @@ import { usePersistentState } from '../utils/usePersistentState'
 import { usePrivacy } from '../utils/PrivacyContext'
 import { useScenario } from '../context/ScenarioContext'
 import { Skeleton } from '../components/Skeleton'
+import RecentTransactionsPopover from '../components/RecentTransactionsPopover'
+
 
 const FX_METHOD_OPTIONS = [
   { label: 'Historical', value: 'historical' as const, tooltip: 'Uses the FX rate at the time each trade was executed. Reflects your true cost basis in the currency, accounting for currency movements over time.' },
@@ -258,9 +260,10 @@ export default function PortfolioPage() {
           </div>
 
         {/* Controls — centered */}
-        <div className="flex flex-wrap justify-center gap-4 mb-6">
+        <div className="flex flex-wrap items-center justify-center gap-4 mb-6">
           <SegmentedControl label="FX Method" options={FX_METHOD_OPTIONS} value={acctModel} onChange={setAcctModel} />
           <SegmentedControl label="Currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
+          <RecentTransactionsPopover currency={reqCurrency} acctModel={reqAcctModel} />
         </div>
 
         {error && <ErrorAlert message={error} className="mb-10" />}

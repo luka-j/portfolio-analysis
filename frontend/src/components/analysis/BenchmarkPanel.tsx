@@ -190,7 +190,7 @@ const BenchmarkPanel = memo(function BenchmarkPanel({
 
       {/* Standalone metrics table */}
       {standaloneResults.length > 0 && (
-        <div className="overflow-x-auto w-full mb-12 relative">
+        <div className="overflow-x-auto overflow-y-hidden w-full mb-12 relative">
           {standaloneRefreshing && (
             <div className="absolute top-0 right-4 w-4 h-4 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin" />
           )}
@@ -207,7 +207,7 @@ const BenchmarkPanel = memo(function BenchmarkPanel({
                       {tip ? (
                         <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
                           {h}
-                          <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="down" className="w-56">{tip}</HoverTooltip>
+                          <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="up" className="w-56">{tip}</HoverTooltip>
                         </span>
                       ) : h}
                     </th>
@@ -251,7 +251,7 @@ const BenchmarkPanel = memo(function BenchmarkPanel({
                       {tip ? (
                         <span className={`relative group inline-flex ${h === 'Security' ? '' : 'justify-end'} cursor-help`}>
                           {h}
-                          <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="down" className="w-56">{tip}</HoverTooltip>
+                          <HoverTooltip align={h === 'Security' ? 'left' : 'right'} direction="up" className="w-56">{tip}</HoverTooltip>
                         </span>
                       ) : h}
                     </th>

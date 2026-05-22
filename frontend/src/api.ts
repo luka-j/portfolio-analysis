@@ -1054,3 +1054,41 @@ export async function compareScenariosLLM(
     body: JSON.stringify({ a_id: aId, b_id: bId, question, currency, model }),
   });
 }
+
+export interface EnrichedTrade {
+  id: string;
+  entry_method?: string;
+  date: string;
+  side: string;
+  symbol: string;
+  listing_exchange?: string;
+  quantity: number;
+  price: number;
+  native_currency: string;
+  converted_price: number;
+  commission: number;
+  proceeds: number;
+  realized_gain: number;
+  unrealized_gain: number;
+  yahoo_symbol?: string;
+}
+
+export interface TransactionsResponse {
+  currency: string;
+  accounting_model: string;
+  trades: EnrichedTrade[];
+  total_count: number;
+}
+
+export async function getTransactions(
+  currency = 'USD',
+  accountingModel = 'historical',
+  limit?: number,
+  offset?: number
+): Promise<TransactionsResponse> {
+  let query = `currency=${encodeURIComponent(currency)}&accounting_model=${accountingModel}`;
+  if (limit !== undefined) query += `&limit=${limit}`;
+  if (offset !== undefined) query += `&offset=${offset}`;
+  return request<TransactionsResponse>(`/portfolio/transactions?${query}`);
+}
+
