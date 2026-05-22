@@ -5,101 +5,195 @@ import (
 	"time"
 
 	"portfolio-analysis/models"
+	"portfolio-analysis/services/fx"
 )
 
-type mockRedirectMarketProvider struct {
-	prices map[string]float64
-}
-
-func (m *mockRedirectMarketProvider) GetLatestPrice(symbol string) (float64, error) {
-	if p, ok := m.prices[symbol]; ok {
-		return p, nil
-	}
-	return 1.0, nil
-}
-
-func (m *mockRedirectMarketProvider) GetHistory(symbol string, from, to time.Time) ([]models.PricePoint, error) {
-	if p, ok := m.prices[symbol]; ok {
-		return []models.PricePoint{{Date: to, Close: p, AdjClose: p}}, nil
-	}
-	return []models.PricePoint{{Date: to, Close: 1.0, AdjClose: 1.0}}, nil
-}
-
-func (m *mockRedirectMarketProvider) TradingDates(from, to time.Time) ([]time.Time, error) {
-	return nil, nil
-}
-
 func TestBuildRedirectScenario(t *testing.T) {
-	mp := &mockRedirectMarketProvider{
-		prices: map[string]float64{
-			"SPY": 100.0,
+	mp := &mockMarketProvider{
+		latest: map[string]float64{
+			"AAPL": 150,
+			"MSFT": 300,
+		},
+		hist: map[string][]models.PricePoint{
+			"AAPL": {
+				{Date: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), Close: 100},
+				{Date: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), Close: 110},
+			},
+			"MSFT": {
+				{Date: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), Close: 200},
+				{Date: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), Close: 220},
+			},
+			"EURUSD=X": {
+				{Date: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), Close: 1.1},
+			},
 		},
 	}
+	fxSvc := fx.NewService(mp, nil)
 
-	t1 := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	t2 := time.Date(2020, 2, 1, 0, 0, 0, 0, time.UTC)
-
-	// User buys $1000 of AAPL at t1
-	// User sells $500 of AAPL at t2 (which produces a positive flow if not consumed within expiry, wait, default is 3 days).
-	// So t1: -$1000 (deposit). t2: +$500 (withdrawal).
 	realData := &models.FlexQueryData{
 		Trades: []models.Trade{
-			{
-				Symbol:   "AAPL",
-				Currency: "USD",
-				Quantity: 10,
-				Price:    100,
-				Proceeds: -1000,
-				BuySell:  "BUY",
-				DateTime: t1,
-			},
-			{
-				Symbol:   "AAPL",
-				Currency: "USD",
-				Quantity: -4,
-				Price:    125,
-				Proceeds: 500,
-				BuySell:  "SELL",
-				DateTime: t2,
-			},
+			// Deposit equivalent via BUY
+			{Symbol: "AAPL", Quantity: 10, Price: 100, Proceeds: -1000, DateTime: time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC), BuySell: "BUY", Currency: "USD"},
+			// Withdrawal equivalent via SELL
+			{Symbol: "AAPL", Quantity: -5, Price: 110, Proceeds: 550, DateTime: time.Date(2024, 2, 1, 10, 0, 0, 0, time.UTC), BuySell: "SELL", Currency: "USD"},
 		},
 	}
 
-	spec := ScenarioSpec{
-		Base: BaseModeRedirect,
-		Basket: &Basket{
-			Mode:             BasketModeWeight,
-			NotionalCurrency: "USD",
-			Items: []BasketItem{
-				{Symbol: "SPY", Weight: 1, Currency: "USD"},
+	t.Run("redirect scenario success", func(t *testing.T) {
+		spec := ScenarioSpec{
+			Base: BaseModeRedirect,
+			Basket: &Basket{
+				Mode:             BasketModeWeight,
+				NotionalCurrency: "USD",
+				Items: []BasketItem{
+					{Symbol: "MSFT", Weight: 1.0, Currency: "USD"},
+				},
 			},
+		}
+
+		res, err := Build(spec, realData, mp, fxSvc)
+		if err != nil {
+			t.Fatalf("unexpected Build error: %v", err)
+		}
+
+		if len(res.Trades) != 2 {
+			t.Fatalf("expected 2 trades, got %d", len(res.Trades))
+		}
+
+		// Initial Buy: $1000 worth of MSFT on 2024-01-02. MSFT price = 200. Qty = 5.
+		// Sell on 2024-02-01: Proportional sell. $550 withdrawal. MSFT price = 220. Qty = 2.5.
+		var buyQty, sellQty float64
+		for _, trade := range res.Trades {
+			if trade.BuySell == "BUY" {
+				buyQty = trade.Quantity
+			} else if trade.BuySell == "SELL" {
+				sellQty = trade.Quantity
+			}
+		}
+
+		if buyQty != 5 {
+			t.Errorf("expected buy quantity to be 5, got %f", buyQty)
+		}
+		if sellQty != -2.5 {
+			t.Errorf("expected sell quantity to be -2.5, got %f", sellQty)
+		}
+	})
+
+	t.Run("redirect scenario validation errors", func(t *testing.T) {
+		// Missing basket
+		specNoBasket := ScenarioSpec{Base: BaseModeRedirect}
+		_, err := Build(specNoBasket, realData, mp, fxSvc)
+		if err == nil {
+			t.Fatal("expected error for missing basket in redirect scenario")
+		}
+
+		// Incorrect basket mode
+		specBadMode := ScenarioSpec{
+			Base: BaseModeRedirect,
+			Basket: &Basket{
+				Mode: BasketModeQuantity,
+			},
+		}
+		_, err = Build(specBadMode, realData, mp, fxSvc)
+		if err == nil {
+			t.Fatal("expected error for quantity basket mode in redirect scenario")
+		}
+	})
+
+	t.Run("getPriceAt pricing errors", func(t *testing.T) {
+		// Test getPriceAt error cases indirectly via a symbol that doesn't exist
+		spec := ScenarioSpec{
+			Base: BaseModeRedirect,
+			Basket: &Basket{
+				Mode: BasketModeWeight,
+				Items: []BasketItem{
+					{Symbol: "NON_EXISTENT", Weight: 1.0},
+				},
+			},
+		}
+		res, err := Build(spec, realData, mp, fxSvc)
+		if err != nil {
+			t.Fatalf("Build failed: %v", err)
+		}
+		// Since it falls back to 1 when non-existent and LatestPrice also fails
+		if len(res.Trades) == 0 {
+			t.Fatal("expected trades even with missing prices due to fallbacks")
+		}
+	})
+
+	t.Run("TRANSFER_IN handling", func(t *testing.T) {
+		transferData := &models.FlexQueryData{
+			Trades: []models.Trade{
+				{Symbol: "AAPL", Quantity: 10, Price: 100, DateTime: time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC), BuySell: "TRANSFER_IN", Currency: "USD"},
+			},
+		}
+		spec := ScenarioSpec{
+			Base: BaseModeRedirect,
+			Basket: &Basket{
+				Mode:             BasketModeWeight,
+				NotionalCurrency: "USD",
+				Items: []BasketItem{
+					{Symbol: "MSFT", Weight: 1.0, Currency: "USD"},
+				},
+			},
+		}
+		res, err := Build(spec, transferData, mp, fxSvc)
+		if err != nil {
+			t.Fatalf("Build failed: %v", err)
+		}
+		if len(res.Trades) == 0 {
+			t.Error("expected trades generated from TRANSFER_IN")
+		}
+	})
+}
+
+func TestBuildOtherModes(t *testing.T) {
+	mp := &mockMarketProvider{
+		latest: map[string]float64{"AAPL": 150},
+	}
+	realData := &models.FlexQueryData{
+		Trades: []models.Trade{
+			{Symbol: "AAPL", Quantity: 10, Price: 100, DateTime: time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC), BuySell: "BUY", Currency: "USD"},
 		},
 	}
 
-	outData, err := buildRedirectScenario(spec, realData, mp, nil)
-	if err != nil {
-		t.Fatalf("buildRedirectScenario failed: %v", err)
-	}
+	t.Run("BaseModeReal with BaseAsOf", func(t *testing.T) {
+		asOf := NewDateOnly(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+		spec := ScenarioSpec{
+			Base:     BaseModeReal,
+			BaseAsOf: &asOf,
+		}
+		res, err := Build(spec, realData, mp, nil)
+		if err != nil {
+			t.Fatalf("unexpected Build error: %v", err)
+		}
+		if len(res.Trades) != 0 {
+			t.Errorf("expected 0 trades because trade is after BaseAsOf, got %d", len(res.Trades))
+		}
+	})
 
-	// We expect two trades:
-	// 1. Buy SPY with $1000 at t1. SPY price is 100, so qty = 10.
-	// 2. Sell SPY for $500 at t2. SPY price is 100, so qty = 5.
+	t.Run("BaseModeReal with Adjustments", func(t *testing.T) {
+		spec := ScenarioSpec{
+			Base: BaseModeReal,
+			Adjustments: []Adjustment{
+				{Symbol: "AAPL", Action: ActionSellAll},
+			},
+		}
+		res, err := Build(spec, realData, mp, nil)
+		if err != nil {
+			t.Fatalf("unexpected Build error: %v", err)
+		}
+		if len(res.Trades) != 2 {
+			t.Fatalf("expected 2 trades (1 original, 1 synthetic sell), got %d", len(res.Trades))
+		}
+	})
 
-	if len(outData.Trades) != 2 {
-		t.Fatalf("expected 2 trades, got %d", len(outData.Trades))
-	}
-
-	if outData.Trades[0].Symbol != "SPY" || outData.Trades[0].Quantity != 10 {
-		t.Errorf("expected buy 10 SPY, got %f", outData.Trades[0].Quantity)
-	}
-	if outData.Trades[0].Proceeds != -1000 {
-		t.Errorf("expected proceeds -1000, got %f", outData.Trades[0].Proceeds)
-	}
-
-	if outData.Trades[1].Symbol != "SPY" || outData.Trades[1].Quantity != -5 {
-		t.Errorf("expected sell 5 SPY, got %f", outData.Trades[1].Quantity)
-	}
-	if outData.Trades[1].Proceeds != 500 {
-		t.Errorf("expected proceeds 500, got %f", outData.Trades[1].Proceeds)
-	}
+	t.Run("getPriceAt fallbacks", func(t *testing.T) {
+		// Mock with empty price history to test getPriceAt no price data error
+		mpErr := &mockMarketProviderError{}
+		_, err := getPriceAt(mpErr, "AAPL", time.Now())
+		if err == nil {
+			t.Fatal("expected error from provider failure")
+		}
+	})
 }

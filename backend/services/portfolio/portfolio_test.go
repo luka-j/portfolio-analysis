@@ -455,4 +455,3 @@ func TestGetAllEnrichedTrades(t *testing.T) {
 	assert.Equal(t, 0.0, enriched[1].RealizedGain)
 	assert.Equal(t, 150.0, enriched[1].UnrealizedGain) // 5 shares remaining * (130 - 100) = 150
 }
-

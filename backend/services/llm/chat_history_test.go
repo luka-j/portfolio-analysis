@@ -147,3 +147,41 @@ func TestCreateSnippet(t *testing.T) {
 	assert.True(t, strings.HasPrefix(snippet, "..."))
 	assert.True(t, strings.HasSuffix(snippet, "..."))
 }
+
+// TestChatHistoryService_EdgeCases covers all remaining error and boundary conditions in the chat history.
+func TestChatHistoryService_EdgeCases(t *testing.T) {
+	db := setupTestDB(t)
+	svc := &Service{DB: db}
+	userHash := "user_edges"
+
+	// 1. Create thread with empty title
+	t1, err := svc.CreateThread(userHash, "")
+	require.NoError(t, err)
+	assert.Equal(t, "New Conversation", t1.Title)
+
+	// 2. RenameThread not found or permission denied
+	err = svc.RenameThread(999, userHash, "New Title")
+	assert.ErrorContains(t, err, "thread not found or permission denied")
+
+	// 3. DeleteThread not found or permission denied
+	err = svc.DeleteThread(999, userHash)
+	assert.ErrorContains(t, err, "thread not found or permission denied")
+
+	// 4. DeleteExpiredThreads with non-positive retentionDays
+	deleted, err := svc.DeleteExpiredThreads(0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), deleted)
+
+	deleted, err = svc.DeleteExpiredThreads(-10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), deleted)
+
+	// 5. SearchThreads with empty query
+	res, err := svc.SearchThreads(userHash, "", 5)
+	require.NoError(t, err)
+	assert.Empty(t, res)
+
+	// 6. createSnippet when query is not found and content is long
+	snippet := createSnippet("This is a very long content string that exceeds twice the padding size, so it will get truncated.", "nonexistent", 5)
+	assert.True(t, strings.HasSuffix(snippet, "..."))
+}

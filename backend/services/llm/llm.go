@@ -570,7 +570,7 @@ func (s *Service) AnalyzePortfolioStream(
 					if cleanChunk != "" {
 						if cbErr := onChunk(cleanChunk); cbErr != nil {
 							slog.Debug("llm: stream chunk callback failed (client disconnected)", "err", cbErr)
-							return fullResponse.String(), nil, nil, nil
+							return fullResponse.String() + roundText.String(), nil, nil, nil
 						}
 					}
 				}
