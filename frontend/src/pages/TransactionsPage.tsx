@@ -29,6 +29,28 @@ const SIDE_OPTIONS = [
   { label: 'RSU VEST', value: 'RSU_VEST' },
 ]
 
+function entryMethodBadge(method: string | undefined) {
+  if (!method) return <span className="text-slate-500">—</span>
+  const styles: Record<string, string> = {
+    flexquery:       'bg-slate-500/10 text-slate-500 border-slate-500/20',
+    etrade_benefits: 'bg-slate-500/10 text-slate-500 border-slate-500/20',
+    etrade_sales:    'bg-slate-500/10 text-slate-500 border-slate-500/20',
+    manual:          'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+  }
+  const labels: Record<string, string> = {
+    flexquery:       'FlexQuery',
+    etrade_benefits: 'E*Trade',
+    etrade_sales:    'E*Trade',
+    manual:          'Manual',
+  }
+  const cls = styles[method] ?? 'bg-slate-500/10 text-slate-500 border-slate-500/20'
+  return (
+    <span className={`px-2 py-1 rounded-xl text-[9px] font-black uppercase tracking-[0.1em] border ${cls}`}>
+      {labels[method] ?? method}
+    </span>
+  )
+}
+
 const LIMIT = 30
 
 export default function TransactionsPage() {
@@ -67,6 +89,10 @@ export default function TransactionsPage() {
   const isOriginal = currency === 'Original'
   const reqCurrency = isOriginal ? globalCurrency : currency
   const reqAcctModel = isOriginal ? 'original' : acctModel
+
+  const tableGridCols = isOriginal
+    ? 'minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1.5fr)'
+    : 'minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.4fr)'
 
   // Reset list when currency, acctModel or filters change
   useEffect(() => {
@@ -171,7 +197,7 @@ export default function TransactionsPage() {
   }
 
   return (
-    <PageLayout maxWidth="max-w-[1200px]">
+    <PageLayout maxWidth="max-w-[1400px]">
       {/* Header section with back navigation */}
       <div className="w-full mb-10">
         <button
@@ -253,15 +279,21 @@ export default function TransactionsPage() {
 
       {/* Transactions Table Container */}
       <div className="w-full selection:bg-indigo-500/20 overflow-x-auto">
-        <div className="min-w-[960px]">
+        <div className="min-w-[1200px]">
           {/* Table Header */}
-          <div className="grid grid-cols-8 gap-4 px-8 py-5 text-xs font-bold text-slate-500 border-b border-border-dim/40 tracking-wider">
+          <div 
+            className="grid gap-4 px-8 py-5 text-xs font-bold text-slate-500 border-b border-border-dim/40 tracking-wider"
+            style={{ gridTemplateColumns: tableGridCols }}
+          >
             <div className="col-span-1">Date</div>
             <div className="col-span-1">Side</div>
+            <div className="col-span-1">Source</div>
             <div className="col-span-1">Symbol</div>
             <div className="col-span-1 text-right">Quantity</div>
-            <div className="col-span-1 text-right">Price</div>
+            <div className="col-span-1 text-right">Orig. Price</div>
+            {currency !== 'Original' && <div className="col-span-1 text-right">Conv. Price</div>}
             <div className="col-span-1 text-right">Value</div>
+            <div className="col-span-1 text-right">Commission</div>
             <div className="col-span-1 text-right text-emerald-400/80">Realized Gain</div>
             <div className="col-span-1 text-right text-indigo-400/80">Unrealized Gain</div>
           </div>
@@ -280,7 +312,8 @@ export default function TransactionsPage() {
                 return (
                   <div
                     key={`${trade.id}-${idx}`}
-                    className="grid grid-cols-8 gap-4 px-8 py-4.5 text-sm items-center hover:bg-surface-hover/30 transition-colors duration-150"
+                    className="grid gap-4 px-8 py-4.5 text-sm items-center hover:bg-surface-hover/30 transition-colors duration-150"
+                    style={{ gridTemplateColumns: tableGridCols }}
                   >
                     {/* Date */}
                     <div className="col-span-1 text-slate-300 font-mono tracking-tight text-sm">
@@ -290,6 +323,11 @@ export default function TransactionsPage() {
                     {/* Side */}
                     <div className="col-span-1 flex items-center">
                       {getSideBadge(trade.side)}
+                    </div>
+
+                    {/* Source */}
+                    <div className="col-span-1 flex items-center">
+                      {entryMethodBadge(trade.entry_method)}
                     </div>
 
                     {/* Symbol */}
@@ -307,16 +345,17 @@ export default function TransactionsPage() {
                       {privacy ? '———' : formatQuantity(trade.quantity)}
                     </div>
 
-                    {/* Price */}
-                    <div className="col-span-1 text-right tabular-nums text-slate-300">
-                      {privacy ? (
-                        '———'
-                      ) : currency === 'Original' ? (
-                        formatCurrency(trade.price, trade.native_currency)
-                      ) : (
-                        formatCurrency(trade.converted_price, currency)
-                      )}
+                    {/* Orig. Price */}
+                    <div className="col-span-1 text-right tabular-nums text-slate-400">
+                      {privacy ? '———' : formatCurrency(trade.price, trade.native_currency)}
                     </div>
+
+                    {/* Conv. Price */}
+                    {currency !== 'Original' && (
+                      <div className="col-span-1 text-right tabular-nums text-slate-300">
+                        {privacy ? '———' : formatCurrency(trade.converted_price, currency)}
+                      </div>
+                    )}
 
                     {/* Value */}
                     <div className="col-span-1 text-right tabular-nums font-semibold text-slate-100">
@@ -327,6 +366,11 @@ export default function TransactionsPage() {
                       ) : (
                         formatCurrency(trade.quantity * trade.converted_price, currency)
                       )}
+                    </div>
+
+                    {/* Commission */}
+                    <div className="col-span-1 text-right tabular-nums text-slate-400">
+                      {privacy ? '———' : trade.commission ? formatCurrency(Math.abs(trade.commission), trade.native_currency) : <span className="opacity-40">—</span>}
                     </div>
 
                     {/* Realized Gain */}
@@ -365,11 +409,14 @@ export default function TransactionsPage() {
             {isLoading && (
               <div className="p-4 space-y-3.5">
                 {[...Array(3)].map((_, i) => (
-                  <div key={i} className="grid grid-cols-8 gap-4 px-4 items-center">
+                  <div key={i} className="grid gap-4 px-4 items-center" style={{ gridTemplateColumns: tableGridCols }}>
                     <Skeleton className="h-4 col-span-1" />
+                    <Skeleton className="h-5 col-span-1 rounded-lg" />
                     <Skeleton className="h-5 col-span-1 rounded-lg" />
                     <Skeleton className="h-4 col-span-1" />
                     <Skeleton className="h-4 col-span-1 text-right" />
+                    <Skeleton className="h-4 col-span-1 text-right" />
+                    {currency !== 'Original' && <Skeleton className="h-4 col-span-1 text-right" />}
                     <Skeleton className="h-4 col-span-1 text-right" />
                     <Skeleton className="h-4 col-span-1 text-right" />
                     <Skeleton className="h-4 col-span-1 text-right" />
