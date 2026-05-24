@@ -225,7 +225,7 @@ export function ChatHistorySidebar({
                     >
                       <Edit2Icon className="w-3 h-3" />
                     </button>
-                    <HoverTooltip direction="up" align="right" className="whitespace-nowrap !opacity-0 group-hover/action:!opacity-100">
+                    <HoverTooltip direction="up" align="right" className="whitespace-nowrap !opacity-0 group-hover/action:!opacity-100 !py-1 !px-2.5 !mb-1">
                       Rename
                     </HoverTooltip>
                   </div>
@@ -236,7 +236,7 @@ export function ChatHistorySidebar({
                     >
                       <Trash2Icon className="w-3 h-3" />
                     </button>
-                    <HoverTooltip direction="up" align="right" className="whitespace-nowrap !opacity-0 group-hover/action:!opacity-100">
+                    <HoverTooltip direction="up" align="right" className="whitespace-nowrap !opacity-0 group-hover/action:!opacity-100 !py-1 !px-2.5 !mb-1">
                       Delete
                     </HoverTooltip>
                   </div>
@@ -338,7 +338,7 @@ export function ChatHistorySidebar({
       </div>
 
       {/* Scrollable list */}
-      <div className="flex-1 overflow-y-auto min-h-0 pb-4 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto min-h-0 pt-7 pb-4 custom-scrollbar">
         {searchMode ? renderSearchResults() : renderThreads()}
       </div>
     </div>
