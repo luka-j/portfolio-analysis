@@ -62,6 +62,7 @@ export default function TransactionsPage() {
   const [hasMore, setHasMore] = useState(true)
 
   const sentinelRef = useRef<HTMLDivElement>(null)
+  const isResetting = useRef(false)
 
   const isOriginal = currency === 'Original'
   const reqCurrency = isOriginal ? globalCurrency : currency
@@ -69,6 +70,7 @@ export default function TransactionsPage() {
 
   // Reset list when currency, acctModel or filters change
   useEffect(() => {
+    isResetting.current = true
     setTrades([])
     setOffset(0)
     setHasMore(true)
@@ -105,6 +107,7 @@ export default function TransactionsPage() {
       } finally {
         if (active) {
           setIsLoading(false)
+          isResetting.current = false
         }
       }
     }
@@ -123,7 +126,7 @@ export default function TransactionsPage() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading) {
+        if (entries[0].isIntersecting && hasMore && !isLoading && !isResetting.current) {
           setOffset(prev => prev + LIMIT)
         }
       },
